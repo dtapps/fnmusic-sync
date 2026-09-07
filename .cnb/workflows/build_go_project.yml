@@ -71,7 +71,6 @@
         # 生成 Release 正文：预发布提示 + 发布信息表 + certflow 风格下载表 + 更新日志
         - name: 生成 Release 正文
           script: |
-            shopt -s nullglob
             CNB_BASE="${CNB_REPO_URL_HTTPS%/}/-"
             DL_BASE="${CNB_BASE}/releases/download/${INTERIOR_VERSION}"
 
@@ -106,6 +105,7 @@
               echo "|------|------|------|------|------|"
 
               for f in bin/*; do
+                [ -e "$f" ] || continue
                 [ -d "$f" ] && continue
                 fname=$(basename "$f")
                 [ "$fname" = "SHA256SUMS" ] && continue
