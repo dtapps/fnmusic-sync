@@ -54,6 +54,13 @@ playlist:
 
 logging:
   level: info                # info / debug
+  # 日志固定写入 /var/log/fnmusic-sync/fnmusic-sync.log（目录与文件名不可配），
+  # 同时输出到控制台(stderr)；目录不可写时自动降级为仅控制台。
+  # 下面只控制「轮转」：
+  max_size: 10               # 单文件超过 10MB 自动切割（0 = 不按大小切割）
+  max_backups: 5             # 只保留最近 5 份历史日志（0 = 不限份数）
+  max_age: 7                 # 历史日志保留 7 天（0 = 不按时间过期）
+  compress: true             # 切割后的历史日志自动 gzip 压缩（.gz）
 
 # 用户状态（是否启用各平台、累计推送次数、最近推送时间）由程序自动维护在
 # 单独的 state.yaml 中（默认与配置文件同目录，即 <配置目录>/state.yaml），无需在此手写。

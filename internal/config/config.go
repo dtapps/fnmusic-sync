@@ -59,8 +59,19 @@ type PlaylistConfig struct {
 	SyncInterval string `mapstructure:"sync_interval"`
 }
 
+// LoggingConfig 日志配置。
+// 注意：日志目录与文件名是代码常量（/var/log/fnmusic-sync/fnmusic-sync.log），
+// 不在这里暴露，配置里只放级别与轮转策略。
 type LoggingConfig struct {
 	Level string `mapstructure:"level"`
+	// MaxSize 单个日志文件超过该大小(MB)后自动切割，0 = 不按大小切割。
+	MaxSize int `mapstructure:"max_size"`
+	// MaxBackups 保留的历史日志文件份数，0 = 不限份数（仍受 MaxAge 约束）。
+	MaxBackups int `mapstructure:"max_backups"`
+	// MaxAge 历史日志保留天数，0 = 不按时间过期。
+	MaxAge int `mapstructure:"max_age"`
+	// Compress 切割后的历史日志是否 gzip 压缩。
+	Compress bool `mapstructure:"compress"`
 }
 
 // prepare 初始化 viper 实例：默认值、读取配置文件。
@@ -243,4 +254,20 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("playlist.enabled", true)
 	v.SetDefault("playlist.sync_interval", "30m")
 	v.SetDefault("logging.level", "info")
+	v.SetDefault("logging.max_size", 10)
+	v.SetDefault("logging.max_backups", 5)
+	v.SetDefault("logging.max_age", 7)
+	v.SetDefault("logging.compress", true)
+}
+
+// DefaultLogging 返回日志默认值（配置文件缺失或读取失败时的兜底），
+// 与 setDefaults 中的 logging.* 保持一致，避免两处各写一份。
+func DefaultLogging() LoggingConfig {
+	v := viper.New()
+	setDefaults(v)
+
+	var cfg Config
+	_ = v.Unmarshal(&cfg)
+
+	return cfg.Logging
 }

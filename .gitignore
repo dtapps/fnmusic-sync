@@ -15,11 +15,11 @@
 # 编译文件
 /bin
 *.exe
-fnmusic-sync
 
 # 临时文件
 /temp
 **/temp
+ai.md
 
 # nfpm 打包临时文件（Makefile 生成并清理）
 .nfpm-*.yaml

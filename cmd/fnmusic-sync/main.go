@@ -7,6 +7,8 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -23,7 +25,7 @@ const (
 	defaultUpstreamSocket = "/var/run/trim_music_upstream.socket"
 	defaultUpstreamWait   = 30 * time.Second
 	defaultConfigPath     = "/etc/fnmusic-sync/config.yaml"
-	defaultStatePath      = "/etc/fnmusic-sync/state.yaml"
+	defaultStatePath      = "/var/lib/fnmusic-sync/state.yaml"
 )
 
 // 版本/构建信息：由 Makefile 通过 -ldflags 注入；
@@ -43,6 +45,7 @@ type options struct {
 	wait     time.Duration
 	config   string
 	state    string
+	logDir   string
 }
 
 func main() {
@@ -52,6 +55,14 @@ func main() {
 		switch os.Args[1] {
 		case "self-upgrade":
 			handleSelfUpgrade()
+
+			return
+		case "version", "version-info", "-v", "--version":
+			printVersion()
+
+			return
+		case "service":
+			handleService(os.Args[2:])
 
 			return
 		}
@@ -77,22 +88,67 @@ func main() {
 	flag.StringVar(&opts.state, "state",
 		defaultStatePath,
 		"用户状态文件路径（程序维护，记录各用户推送统计）")
+	flag.StringVar(&opts.logDir, "log-dir", opts.logDir,
+		"日志保存目录（默认 "+defaultLogDir+"，off 表示只输出控制台，不写文件）")
+
+	flag.Usage = func() {
+		out := flag.CommandLine.Output()
+
+		fmt.Fprintf(out, "用法：\n  %s [子命令] [参数]\n\n子命令：\n", BinaryName)
+		fmt.Fprintf(out, "  version         打印版本、Git 提交、构建时间与平台信息\n")
+		fmt.Fprintf(out, "  self-upgrade    升级自身二进制到仓库最新版本（写安装目录通常需要 sudo）\n")
+		fmt.Fprintf(out, "  service         安装/卸载/启停系统服务（install|uninstall|start|stop|restart|status，需 root）\n\n参数：\n")
+
+		flag.PrintDefaults()
+	}
 
 	flag.Parse()
 
-	// 单一 logger：固定写 stderr，级别由 levelVar 控制（支持运行时热更新）。
+	// 日志目录固定为 /var/log/fnmusic-sync（仅 --log-dir 可临时覆盖），
+	// 文件名固定 fnmusic-sync.log；配置里只放级别与轮转策略。
+	// logger 必须先于 run 构造（run 内所有日志都用它），故此处预读一次配置；
+	// 读失败就用默认值，等 run 里正式加载时统一报错。
+	logCfg := config.DefaultLogging()
+
+	if pre, perr := config.Load(opts.config); perr == nil {
+		logCfg = pre.Logging
+	}
+
+	// 单一 logger：同时输出到控制台(stderr)与日志文件，级别由 levelVar 控制（支持运行时热更新）。
 	levelVar := &slog.LevelVar{}
 	if opts.debug {
 		levelVar.Set(slog.LevelDebug)
 	} else {
 		levelVar.Set(slog.LevelInfo)
 	}
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: levelVar}))
+
+	logger, _, closeLog := setupLogger(opts.logDir, logCfg, levelVar)
+	defer closeLog()
 
 	if err := run(opts, logger, levelVar); err != nil {
 		logger.Error("启动失败", "错误", err)
 
+		closeLog()
+
 		os.Exit(1)
+	}
+}
+
+// printVersion 打印版本与构建信息（version 子命令）。
+// 版本/提交/构建时间由 Makefile 通过 -ldflags 注入，本地直接 go build 时为 dev。
+func printVersion() {
+	fmt.Printf("%s %s\n", BinaryName, Version)
+	fmt.Printf("  版本      %s\n", Version)
+	fmt.Printf("  Git提交   %s\n", GitCommit)
+	fmt.Printf("  构建时间  %s\n", BuildTime)
+	fmt.Printf("  Go版本    %s\n", runtime.Version())
+	fmt.Printf("  平台      %s/%s\n", runtime.GOOS, runtime.GOARCH)
+	fmt.Printf("  配置      %s\n", defaultConfigPath)
+	fmt.Printf("  状态      %s\n", defaultStatePath)
+	fmt.Printf("  日志      %s\n", filepath.Join(defaultLogDir, defaultLogFile))
+
+	if Version == "dev" {
+		fmt.Println("  说明      本地构建（未注入发布版本号）")
 	}
 }
 
