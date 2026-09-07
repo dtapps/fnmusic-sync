@@ -3,6 +3,7 @@ package main
 import (
 	"archive/tar"
 	"compress/gzip"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -12,18 +13,24 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"cnb.cool/dtapp/fnmusic-sync/internal/buildinfo"
+	"github.com/kardianos/service"
 )
 
 // repoBase 是当前项目在 CNB 上的仓库地址（与 Makefile 的 PKG 对应），
 // 升级时从这里抓取 releases 并下载对应平台的二进制。
 const repoBase = "https://cnb.cool/dtapp/fnmusic-sync"
 
+// errNoService 表示当前未安装系统服务（纯前台运行），升级后交给用户手动重启。
+var errNoService = errors.New("no system service")
+
 // handleSelfUpgrade 检查并升级当前二进制到 CNB 仓库的最新 release。
 func handleSelfUpgrade() {
 	arch := runtime.GOARCH
 	osName := runtime.GOOS
 
-	fmt.Printf("🔄 检查 %s 自身更新 (当前版本: %s, 平台: %s/%s)...\n", BinaryName, Version, osName, arch)
+	fmt.Printf("🔄 检查 %s 自身更新 (当前版本: %s, 平台: %s/%s)...\n", buildinfo.BinaryName, buildinfo.Version, osName, arch)
 
 	client := &http.Client{Timeout: 30 * time.Second}
 
@@ -45,13 +52,13 @@ func handleSelfUpgrade() {
 	latestTag := match[1]
 
 	// 2. 版本比对（dev 视为未发布，强制更新）
-	if latestTag == Version && Version != "dev" {
-		fmt.Printf("✅ 已是最新版本 (%s)，无需升级。\n", Version)
+	if latestTag == buildinfo.Version && buildinfo.Version != "dev" {
+		fmt.Printf("✅ 已是最新版本 (%s)，无需升级。\n", buildinfo.Version)
 		return
 	}
 
 	// 3. 拼接下载地址（Release 上传的是 .tar.gz 压缩包，供自升级下载）
-	fileName := fmt.Sprintf("%s-%s-%s.tar.gz", BinaryName, osName, arch)
+	fileName := fmt.Sprintf("%s-%s-%s.tar.gz", buildinfo.BinaryName, osName, arch)
 	downloadURL := fmt.Sprintf("%s/-/releases/download/%s/%s", repoBase, latestTag, fileName)
 
 	fmt.Printf("🚀 发现新版本: %s\n📥 正在拉取: %s\n", latestTag, downloadURL)
@@ -59,12 +66,49 @@ func handleSelfUpgrade() {
 	if err := doReplace(client, downloadURL); err != nil {
 		fmt.Printf("❌ 替换失败: %v\n", err)
 		if strings.Contains(err.Error(), "permission denied") {
-			fmt.Println("💡 提示：请尝试使用 'sudo ./" + BinaryName + " self-upgrade' 运行")
+			fmt.Println("💡 提示：请尝试使用 'sudo " + buildinfo.BinaryName + " self-upgrade' 运行")
 		}
 		return
 	}
 
-	fmt.Printf("✨ 升级成功！请重新运行以使用新版本 %s。\n", latestTag)
+	// 二进制已替换到磁盘。若以系统服务方式运行，旧进程仍驻留内存跑旧代码，
+	// 必须重启服务才能加载新版本；纯前台运行（未安装服务）则提示手动重启。
+	switch err := restartServiceIfManaged(); {
+	case err == nil:
+		fmt.Printf("✨ 升级成功！服务已自动重启，正在运行新版本 %s。\n", latestTag)
+		return
+	case errors.Is(err, errNoService):
+		fmt.Printf("✨ 升级成功！当前为前台运行（未安装系统服务），请重新运行以使用新版本 %s。\n", latestTag)
+		return
+	default:
+		fmt.Printf("⚠️ 二进制已更新，但自动重启服务失败：%v\n", err)
+		fmt.Printf("   请手动重启以生效：%s service restart\n", buildinfo.BinaryName)
+	}
+}
+
+// restartServiceIfManaged 在服务已安装的情况下重启它，使新二进制生效。
+// 未安装服务（纯前台）时返回 errNoService，交由调用方提示手动重启。
+func restartServiceIfManaged() error {
+	s, err := newService()
+	if err != nil {
+		return err
+	}
+
+	st, err := s.Status()
+	if err != nil {
+		// 服务未安装 / 当前平台不支持托管
+		return fmt.Errorf("%w: %v", errNoService, err)
+	}
+
+	if st != service.StatusRunning {
+		fmt.Printf("ℹ️ 服务当前未运行（状态=%v），尝试启动以加载新版本...\n", st)
+	}
+
+	if err := s.Restart(); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 // doReplace 下载 url（.tar.gz）到临时目录并解压出二进制，原子替换当前可执行文件。
@@ -161,7 +205,7 @@ func extractBinaryFromTarGz(gzPath string) ([]byte, error) {
 		// 而运行时 exePath 的 base 是安装后的 <BinaryName>，二者不一致。
 		// 因此按 BinaryName 前缀匹配包内普通文件，兼容带目录前缀的情况。
 		base := filepath.Base(hdr.Name)
-		if !strings.HasPrefix(base, BinaryName) {
+		if !strings.HasPrefix(base, buildinfo.BinaryName) {
 			continue
 		}
 		data, err := io.ReadAll(tr)
@@ -170,5 +214,5 @@ func extractBinaryFromTarGz(gzPath string) ([]byte, error) {
 		}
 		return data, nil
 	}
-	return nil, fmt.Errorf("压缩包中未找到 %s 二进制", BinaryName)
+	return nil, fmt.Errorf("压缩包中未找到 %s 二进制", buildinfo.BinaryName)
 }

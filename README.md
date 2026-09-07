@@ -13,6 +13,7 @@
 - **日志双写**：同时输出到控制台(stderr)与日志文件 `/var/log/fnmusic-sync/fnmusic-sync.log`，自动切割、gzip 压缩、过期清理。
 - **服务自管理**：内置 `service install/uninstall/start/stop/restart/status`（基于 `kardianos/service`），不用手搓 unit 文件。
 - **自升级**：`fnmusic-sync self-upgrade`，一键拉最新版本。
+- **ListenBrainz 推荐歌单同步**：自动同步 ListenBrainz 的 daily_jams、weekly_jams、weekly_exploration 推荐歌单到飞牛音乐。
 
 ## 工作原理
 
@@ -135,18 +136,30 @@ users:
     listenbrainz:
       enabled: false
       token: ""           # ListenBrainz 用户 Token
-      username: ""        # 仅将来做歌单同步时需要
+      username: ""        # 歌单同步时必填（ListenBrainz 用户名）
+      # 歌单同步配置（需要 username）
+      # 开启前请确保：1. 关注 troi-bot（daily-jams 必须） 2. 音乐文件有 MBID 标签
+      playlist:
+        daily_jams:
+          enabled: false
+          name: "每日推荐"       # 飞牛音乐中的歌单名称
+        weekly_jams:
+          enabled: false
+          name: "每周推荐"
+        weekly_exploration:
+          enabled: false
+          name: "每周探索"
 
 playback:
   scrobble_threshold: auto   # auto / 30s / 50% / off
 
 playlist:
-  enabled: true
-  sync_interval: 30m
+  enabled: true          # 歌单同步总开关
+  sync_interval: 30m     # 同步间隔
 
 logging:
   level: info                # info / debug
-  max_size: 10               # 单文件超过 10MB 自动切割（0 = 不按大小切割）
+  max_size: 3                # 单文件超过 3MB 自动切割（0 = 不按大小切割）
   max_backups: 5             # 只保留最近 5 份历史日志（0 = 不限份数）
   max_age: 7                 # 历史日志保留 7 天（0 = 不按时间过期）
   compress: true             # 历史日志自动 gzip 压缩（.gz）
@@ -157,7 +170,11 @@ logging:
 | `server` | socket 路径与权限；`socket_mode: 0` 表示继承官方 socket 权限，一般不用改 |
 | `users` | 按飞牛用户名隔离的推送凭证，可配多个用户 |
 | `playback.scrobble_threshold` | `auto`=听满 min(时长/2, 4min)（Last.fm 规则）；`30s`/`2m`=固定时长；`50%`=按比例；`off`=收到播放即推（不建议日常用） |
-| `playlist` | 歌单同步开关与间隔 |
+| `playlist` | 歌单同步总开关与间隔 |
+| `users.<name>.listenbrainz.playlist` | 每个用户的 ListenBrainz 推荐歌单同步配置 |
+| `users.<name>.listenbrainz.playlist.daily_jams` | 每日推荐歌单，需在 ListenBrainz 关注 [troi-bot](https://listenbrainz.org/user/troi-bot/) |
+| `users.<name>.listenbrainz.playlist.weekly_jams` | 每周推荐歌单 |
+| `users.<name>.listenbrainz.playlist.weekly_exploration` | 每周探索歌单（发现新音乐） |
 | `logging` | 日志级别与轮转策略（切割大小、保留份数、过期天数、是否压缩）。日志路径固定为 `/var/log/fnmusic-sync/fnmusic-sync.log`，**目录与文件名不可配** |
 
 ### Last.fm 授权
@@ -165,9 +182,57 @@ logging:
 1. `users.<名字>.lastfm` 填 `enabled: true` + `api_key` + `api_secret`，`session_key` 留空；
 2. 启动程序，日志里会出现授权链接：
    `Last.fm 需要授权，请在浏览器打开以下链接并点击同意`；
-3. 浏览器点「同意」后，程序自动把 `session_key` 写回配置文件并热加载生效（60 秒轮询，超时重启程序可重试）。
+3. 浏览器点「同意」后，程序自动把 `session_key` 写回配置文件并热加载生效（180 秒轮询，超时重启程序可重试）。
 
 ListenBrainz 只需填 `token`。
+
+### ListenBrainz 推荐歌单同步
+
+支持将 ListenBrainz 的推荐歌单同步到飞牛音乐，按用户独立配置。
+
+| 歌单类型 | 说明 | 特殊要求 |
+| --- | --- | --- |
+| `daily_jams` | 每日推荐 | 需在 ListenBrainz 上关注 [`troi-bot`](https://listenbrainz.org/user/troi-bot/) |
+| `weekly_jams` | 每周推荐 | 无 |
+| `weekly_exploration` | 每周探索（发现新音乐） | 无 |
+
+**开启条件：**
+
+1. **ListenBrainz 用户名**：必须填写 `users.<名字>.listenbrainz.username`
+2. **关注 troi-bot**（daily-jams 必须）：在 ListenBrainz 上关注 [`troi-bot`](https://listenbrainz.org/user/troi-bot/) 机器人，它会基于你的听歌历史生成推荐
+3. **曲库里有对应歌曲**：曲目按「录音 MBID → 艺人名+曲名 → 仅曲名」的顺序匹配，
+   推荐曲名里的括号附注（如 `不将就 (Can't Bear It)`）会自动截断后再次比对，
+   因此**不强要求音乐文件带 MBID 标签**
+4. **启用歌单同步**：在 `playlist.enabled: true` 且用户配置中开启对应的歌单类型
+
+**配置示例：**
+
+```yaml
+playlist:
+  enabled: true           # 歌单同步总开关
+  sync_interval: 30m
+
+users:
+  admin:
+    listenbrainz:
+      enabled: true
+      token: "your-token"
+      username: "your-listenbrainz-username"  # 必须填写
+      playlist:
+        daily_jams:
+          enabled: true
+          name: "每日推荐"           # 飞牛音乐中显示的歌单名称
+        weekly_jams:
+          enabled: true
+          name: "每周推荐"
+        weekly_exploration:
+          enabled: true
+          name: "每周探索"
+```
+
+> ⚠️ **注意**：歌单同步从 ListenBrainz 的 `createdfor` 接口取"分享给你的"推荐歌单（daily-jams / weekly-jams / weekly-exploration，取最新一期），
+> 再按「录音 MBID → 艺人名+曲名 → 仅曲名」在飞牛音乐库中匹配，只**增量添加**缺失的曲目，重复同步不会把歌单撑大。
+> 每轮同步会在日志里打印匹配数与未匹配示例，便于排查命中率。
 
 ## 运行
 
@@ -288,6 +353,7 @@ CI（`.cnb/workflows/build_go_project.yml`）在打 tag 时构建并发布 Relea
 cmd/fnmusic-sync/     主程序（main.go / upgrade.go / logging.go / service.go）
 internal/config/      配置加载、热加载、默认配置生成
 internal/playback/    播放事件解析、scrobble 判定、用户识别与统计
+internal/playlist/    ListenBrainz 推荐歌单同步服务
 internal/proxy/       socket 接管、HTTP 反向代理、健康检查
 internal/scrobbler/   Last.fm / ListenBrainz 客户端
 configs/              配置示例

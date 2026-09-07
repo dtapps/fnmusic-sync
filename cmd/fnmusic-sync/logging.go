@@ -12,6 +12,50 @@ import (
 	"gopkg.in/natefinch/lumberjack.v2"
 )
 
+// newLogger 构造进程唯一的 logger：同时输出到控制台(stderr)与日志文件。
+// 返回 logger、级别变量（供配置热更新）与关闭函数。
+func newLogger(
+	opts *options,
+	lg config.LoggingConfig,
+) (*slog.Logger, *slog.LevelVar, func()) {
+	levelVar := levelOf(*opts)
+
+	logger, _, closeLog := setupLogger(opts.logDir, lg, levelVar)
+
+	return logger, levelVar, closeLog
+}
+
+// levelOf 起始日志级别：--debug 直接开 debug，否则等配置加载后由 parseLevel 决定。
+func levelOf(opts options) *slog.LevelVar {
+	levelVar := &slog.LevelVar{}
+
+	if opts.debug {
+		levelVar.Set(slog.LevelDebug)
+	} else {
+		levelVar.Set(slog.LevelInfo)
+	}
+
+	return levelVar
+}
+
+// parseLevel 计算日志级别：命令行 --debug 优先，其次配置文件 logging.level。
+func parseLevel(cfg *config.Config, debug bool) slog.Level {
+	if debug {
+		return slog.LevelDebug
+	}
+
+	switch strings.ToLower(cfg.Logging.Level) {
+	case "debug":
+		return slog.LevelDebug
+	case "warn", "warning":
+		return slog.LevelWarn
+	case "error":
+		return slog.LevelError
+	default:
+		return slog.LevelInfo
+	}
+}
+
 // 日志目录与文件名：固定值，不在配置文件里暴露。
 // 目录与 scripts/install.sh、scripts/postinstall.sh 创建的目录保持一致：
 // 日志 /var/log/fnmusic-sync，状态 /var/lib/fnmusic-sync，配置 /etc/fnmusic-sync。

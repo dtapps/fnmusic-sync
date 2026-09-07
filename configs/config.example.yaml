@@ -21,10 +21,58 @@ users:
       # 在浏览器打开并点「同意」后，程序自动把 session_key 写回本文件并热加载生效，无需手动填。
       # 也可手动填写用户授权后获得的会话密钥（auth.getSession 换取）。
       session_key: ""     # 用户授权后获得的会话密钥
+      # username 留空时：授权成功后程序自动从 Last.fm 获取并写回。
+      # 也可手动填写 Last.fm 用户名（歌单同步需要）。
+      username: ""       # Last.fm 用户名
+      # Last.fm 智能歌单同步配置（需要 username + api_key）
+      # 基于 scrobble 数据自动生成歌单同步到飞牛音乐
+      playlist:
+        top_tracks:
+          enabled: false
+          name: "LF {period} 最常听"        # 飞牛音乐中的歌单名称
+          period: overall      # 统计周期：7day / 1month / 3month / 6month / 12month / overall
+          limit: 50             # 最多同步曲目数，0=不限制（Last.fm 上限 1000）
+        loved_tracks:
+          enabled: false
+          name: "LF 红心收藏"
+          limit: 50             # 0=不限制（上限 1000）
+        recent_tracks:
+          enabled: false
+          name: "LF 最近播放"
+          limit: 50             # 0=不限制（上限 200）
     listenbrainz:
       enabled: false
       token: ""           # ListenBrainz 用户 Token（scrobble 只认这个）
-      username: ""        # 仅将来做歌单同步时需要（/1/user/{username}/playlists），现在可留空
+      # username 留空时：程序启动时自动调用 /1/validate-token 获取用户名并写回本文件。
+      # 也可手动填写 ListenBrainz 用户名（歌单同步需要）。
+      username: ""        # ListenBrainz 用户名
+      # 歌单同步配置（需要 username）
+      # 开启前请确保：
+      #   1. 已在 ListenBrainz 上关注 troi-bot（获取 daily-jams 必须）
+      #      关注链接：https://listenbrainz.org/user/troi-bot/
+      #   2. 音乐文件有 MBID 标签（用于匹配歌曲）
+      playlist:
+        daily_jams:
+          enabled: false
+          name: "LB 每日推荐"       # 飞牛音乐中的歌单名称
+          limit: 0               # 最多同步曲目数，0=不限制（使用歌单全量）
+        weekly_jams:
+          enabled: false
+          name: "LB 每周推荐"
+          limit: 0
+        weekly_exploration:
+          enabled: false
+          name: "LB 每周探索"
+          limit: 0
+        # 年度歌单（ListenBrainz 每年自动生成）
+        year_discoveries:
+          enabled: false
+          name: "LB {year} 年度发现"   # {year} 会自动替换为真实年份，如 "LB 2025 年度发现"
+          limit: 0
+        year_missed:
+          enabled: false
+          name: "LB {year} 年度遗珠"   # {year} 会自动替换为真实年份，如 "LB 2025 年度遗珠"
+          limit: 0
   # 第二个用户示例（去掉注释即可）：
   # alice:
   #   lastfm:
@@ -32,10 +80,46 @@ users:
   #     api_key: "xxxx"
   #     api_secret: "xxxx"
   #     session_key: "xxxx"
+  #     username: "alice"       # Last.fm 用户名
+  #     playlist:
+  #       top_tracks:
+  #         enabled: true
+  #         name: "LF {period} TopTracks"
+  #         period: 7day
+  #         limit: 50
+  #       loved_tracks:
+  #         enabled: true
+  #         name: "Last.fm LovedTracks"
+  #         limit: 50
+  #       recent_tracks:
+  #         enabled: false
+  #         name: "Last.fm RecentTracks"
+  #         limit: 50
   #   listenbrainz:
   #     enabled: false
   #     token: ""
   #     username: ""
+  #     playlist:
+  #       daily_jams:
+  #         enabled: true
+  #         name: "ListenBrainz Daily Jams"
+  #         limit: 50
+  #       weekly_jams:
+  #         enabled: true
+  #         name: "ListenBrainz Weekly Jams"
+  #         limit: 50
+  #       weekly_exploration:
+  #         enabled: true
+  #         name: "ListenBrainz Weekly Exploration"
+  #         limit: 50
+  #       year_discoveries:
+  #         enabled: true
+  #         name: "LB {year} Year Discoveries"
+  #         limit: 50
+  #       year_missed:
+  #         enabled: true
+  #         name: "LB {year} Year Missed"
+  #         limit: 50
 
 playback:
   # 触发 scrobble（记录到 Last.fm / ListenBrainz）的进度阈值：
@@ -49,15 +133,15 @@ playback:
   scrobble_threshold: auto
 
 playlist:
-  enabled: true
-  sync_interval: 30m
+  enabled: true          # 歌单同步总开关
+  sync_interval: 30m     # 同步间隔（检查所有用户的歌单更新）
 
 logging:
   level: info                # info / debug
   # 日志固定写入 /var/log/fnmusic-sync/fnmusic-sync.log（目录与文件名不可配），
   # 同时输出到控制台(stderr)；目录不可写时自动降级为仅控制台。
   # 下面只控制「轮转」：
-  max_size: 10               # 单文件超过 10MB 自动切割（0 = 不按大小切割）
+  max_size: 3                # 单文件超过 3MB 自动切割（0 = 不按大小切割）
   max_backups: 5             # 只保留最近 5 份历史日志（0 = 不限份数）
   max_age: 7                 # 历史日志保留 7 天（0 = 不按时间过期）
   compress: true             # 切割后的历史日志自动 gzip 压缩（.gz）

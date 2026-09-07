@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 
+	"cnb.cool/dtapp/fnmusic-sync/internal/buildinfo"
 	"github.com/kardianos/service"
 )
 
@@ -42,8 +43,8 @@ func (p *serviceProgram) Stop(s service.Service) error { return nil }
 // newService 构造服务描述：名称、说明、启动参数（配置与状态文件路径）。
 func newService() (service.Service, error) {
 	cfg := &service.Config{
-		Name:        BinaryName,
-		DisplayName: BinaryName,
+		Name:        buildinfo.BinaryName,
+		DisplayName: buildinfo.BinaryName,
 		Description: "fnOS 飞牛音乐 Last.fm / ListenBrainz scrobble 代理",
 		Arguments: []string{
 			"--config", defaultConfigPath,
@@ -80,7 +81,7 @@ func handleService(args []string) {
 		err = s.Install()
 		if err == nil {
 			fmt.Printf("✅ 服务已安装：%s\n", s.Platform())
-			fmt.Println("   启动并设为开机自启：systemctl enable --now " + BinaryName)
+			fmt.Println("   启动并设为开机自启：systemctl enable --now " + buildinfo.BinaryName)
 		}
 	case "uninstall", "remove":
 		err = s.Uninstall()
@@ -134,7 +135,7 @@ func handleService(args []string) {
 }
 
 func printServiceUsage() {
-	fmt.Printf("用法：%s service <动作>\n\n", BinaryName)
+	fmt.Printf("用法：%s service <动作>\n\n", buildinfo.BinaryName)
 	fmt.Println("  install     安装系统服务（systemd，需 root）")
 	fmt.Println("  uninstall   卸载系统服务（需 root）")
 	fmt.Println("  start       启动服务")

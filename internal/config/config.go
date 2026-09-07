@@ -39,15 +39,23 @@ type UserLastFM struct {
 	APIKey     string `mapstructure:"api_key"`
 	APISecret  string `mapstructure:"api_secret"`
 	SessionKey string `mapstructure:"session_key"`
+	// Username Last.fm 用户名（用于歌单同步的 user.getTopTracks 等读取接口）。
+	// 授权成功后由程序自动写回配置；也可手动填写。
+	Username string `mapstructure:"username"`
+	// Playlist Last.fm 歌单同步配置。
+	// Last.fm 虽然没有 playlist CRUD API，但有 user.getTopTracks / getLovedTracks /
+	// getRecentTracks 等读取接口，可基于用户的 scrobble 数据自动生成智能歌单同步到飞牛。
+	Playlist UserLastFMPlaylistConfig `mapstructure:"playlist"`
 }
 
 type UserListenBrainz struct {
 	Enabled bool   `mapstructure:"enabled"`
 	Token   string `mapstructure:"token"`
-	// Username 供将来的 ListenBrainz 歌单同步使用
-	// （端点 /1/user/{username}/playlists 需要用户名）。
-	// 仅做 scrobble 时用不到（submit-listens 只认 token），可留空。
+	// Username ListenBrainz 用户名，用于歌单同步（daily-jams、weekly-jams、weekly-exploration）。
+	// scrobble 不需要（submit-listens 只认 token），但开启歌单同步时必须填写。
 	Username string `mapstructure:"username"`
+	// Playlist 该用户的 ListenBrainz 推荐歌单同步配置。
+	Playlist UserPlaylistConfig `mapstructure:"playlist"`
 }
 
 type PlaybackConfig struct {
@@ -57,6 +65,48 @@ type PlaybackConfig struct {
 type PlaylistConfig struct {
 	Enabled      bool   `mapstructure:"enabled"`
 	SyncInterval string `mapstructure:"sync_interval"`
+}
+
+// UserPlaylistConfig 单个用户的 ListenBrainz 推荐歌单同步配置。
+type UserPlaylistConfig struct {
+	DailyJams         PlaylistSourceConfig `mapstructure:"daily_jams"`
+	WeeklyJams        PlaylistSourceConfig `mapstructure:"weekly_jams"`
+	WeeklyExploration PlaylistSourceConfig `mapstructure:"weekly_exploration"`
+	// YearDiscoveries 年度发现歌单（top-discoveries-of-{year}），ListenBrainz 每年自动生成。
+	YearDiscoveries PlaylistSourceConfig `mapstructure:"year_discoveries"`
+	// YearMissed 年度遗珠歌单（top-missed-recordings-of-{year}），ListenBrainz 每年自动生成。
+	YearMissed PlaylistSourceConfig `mapstructure:"year_missed"`
+}
+
+// UserLastFMPlaylistConfig Last.fm 智能歌单同步配置。
+// 基于 user.getTopTracks / getLovedTracks / getRecentTracks 等读取接口，
+// 利用用户已有的 scrobble 数据自动生成歌单同步到飞牛音乐。
+type UserLastFMPlaylistConfig struct {
+	// TopTracks 最常听曲目歌单，可按时间维度（7day/1month/3month/6month/12month/overall）统计
+	TopTracks LastFMPlaylistSourceConfig `mapstructure:"top_tracks"`
+	// LovedTracks 红心收藏曲目歌单
+	LovedTracks LastFMPlaylistSourceConfig `mapstructure:"loved_tracks"`
+	// RecentTracks 最近播放曲目歌单
+	RecentTracks LastFMPlaylistSourceConfig `mapstructure:"recent_tracks"`
+}
+
+// LastFMPlaylistSourceConfig Last.fm 单个智能歌单源的同步配置。
+type LastFMPlaylistSourceConfig struct {
+	Enabled bool   `mapstructure:"enabled"`
+	Name    string `mapstructure:"name"`
+	// Period 统计周期，仅 top_tracks 适用。
+	// 可选值：7day / 1month / 3month / 6month / 12month / overall，默认 overall
+	Period string `mapstructure:"period"`
+	// Limit 最多同步的曲目数量，0 表示不限制（使用 Last.fm API 默认上限）。
+	Limit int `mapstructure:"limit"`
+}
+
+// PlaylistSourceConfig ListenBrainz 单个推荐歌单源的同步配置。
+type PlaylistSourceConfig struct {
+	Enabled bool   `mapstructure:"enabled"`
+	Name    string `mapstructure:"name"`
+	// Limit 最多同步的曲目数量，0 表示不限制（使用歌单全量）。
+	Limit int `mapstructure:"limit"`
 }
 
 // LoggingConfig 日志配置。
@@ -229,8 +279,15 @@ func Watch(
 // 注意：viper 写回会按自身格式重新序列化整个文件，若原文件含注释/特殊排版可能被
 // 规范化；此函数仅在授权补全场景下调用（通常文件为默认生成、注释很少），影响很小。
 func SetLastFMSessionKey(path, username, sessionKey string) error {
+	return SetLastFMCredentials(path, username, sessionKey, "")
+}
+
+// SetLastFMCredentials 把指定用户的 Last.fm session_key 和用户名写回配置文件并持久化。
+// lastfmUsername 是 Last.fm 返回的用户名（auth.getSession → session.name），
+// 为空时只写 session_key（向后兼容 SetLastFMSessionKey 的调用方）。
+func SetLastFMCredentials(path, username, sessionKey, lastfmUsername string) error {
 	if path == "" {
-		return fmt.Errorf("配置文件路径为空，无法写入 session_key")
+		return fmt.Errorf("配置文件路径为空，无法写入")
 	}
 
 	v := viper.New()
@@ -243,6 +300,30 @@ func SetLastFMSessionKey(path, username, sessionKey string) error {
 
 	v.Set(fmt.Sprintf("users.%s.lastfm.session_key", username), sessionKey)
 
+	if lastfmUsername != "" {
+		v.Set(fmt.Sprintf("users.%s.lastfm.username", username), lastfmUsername)
+	}
+
+	return v.WriteConfig()
+}
+
+// SetListenBrainzUsername 把指定用户的 ListenBrainz 用户名写回配置文件并持久化。
+// 在启动时对"已启用但缺 username"的用户自动调用 /1/validate-token 获取用户名后写入。
+func SetListenBrainzUsername(path, feiniuUsername, lbUsername string) error {
+	if path == "" {
+		return fmt.Errorf("配置文件路径为空，无法写入")
+	}
+
+	v := viper.New()
+	v.SetConfigFile(path)
+	v.SetConfigType("yaml")
+
+	if err := v.ReadInConfig(); err != nil {
+		return fmt.Errorf("读取配置文件 %s 失败: %w", path, err)
+	}
+
+	v.Set(fmt.Sprintf("users.%s.listenbrainz.username", feiniuUsername), lbUsername)
+
 	return v.WriteConfig()
 }
 
@@ -254,7 +335,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("playlist.enabled", true)
 	v.SetDefault("playlist.sync_interval", "30m")
 	v.SetDefault("logging.level", "info")
-	v.SetDefault("logging.max_size", 10)
+	v.SetDefault("logging.max_size", 3)
 	v.SetDefault("logging.max_backups", 5)
 	v.SetDefault("logging.max_age", 7)
 	v.SetDefault("logging.compress", true)

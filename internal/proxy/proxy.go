@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"cnb.cool/dtapp/fnmusic-sync/internal/playback"
+	"cnb.cool/dtapp/fnmusic-sync/internal/strutil"
 )
 
 const (
@@ -48,6 +49,17 @@ type Config struct {
 	// ProviderStatus 返回某用户是否启用了 Last.fm / ListenBrainz（依据配置）。
 	// 用于把"是否启用各平台"写入该用户的状态文件。
 	ProviderStatus func(username string) (lastfm, listenBrainz bool)
+
+	// LogDir 日志目录，debug 模式下抓包日志写入此目录。
+	LogDir string
+	// LogMaxSize 抓包日志单文件大小上限(MB)，复用主日志配置。
+	LogMaxSize int
+	// LogMaxBackups 抓包日志保留份数，复用主日志配置。
+	LogMaxBackups int
+	// LogMaxAge 抓包日志保留天数，复用主日志配置。
+	LogMaxAge int
+	// LogCompress 抓包日志是否压缩，复用主日志配置。
+	LogCompress bool
 }
 
 type Proxy struct {
@@ -61,6 +73,7 @@ type Proxy struct {
 
 	userCache *playback.UserCache
 	detector  *playback.Detector
+	capture   *CaptureLogger
 
 	server *http.Server
 }
@@ -103,6 +116,8 @@ func New(
 		p.cfg.ProviderStatus,
 	)
 
+	p.capture = NewCaptureLogger(cfg.LogDir, cfg.LogMaxSize, cfg.LogMaxBackups, cfg.LogMaxAge, cfg.LogCompress)
+
 	// 播放识别 → scrobble 推送。
 	p.detector = playback.NewDetector(manager, logger)
 
@@ -116,6 +131,22 @@ func New(
 	}
 
 	return p
+}
+
+// UserCache 返回代理内部的用户缓存，供其他服务（如歌单同步）使用。
+func (p *Proxy) UserCache() *playback.UserCache {
+	return p.userCache
+}
+
+// Close 释放代理资源（抓包日志文件等）。
+func (p *Proxy) Close() {
+	if p.capture != nil {
+		p.capture.Close()
+	}
+
+	if p.detector != nil {
+		p.detector.Stop()
+	}
 }
 
 // Start 在指定的 listener 上启动代理，ctx 取消时优雅退出。
@@ -168,32 +199,34 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			context.WithValue(
 				r.Context(),
 				userCtxKey{},
-				userCtx{Key: userKey, Name: name},
+				userCtx{Key: userKey, Name: name, Source: userSource},
 			),
 		)
 	}
 
-	p.logger.Debug("用户识别诊断",
-		"含music-token", hasCookie(r, "music-token"),
-		"含fnos-token", hasCookie(r, "fnos-token"),
-		"userKey来源", userSource,
-		"userKey前8位", firstN(userKey, 8),
-	)
+	// 抓包日志已启用时，原始请求（含 Cookie 头）已在 capture.log 完整记录，主日志不再重复打用户识别诊断。
+	if p.capture == nil {
+		p.logger.Debug("用户识别诊断",
+			"含music-token", hasCookie(r, "music-token"),
+			"含fnos-token", hasCookie(r, "fnos-token"),
+			"userKey来源", userSource,
+			"userKey前8位", strutil.FirstN8(userKey),
+		)
+	}
 
 	body := p.bufferBody(r)
 	stream := isPlaybackPath(r.URL.Path)
 
 	writer := &countWriter{ResponseWriter: w}
 
-	p.logger.Debug("收到请求",
-		"方法", r.Method,
-		"主机", r.Host,
-		"路径", r.URL.Path,
-		"查询", r.URL.RawQuery,
-		"请求头", redactHeaders(r.Header),
-		"请求体", truncate(string(body), maxLogBody),
-		"声明长度", r.ContentLength,
-	)
+	// debug + capture 启用时，创建一条抓包记录（请求部分先暂存，响应返回时合并写出，
+	// 保证请求/响应成对成块，并发下不交错）。连接断开等未走到响应的情况由 defer 兜底写出。
+	if p.logger.Enabled(r.Context(), slog.LevelDebug) && p.capture != nil && !stream {
+		if entry := p.capture.Begin(r.Method, r.URL.Path, r.URL.RawQuery, r.Header, body); entry != nil {
+			r = r.WithContext(context.WithValue(r.Context(), captureEntryKey{}, entry))
+			defer entry.Finish(0, nil, nil, 0) // 兜底：响应未正常返回时仍写出请求部分
+		}
+	}
 
 	// 取流是推算真实播放时长的唯一线索，但每次播放会频繁触发，
 	// 默认打 DEBUG（--debug 可见），避免正常使用时刷屏。
@@ -220,6 +253,17 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	p.reverse.ServeHTTP(writer, r)
 
 	p.logDone(r, writer, time.Since(start), stream)
+}
+
+// captureEntryKey 用于在请求 context 中传递抓包记录，使响应返回时能与请求合并成一条。
+type captureEntryKey struct{}
+
+func captureEntryFromCtx(ctx context.Context) *captureEntry {
+	if e, ok := ctx.Value(captureEntryKey{}).(*captureEntry); ok {
+		return e
+	}
+
+	return nil
 }
 
 func (p *Proxy) logDone(
@@ -271,7 +315,10 @@ func (p *Proxy) logDone(
 		return
 	}
 
-	p.logger.Debug("响应完成", attrs...)
+	// 响应详情已完整写入 capture.log（debug + capture 启用时），主日志不再重复刷屏。
+	if p.capture == nil {
+		p.logger.Debug("响应完成", attrs...)
+	}
 }
 
 // director 只改写转发目标，其他一律保持原样。
@@ -330,8 +377,9 @@ func (p *Proxy) inspect(r *http.Request, body []byte) {
 
 func (p *Proxy) modifyResponse(resp *http.Response) error {
 	// 始终拦截 /user/me 以识别用户名，不依赖 debug 开关。
+	// 仅使用 music-token 识别用户，忽略 fnos-token。
 	if strings.Contains(resp.Request.URL.Path, "/user/me") {
-		if uc := userFromCtx(resp.Request.Context()); uc.Key != "" {
+		if uc := userFromCtx(resp.Request.Context()); uc.Key != "" && uc.Source == "music-token" {
 			body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<16))
 			if err == nil {
 				resp.Body = io.NopCloser(bytes.NewReader(body))
@@ -376,18 +424,20 @@ func (p *Proxy) modifyResponse(resp *http.Response) error {
 	// 与 debug 无关，始终执行——这是功能本身，不是日志开销。
 	if resp.StatusCode == http.StatusOK && resp.Request != nil &&
 		resp.Request.URL.Path == p.userCache.MEPath() {
-		key := userFromCtx(resp.Request.Context()).Key
+		uc := userFromCtx(resp.Request.Context())
+		key := uc.Key
 		if key == "" {
 			key, _ = extractUserKey(resp.Request)
 		}
-		if key != "" {
+		// 仅使用 music-token 识别用户。
+		if key != "" && uc.Source == "music-token" {
 			if b, rerr := io.ReadAll(io.LimitReader(resp.Body, 1<<16)); rerr == nil {
 				// 读完必须塞回，否则客户端拿不到原响应。
 				resp.Body = io.NopCloser(io.MultiReader(bytes.NewReader(b), resp.Body))
 				if name := p.userCache.Update(key, b); name != "" {
 					p.logger.Debug(
 						"被动识别用户(复用客户端 /user/me )",
-						"用户标识", firstN(key, 8),
+						"用户标识", strutil.FirstN8(key),
 						"用户名", name,
 					)
 				}
@@ -405,10 +455,8 @@ func (p *Proxy) modifyResponse(resp *http.Response) error {
 	}
 
 	// 仅 debug 时才读取/搬运响应 body：否则每个响应都多一次 I/O，非 debug 下毫无必要。
-	// 注意这里用 Enabled 只是为了"跳过昂贵的 body 读取"，Debug 日志本身仍由级别过滤。
+	// debug + capture 可用时，完整响应写入 capture.log，主日志不再打印响应体。
 	if p.logger.Enabled(resp.Request.Context(), slog.LevelDebug) {
-		// 仅对 JSON / 文本类响应打印 body，避免图片、音频等二进制把日志撑爆；
-		// 音频流（playback path）本就不读 body。非文本响应只记类型与长度。
 		ct := resp.Header.Get("Content-Type")
 		if !isPlaybackPath(resp.Request.URL.Path) &&
 			(strings.Contains(ct, "application/json") || strings.Contains(ct, "text/")) {
@@ -419,17 +467,20 @@ func (p *Proxy) modifyResponse(resp *http.Response) error {
 					"错误", err,
 				)
 			} else {
-				// 读完必须塞回去，否则客户端拿不到响应内容。
 				resp.Body = io.NopCloser(
 					io.MultiReader(bytes.NewReader(body), resp.Body),
 				)
 
-				attrs = append(attrs, "响应体", truncate(string(body), maxLogBody))
+				if entry := captureEntryFromCtx(resp.Request.Context()); entry != nil {
+					// 请求 + 响应合并为一条记录一次性写出（capture.log），主日志不再重复。
+					entry.Finish(resp.StatusCode, resp.Header, body, resp.ContentLength)
+				} else {
+					// capture 不可用（nil/未启用/取流）时，响应摘要仍打主日志。
+					attrs = append(attrs, "响应体", truncate(string(body), maxLogBody))
+				}
 			}
 		}
 	}
-
-	p.logger.Debug("上游响应", attrs...)
 
 	return nil
 }
@@ -536,8 +587,9 @@ func isSensitiveHeader(key string) bool {
 type userCtxKey struct{}
 
 type userCtx struct {
-	Key  string
-	Name string
+	Key    string
+	Name   string
+	Source string // "music-token" 或 "fnos-token"
 }
 
 // extractUserKey 从 Cookie 提取 per-user 会话标识：
@@ -560,14 +612,6 @@ func hasCookie(r *http.Request, name string) bool {
 	_, err := r.Cookie(name)
 
 	return err == nil
-}
-
-func firstN(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-
-	return s[:n]
 }
 
 func userFromCtx(ctx context.Context) userCtx {

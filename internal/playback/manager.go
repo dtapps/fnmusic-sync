@@ -13,6 +13,10 @@ import (
 	"cnb.cool/dtapp/fnmusic-sync/internal/scrobbler"
 )
 
+// scrobbleGrace 定时兜底检查的宽容量：到点后再多等 1 秒，
+// 保证 CheckScrobble 里"真实流逝时间"一定略大于阈值，避免边界抖动导致不触发。
+const scrobbleGrace = time.Second
+
 type Session struct {
 	Track model.Track
 
@@ -20,12 +24,29 @@ type Session struct {
 	StartedAt time.Time
 
 	Scrobbled bool
+
+	// done 关闭后，本会话的兜底定时器立即退出（换歌 / 停止 / 已推送）。
+	done      chan struct{}
+	closeOnce sync.Once
+}
+
+// close 结束会话（幂等），用于取消兜底定时器。
+func (s *Session) close() {
+	if s == nil {
+		return
+	}
+
+	s.closeOnce.Do(func() { close(s.done) })
 }
 
 type Manager struct {
 	mu sync.Mutex
 
 	current *Session
+
+	// currentConfirmed 标记当前会话是否由“真实取流”佐证确立。
+	// 已佐证的会话不会被“未佐证”的候选（预加载/下一首预热抢发的 track_play）覆盖。
+	currentConfirmed bool
 
 	// provMu 保护 providersByUser，支持配置热更新时安全替换（与 mu 独立，避免死锁）。
 	provMu sync.RWMutex
@@ -93,6 +114,7 @@ func (m *Manager) Play(
 	ctx context.Context,
 	username string,
 	track model.Track,
+	confirmed bool,
 ) {
 	if !track.Valid() {
 		return
@@ -102,12 +124,36 @@ func (m *Manager) Play(
 
 	now := time.Now()
 
-	// 同一首歌重复收到播放请求，不重新创建 session。
+	// 同一首歌重复收到播放请求，不重新创建 session；但若本次是"真实取流佐证"，
+	// 升级锁定标记（之前可能由超时回退以未佐证方式开了同一首）。
 	if m.current != nil &&
 		m.current.Track.GUID == track.GUID &&
 		!m.current.Scrobbled {
+		if confirmed {
+			m.currentConfirmed = true
+		}
 		m.mu.Unlock()
 		return
+	}
+
+	// 已被“真实取流佐证”锁定的当前播放，不被“未佐证”的候选覆盖：
+	// 第三方客户端会为预加载/下一首预热而抢发 track_play，若直接切换会把
+	// 没听的歌记成“当前播放”甚至 scrobble 出去。
+	if m.current != nil &&
+		!m.current.Scrobbled &&
+		m.currentConfirmed &&
+		!confirmed {
+		m.mu.Unlock()
+		return
+	}
+
+	// 换歌：结束上一首的兜底检查（未达标的不再补推），并留下一条可对照的日志。
+	if prev := m.current; prev != nil {
+		prev.close()
+
+		if !prev.Scrobbled {
+			logSessionEnded(m.logger, prev, "切换歌曲")
+		}
 	}
 
 	noThreshold := m.noThreshold
@@ -116,13 +162,21 @@ func (m *Manager) Play(
 		Track:     track,
 		Username:  username,
 		StartedAt: now,
+		done:      make(chan struct{}),
 	}
+	m.currentConfirmed = confirmed
+
+	session := m.current
 
 	m.mu.Unlock()
 
 	if noThreshold {
 		// 关闭阈值判断：每次播放即推送（不判断进度）。
 		m.CheckScrobble(context.Background(), track.Duration)
+	} else {
+		// 兜底：只靠取流进度不够（客户端可能预加载整首、或音频直连 CDN 不经代理），
+		// 因此按"真实播放时长"定时检查一次，到点即判定达标。
+		go m.scheduleScrobble(session)
 	}
 
 	m.logger.Info(
@@ -147,6 +201,15 @@ func (m *Manager) Play(
 			}
 		}()
 	}
+}
+
+// CurrentConfirmed 返回当前会话是否由“真实取流”佐证确立。
+// Detector 据此决定是否允许“未佐证”的候选覆盖当前播放。
+func (m *Manager) CurrentConfirmed() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	return m.currentConfirmed
 }
 
 func (m *Manager) CheckScrobble(
@@ -179,7 +242,7 @@ func (m *Manager) CheckScrobble(
 		}
 
 		if position < threshold {
-			m.logger.Debug(
+			m.logger.Warn(
 				"scrobble 未到阈值",
 				"用户", session.Username,
 				"播放位置", position.String(),
@@ -194,11 +257,17 @@ func (m *Manager) CheckScrobble(
 
 	m.mu.Unlock()
 
+	// 已完成推送，结束会话（取消兜底定时器）。
+	session.close()
+
+	// 达到阈值即视为"播放完成"（飞牛没有 end 事件，这是唯一可判定的完成信号）。
 	m.logger.Info(
 		"推送scrobble",
 		"用户", session.Username,
 		"标题", session.Track.Title,
 		"艺人", session.Track.Artist,
+		"已播放", time.Since(session.StartedAt).Truncate(time.Second).String(),
+		"时长", session.Track.Duration.Truncate(time.Second).String(),
 	)
 
 	startedAt := session.StartedAt.Unix()
@@ -222,6 +291,12 @@ func (m *Manager) CheckScrobble(
 				return
 			}
 
+			m.logger.Info("scrobble推送成功",
+				"用户", session.Username,
+				"平台", p.Name(),
+				"标题", session.Track.Title,
+			)
+
 			if m.onScrobbled != nil {
 				m.onScrobbled(session.Username, p.Name())
 			}
@@ -229,11 +304,64 @@ func (m *Manager) CheckScrobble(
 	}
 }
 
+// scheduleScrobble 按阈值时长做一次兜底判定。
+//
+// 必要性：CheckScrobble 原本只在取流进度（Content-Range）到达时被调用，
+// 而客户端可能一次性预加载整首、或音频走 CDN 直连不经本代理，
+// 此时一个进度事件都没有，歌播完了也不会推送。这里按真实播放时长兜底。
+func (m *Manager) scheduleScrobble(session *Session) {
+	m.mu.Lock()
+	threshold := m.thresholdFunc(session.Track.Duration)
+	m.mu.Unlock()
+
+	if threshold <= 0 {
+		// 时长未知（元数据缺 duration）时阈值算不出来，
+		// 退化为 Last.fm 的上限 4 分钟，避免永远不触发。
+		if session.Track.Duration > 0 {
+			return
+		}
+
+		threshold = 4 * time.Minute
+	}
+
+	timer := time.NewTimer(threshold + scrobbleGrace)
+	defer timer.Stop()
+
+	select {
+	case <-timer.C:
+		m.CheckScrobble(context.Background(), threshold)
+	case <-session.done:
+	}
+}
+
 func (m *Manager) Stop() {
 	m.mu.Lock()
-	defer m.mu.Unlock()
-
+	cur := m.current
 	m.current = nil
+	m.mu.Unlock()
+
+	cur.close()
+
+	if cur != nil && !cur.Scrobbled {
+		logSessionEnded(m.logger, cur, "程序退出")
+	}
+}
+
+// logSessionEnded 记录一首"没听完就结束"的会话。
+//
+// 注意：飞牛只上报 track_play，没有 pause / stop / end 事件，
+// 所以拿不到真实的"播完"信号——"播放完成"只能等价于"达到 scrobble 阈值"（那条会打
+// "推送scrobble"）。这里只记录未达标的结束，并给出已播放时长与总时长，
+// 便于判断到底是切歌、还是没听够阈值。
+func logSessionEnded(logger *slog.Logger, s *Session, reason string) {
+	logger.Info("播放会话结束",
+		"标题", s.Track.Title,
+		"艺人", s.Track.Artist,
+		"原因", reason,
+		"已播放", time.Since(s.StartedAt).Truncate(time.Second).String(),
+		"时长", s.Track.Duration.Truncate(time.Second).String(),
+		"已推送", false,
+	)
 }
 
 // defaultScrobbleThreshold 实现 Last.fm 官方 scrobble 规则：

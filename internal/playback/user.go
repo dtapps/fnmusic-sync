@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"cnb.cool/dtapp/fnmusic-sync/internal/strutil"
 )
 
 // User 表示一个飞牛音乐用户。
@@ -45,6 +47,10 @@ type UserCache struct {
 	// failed 记录近期探测失败的 token（如 401 失效 token），TTL 内不再重复探测，
 	// 避免无效 token 持续发请求时反复打上游、刷 WARN。
 	failed map[string]time.Time
+
+	// onUserIdentified 当首次识别到新用户时回调，参数为 (token, username)。
+	// 用于触发如歌单同步等需要用户信息的后台任务。
+	onUserIdentified func(token, username string)
 }
 
 func NewUserCache(
@@ -63,6 +69,15 @@ func NewUserCache(
 		probing:        make(map[string]bool),
 		failed:         make(map[string]time.Time),
 	}
+}
+
+// SetOnUserIdentifiedCallback 设置用户首次识别回调。
+// 当某个 token 第一次被解析出用户名时调用，参数为 (token, username)。
+// 注意：必须在 Start 之前设置，且只能设置一次。
+func (c *UserCache) SetOnUserIdentifiedCallback(fn func(token, username string)) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.onUserIdentified = fn
 }
 
 // usernameFields 常见用户名所在字段（含嵌套 data.xxx），宽松匹配。
@@ -126,6 +141,7 @@ func (c *UserCache) Update(key string, body []byte) string {
 	// 用户名未变化则不重复打日志：被动拦截与主动探测可能各成功一次。
 	unchanged := ok && u.Name == name
 	u.Name = name
+	onIdentified := c.onUserIdentified
 	c.mu.Unlock()
 
 	if unchanged {
@@ -134,7 +150,7 @@ func (c *UserCache) Update(key string, body []byte) string {
 
 	c.logger.Info(
 		"识别到用户",
-		"用户标识", firstN(key, 8),
+		"用户标识", strutil.FirstN8(key),
 		"用户名", name,
 	)
 
@@ -145,6 +161,12 @@ func (c *UserCache) Update(key string, body []byte) string {
 			lastfm, lb = c.providerStatus(name)
 		}
 		c.store.Ensure(name, lastfm, lb)
+	}
+
+	// 首次识别到新用户，触发回调（如歌单同步）。
+	// 在锁外调用，避免回调内反向操作 UserCache 导致死锁。
+	if onIdentified != nil {
+		go onIdentified(key, name)
 	}
 
 	return name
@@ -208,6 +230,53 @@ func (c *UserCache) finishProbe(key string) {
 	c.mu.Lock()
 	delete(c.probing, key)
 	c.mu.Unlock()
+}
+
+// ActiveUsers 返回当前已识别的用户列表（token → 用户名）。
+// 注意：同一用户名可能有多个 token（不同客户端登录），都保留。
+// 用于后台任务（如歌单同步）获取需要同步的用户。
+func (c *UserCache) ActiveUsers() map[string]string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	users := make(map[string]string, len(c.byKey))
+	for key, u := range c.byKey {
+		if u.Name != "" {
+			users[key] = u.Name
+		}
+	}
+
+	return users
+}
+
+// InvalidateToken 移除已失效的 token（如上游返回 401 INVALID TOKEN）。
+//
+// 失效 token 会一直停留在活跃用户列表里，导致定时任务反复用它请求上游、
+// 每轮都刷一遍 401。这里直接剔除；用户重新登录产生的新 token 会被重新识别。
+// 返回值表示这个 token 之前还在活跃列表中（已被剔除过则为 false）。
+func (c *UserCache) InvalidateToken(key string) bool {
+	c.mu.Lock()
+	_, existed := c.byKey[key]
+	delete(c.byKey, key)
+	c.failed[key] = time.Now()
+	c.mu.Unlock()
+
+	return existed
+}
+
+// UserByName 根据用户名查找对应的 token。
+// 返回 token 和是否找到。
+func (c *UserCache) UserByName(name string) (string, bool) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	for key, u := range c.byKey {
+		if u.Name == name {
+			return key, true
+		}
+	}
+
+	return "", false
 }
 
 // MEPath 返回探测所用的 /user/me 路径（被动识别时用于路径比对）。
@@ -283,7 +352,7 @@ func (c *UserCache) probe(key string, auth http.Header) {
 	if err != nil {
 		c.logger.Warn(
 			"探测用户信息失败",
-			"用户标识", firstN(key, 8),
+			"用户标识", strutil.FirstN8(key),
 			"耗时", time.Since(start).String(),
 			"错误", err,
 		)
@@ -298,12 +367,12 @@ func (c *UserCache) probe(key string, auth http.Header) {
 	if resp.StatusCode != http.StatusOK {
 		c.logger.Warn(
 			"探测用户信息失败",
-			"用户标识", firstN(key, 8),
+			"用户标识", strutil.FirstN8(key),
 			"探测路径", c.mePath,
 			"触发请求携带认证头", authHeadersPresent(auth),
 			"触发请求Cookie中的token", cookieNames(auth),
 			"状态码", resp.StatusCode,
-			"响应体", firstN(string(body), 512),
+			"响应体", strutil.FirstN(string(body), 512),
 		)
 		c.markFailed(key)
 
@@ -315,7 +384,7 @@ func (c *UserCache) probe(key string, auth http.Header) {
 
 	c.logger.Debug(
 		"探测用户信息成功",
-		"用户标识", firstN(key, 8),
+		"用户标识", strutil.FirstN8(key),
 		"状态码", resp.StatusCode,
 		"字节数", len(body),
 		"耗时", time.Since(start).String(),
@@ -324,9 +393,9 @@ func (c *UserCache) probe(key string, auth http.Header) {
 	if name == "" {
 		c.logger.Warn(
 			"未能从 /user/me 解析出用户名",
-			"用户标识", firstN(key, 8),
+			"用户标识", strutil.FirstN8(key),
 			"状态码", resp.StatusCode,
-			"响应体", firstN(string(body), 512),
+			"响应体", strutil.FirstN(string(body), 512),
 		)
 		c.markFailed(key)
 	} else {
@@ -346,12 +415,4 @@ func (c *UserCache) clearFailed(key string) {
 	c.mu.Lock()
 	delete(c.failed, key)
 	c.mu.Unlock()
-}
-
-func firstN(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-
-	return s[:n]
 }

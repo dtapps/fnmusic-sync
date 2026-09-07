@@ -22,6 +22,7 @@ format:
 	gofmt -w -s .
 	go fmt ./...
 	go fix ./...
+	go vet ./...	
 
 #####################
 ## 构建相关
@@ -141,18 +142,18 @@ VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev
 COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 BUILDTIME ?= $(shell date -u '+%Y-%m-%d %H:%M:%S UTC')
 
-# 路径（ldflags -X 注入版本变量的包路径；package main 用 "main" 即可）
-PKG_PATH = main
+# 路径（ldflags -X 注入版本变量的包路径，需与 go.mod 模块路径一致）
+PKG_PATH = cnb.cool/dtapp/fnmusic-sync/internal/buildinfo
 
 # ldflags 模板
 # -s -w: 移除符号表和调试信息，减小体积
 # -buildid=: 移除构建指纹
+# 所有构建信息统一注入到 buildinfo 包
 LDFLAGS = -s -w \
 	-X '$(PKG_PATH).Version=$(VERSION)' \
 	-X '$(PKG_PATH).GitCommit=$(COMMIT)' \
 	-X '$(PKG_PATH).BuildTime=$(BUILDTIME)' \
-	-X '$(PKG_PATH).BinaryName=$(BINARY_NAME)' \
-	-X 'fnmusic-sync/internal/scrobbler.Version=$(VERSION)'
+	-X '$(PKG_PATH).BinaryName=$(BINARY_NAME)'
 
 # 统一定义构建命令
 # CGO_ENABLED=0: 禁用 CGO，实现完全静态链接
@@ -163,14 +164,10 @@ BUILD_CMD = CGO_ENABLED=0 go build -trimpath -ldflags="$(LDFLAGS)"
 # 构建所有 Linux 平台
 build-all: clean \
 	build-linux-amd64 \
-	build-linux-arm64 \
-	build-linux-mips \
-	build-linux-mipsle \
-	build-linux-arm \
-	build-linux-386
+	build-linux-arm64
 
 # 构建 Linux 平台
-build-linux-all: build-linux-amd64 build-linux-arm64 build-linux-mips build-linux-mipsle build-linux-arm build-linux-386
+build-linux-all: build-linux-amd64 build-linux-arm64
 
 clean:
 	@echo "[Clean] 清理构建目录..."
@@ -195,28 +192,12 @@ build-linux-amd64:
 build-linux-arm64:
 	$(call build_binary,linux,arm64,Linux ARM64,,)
 
-build-linux-mips:
-	$(call build_binary,linux,mips,Linux MIPS,,GOMIPS=softfloat)
-
-build-linux-mipsle:
-	$(call build_binary,linux,mipsle,Linux MIPSLE,,GOMIPS=softfloat)
-
-build-linux-arm:
-	$(call build_binary,linux,arm,Linux ARMv7,,GOARM=7)
-
-build-linux-386:
-	$(call build_binary,linux,386,Linux x86 32位,,)
-
 # 清理裸二进制（保留 .tar.gz 压缩包供自升级下载，上传前执行）
 .PHONY: clean-binaries
 clean-binaries:
 	@echo "[清理] 删除裸二进制（保留 .tar.gz 与安装包）..."
 	$(call clean_binary,./$(BUILD_DIR)/$(BINARY_NAME)-linux-amd64)
 	$(call clean_binary,./$(BUILD_DIR)/$(BINARY_NAME)-linux-arm64)
-	$(call clean_binary,./$(BUILD_DIR)/$(BINARY_NAME)-linux-mips)
-	$(call clean_binary,./$(BUILD_DIR)/$(BINARY_NAME)-linux-mipsle)
-	$(call clean_binary,./$(BUILD_DIR)/$(BINARY_NAME)-linux-arm)
-	$(call clean_binary,./$(BUILD_DIR)/$(BINARY_NAME)-linux-386)
 	@echo "✓ 清理完成（bin/ 保留 .tar.gz + deb/rpm/apk）"
 
 #####################
@@ -274,47 +255,35 @@ endef
 # 各打包目标统一依赖一次性构建全部架构（避免重复编译）
 package-linux-deb package-linux-rpm package-linux-apk: build-linux-all
 
-# 打包 Linux deb（全部 6 架构）
+# 打包 Linux deb（全部 2 架构）
 .PHONY: package-linux-deb
 package-linux-deb:
 	@echo ""
 	@echo "┌────────────────────────────────────────────────────────────"
-	@echo "│ [打包] 创建 Linux deb 包 (amd64/arm64/mips/mipsle/arm/386)..."
+	@echo "│ [打包] 创建 Linux deb 包 (amd64/arm64)..."
 	@echo "└────────────────────────────────────────────────────────────"
 	$(call package_nfpm_formats,amd64,amd64,amd64,x86_64)
 	$(call package_nfpm_formats,arm64,arm64,arm64,aarch64)
-	$(call package_nfpm_formats,mips,mips,mips,mips)
-	$(call package_nfpm_formats,mipsle,mipsel,mipsel,mipsel)
-	$(call package_nfpm_formats,arm,arm,arm,arm)
-	$(call package_nfpm_formats,386,i386,i386,i386)
 
-# 打包 Linux rpm（全部 6 架构）
+# 打包 Linux rpm（全部 2 架构）
 .PHONY: package-linux-rpm
 package-linux-rpm:
 	@echo ""
 	@echo "┌────────────────────────────────────────────────────────────"
-	@echo "│ [打包] 创建 Linux rpm 包 (x86_64/aarch64/mips/mipsel/arm/386)..."
+	@echo "│ [打包] 创建 Linux rpm 包 (x86_64/aarch64)..."
 	@echo "└────────────────────────────────────────────────────────────"
 	$(call package_nfpm_formats,amd64,amd64,amd64,x86_64)
 	$(call package_nfpm_formats,arm64,arm64,arm64,aarch64)
-	$(call package_nfpm_formats,mips,mips,mips,mips)
-	$(call package_nfpm_formats,mipsle,mipsel,mipsel,mipsel)
-	$(call package_nfpm_formats,arm,arm,arm,arm)
-	$(call package_nfpm_formats,386,i386,i386,i386)
 
-# 打包 Linux apk（Alpine，全部 6 架构）
+# 打包 Linux apk（Alpine，全部 2 架构）
 .PHONY: package-linux-apk
 package-linux-apk:
 	@echo ""
 	@echo "┌────────────────────────────────────────────────────────────"
-	@echo "│ [打包] 创建 Linux apk 包 (x86_64/aarch64/mips/mipsel/arm/386)..."
+	@echo "│ [打包] 创建 Linux apk 包 (x86_64/aarch64)..."
 	@echo "└────────────────────────────────────────────────────────────"
 	$(call package_nfpm_formats,amd64,amd64,amd64,x86_64)
 	$(call package_nfpm_formats,arm64,arm64,arm64,aarch64)
-	$(call package_nfpm_formats,mips,mips,mips,mips)
-	$(call package_nfpm_formats,mipsle,mipsel,mipsel,mipsel)
-	$(call package_nfpm_formats,arm,arm,arm,arm)
-	$(call package_nfpm_formats,386,i386,i386,i386)
 
 # 打包所有 Linux deb/rpm/apk 包（构建一次，各格式复用）
 .PHONY: package-linux-all
@@ -328,15 +297,9 @@ package-linux-all: package-linux-deb package-linux-rpm package-linux-apk
 .PHONY: package-linux
 package-linux: package-linux-all
 
-# 仅打包 Linux deb（快速验证用）
-.PHONY: package-linux-only
-package-linux-only: package-linux-deb
-
 # 构建并打包所有 Linux 包
 .PHONY: package-all
 package-all: package-linux
-
-.PHONY: clean-binaries
 
 # ==================== 更新 / 拉取 ====================
 

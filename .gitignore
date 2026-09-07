@@ -24,3 +24,11 @@ ai.md
 # nfpm 打包临时文件（Makefile 生成并清理）
 .nfpm-*.yaml
 .nfpm-scripts/
+
+# 日志文件
+/logs
+**/logs
+
+# 配置文件
+/configs/config.yaml
+config.yaml

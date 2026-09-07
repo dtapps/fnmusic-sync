@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -16,18 +17,33 @@ import (
 //
 // 数据来源（ai.md 第 19/20 节，已实机抓包确认）：
 //  1. GET  /music/api/v1/track/metadata?guid=X → 曲目元数据（标题/艺人/专辑/时长）
-//  2. POST /music/api/v1/event/report          → track_play 事件（开始播放）
+//  2. POST /music/api/v1/event/report          → track_play 事件（开始播放的“候选”信号）
 //  3. GET  /music/api/v1/track/stream?guid=X   → 边播边下，用 Range 进度推算播放位置
+//
+// 关键修正（修复第三方客户端“缓存一大堆歌”导致记录错乱）：
+//
+//	track_play 只是“候选”——客户端（尤其网页端）会在打开歌单 / 预加载下一首时
+//	抢发 track_play，若直接当作“开始播放”会产生幽灵会话、甚至把没听的歌 scrobble 出去。
+//	因此只有“真实取流”（下载偏移 end>0，排除 bytes=0-0 探针）佐证后，或音频直连 CDN
+//	无取流可参考时超时回退，才真正开会话。这样既根治错记，又对正常客户端（官方 App /
+//	走代理取流）行为不变、对音频直连 CDN 的客户端保持旧行为（不漏记）。
 type Detector struct {
 	mu sync.Mutex
 
-	// tracks 缓存当前播放曲目的元数据（换歌时只保留最新一首，避免无限增长）。
+	// tracks 缓存近期曲目元数据（不再盲目清空，避免真实播放的元数据被“换歌复位”冲掉）。
 	tracks map[string]model.Track
 	// stream 记录每首歌的取流进度（总大小 / 已下载到的最大偏移）。
 	stream map[string]*streamState
-	// pendingPlay 缓存“track_play 已到、但 metadata 尚未到达”的播放请求，
-	// key=guid，value=发起播放的用户名；等 HandleMetadata 补发 Play。
-	pendingPlay map[string]string
+
+	// candidates：已收到 track_play、但尚未被“真实取流”佐证的候选播放。
+	// 只有出现真实取流（end>0）或超时回退，才真正开会话。
+	candidates map[string]*candidate
+	// streamSeen：最近一次“真实取流”（end>0）的时间，用于“取流先于 track_play”的佐证。
+	streamSeen map[string]time.Time
+
+	// stop/done 控制后台超时回退 goroutine 的生命周期（Proxy.Close 时退出）。
+	stop chan struct{}
+	done chan struct{}
 
 	manager *Manager
 	logger  *slog.Logger
@@ -38,13 +54,133 @@ type streamState struct {
 	end   int64
 }
 
+// candidate 表示一个尚未被真实取流佐证的 track_play 候选播放。
+type candidate struct {
+	user      string
+	at        time.Time
+	metaReady bool
+}
+
+const (
+	// candidateConfirmTimeout 候选在无真实取流佐证时，超时回退开会话的等待时长。
+	// 需小于 scrobble 阈值，避免“已开始播放”的计时被严重延迟；同时给走代理的
+	// 客户端足够时间发起真实取流（通常 track_play 后 1~3s 内）。
+	candidateConfirmTimeout = 3 * time.Second
+	// streamSeenWindow 取流记录的有效佐证窗口（“取流先于 track_play”时仍可匹配）。
+	streamSeenWindow = 30 * time.Second
+	// maxTrackCache 元数据缓存上限，超出时清理无候选 / 无取流的条目，避免无限增长。
+	maxTrackCache = 400
+)
+
 func NewDetector(manager *Manager, logger *slog.Logger) *Detector {
-	return &Detector{
-		tracks:      make(map[string]model.Track),
-		stream:      make(map[string]*streamState),
-		pendingPlay: make(map[string]string),
-		manager:     manager,
-		logger:      logger,
+	d := &Detector{
+		tracks:     make(map[string]model.Track),
+		stream:     make(map[string]*streamState),
+		candidates: make(map[string]*candidate),
+		streamSeen: make(map[string]time.Time),
+		stop:       make(chan struct{}),
+		done:       make(chan struct{}),
+		manager:    manager,
+		logger:     logger,
+	}
+
+	go d.expireLoop()
+
+	return d
+}
+
+// Stop 停止后台超时回退 goroutine，应在 Proxy 关闭时调用。
+func (d *Detector) Stop() {
+	close(d.stop)
+	<-d.done
+}
+
+// expireLoop 周期性扫描候选，对超时且无真实取流佐证的候选做回退处理。
+func (d *Detector) expireLoop() {
+	defer close(d.done)
+
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-d.stop:
+			return
+		case <-ticker.C:
+			d.expireCandidates()
+		}
+	}
+}
+
+// expireCandidates 处理超时的候选：
+//   - 若当前播放已被真实取流锁定，所有预加载候选直接丢弃（不覆盖真听）；
+//   - 否则（音频直连 CDN 无取流可参考）在同时到期的候选中只开"最近到达(at 最大)"
+//     的那首、其余丢弃。歌单预加载会抢发一堆 track_play，用户实际在听 / 最后点击的
+//     就是最后到达的那一个，避免逐个预加载歌都生成幽灵会话。
+func (d *Detector) expireCandidates() {
+	d.mu.Lock()
+
+	now := time.Now()
+
+	type expired struct {
+		guid string
+		at   time.Time
+	}
+	var list []expired
+	for guid, c := range d.candidates {
+		if c.metaReady && now.Sub(c.at) >= candidateConfirmTimeout {
+			list = append(list, expired{guid, c.at})
+		}
+	}
+
+	d.mu.Unlock()
+
+	if len(list) == 0 {
+		return
+	}
+
+	// 已被真实取流锁定的当前播放：预加载 / 下一首预热的候选直接丢弃，不覆盖真听。
+	if d.manager.CurrentConfirmed() {
+		d.mu.Lock()
+		for _, e := range list {
+			delete(d.candidates, e.guid)
+		}
+		d.mu.Unlock()
+
+		return
+	}
+
+	// 同一时刻到期的候选里，按到达时间降序，只开"最近"的那首。
+	sort.Slice(list, func(i, j int) bool {
+		return list[i].at.After(list[j].at)
+	})
+
+	d.mu.Lock()
+
+	var chosenTrack model.Track
+	var chosenUser string
+	hasChosen := false
+
+	for _, e := range list {
+		track, ok := d.tracks[e.guid]
+		user := ""
+		if c, exists := d.candidates[e.guid]; exists {
+			user = c.user
+		}
+		delete(d.candidates, e.guid)
+
+		// 从最近往旧找第一个元数据就绪的作为当前播放，其余候选一并丢弃。
+		if !hasChosen && ok {
+			chosenTrack = track
+			chosenUser = user
+			hasChosen = true
+		}
+	}
+
+	d.mu.Unlock()
+
+	if hasChosen {
+		d.manager.Play(context.Background(), chosenUser, chosenTrack, false)
 	}
 }
 
@@ -56,18 +192,17 @@ func (d *Detector) HandleMetadata(guid string, body []byte) {
 
 	track, ok := parseMetadata(guid, body)
 	if !ok {
-		d.logger.Debug("曲目元数据解析失败", "歌曲", guid)
+		d.logger.Error("曲目元数据解析失败", "歌曲", guid)
 
 		return
 	}
 
 	d.mu.Lock()
 	d.tracks[guid] = track
-	// 补发之前因 metadata 未到而暂存的 track_play 播放会话。
-	pendingUser, pending := d.pendingPlay[guid]
-	if pending {
-		delete(d.pendingPlay, guid)
+	if c, exists := d.candidates[guid]; exists {
+		c.metaReady = true
 	}
+	d.trimTrackCache()
 	d.mu.Unlock()
 
 	d.logger.Debug(
@@ -78,18 +213,13 @@ func (d *Detector) HandleMetadata(guid string, body []byte) {
 		"时长", track.Duration.String(),
 	)
 
-	if pending {
-		d.logger.Debug(
-			"补发暂存的播放会话",
-			"用户", pendingUser,
-			"歌曲", guid,
-		)
-		// 锁外调用，避免与 manager 内部锁形成嵌套/死锁。
-		d.manager.Play(context.Background(), pendingUser, track)
-	}
+	d.maybeConfirm(guid)
 }
 
-// HandleEventReport 解析 /event/report 的请求体，识别 track_play 开始播放。
+// HandleEventReport 解析 /event/report 的请求体，识别 track_play 开始播放的“候选”信号。
+//
+// 注意：track_play 不再立即开会话，仅登记候选；真正开会话要等真实取流佐证或超时回退，
+// 以排除客户端预加载 / 下一首预热抢发的 track_play（详见包注释）。
 func (d *Detector) HandleEventReport(username string, body []byte) {
 	guid, ok := parsePlayEvent(body)
 	if !ok {
@@ -97,46 +227,61 @@ func (d *Detector) HandleEventReport(username string, body []byte) {
 	}
 
 	d.mu.Lock()
-	track, has := d.tracks[guid]
-	if has {
-		// 换歌：只保留当前曲目，避免缓存无限增长。
-		d.tracks = map[string]model.Track{guid: track}
-		d.stream = map[string]*streamState{}
-		delete(d.pendingPlay, guid)
-	} else {
-		// 元数据尚未到达（客户端常先发 track_play 再发 metadata，
-		// 网页则相反），暂存用户名，等 metadata 到达后补发 Play。
-		d.pendingPlay[guid] = username
+
+	// 不再清空 d.tracks / d.stream：盲目“换歌复位”会把真实播放所需的元数据冲掉，
+	// 导致第三方客户端预加载时真实播放的会话建不起来或记成别的歌。
+	c := &candidate{user: username, at: time.Now()}
+	if _, has := d.tracks[guid]; has {
+		c.metaReady = true
 	}
+	d.candidates[guid] = c
+
 	d.mu.Unlock()
 
-	if !has {
-		d.logger.Debug(
-			"播放事件缺少曲目元数据，暂存等待",
-			"用户", username,
-			"歌曲", guid,
-		)
+	d.logger.Debug(
+		"收到播放事件(track_play)，登记候选",
+		"用户", username,
+		"歌曲", guid,
+	)
+
+	d.maybeConfirm(guid)
+}
+
+// maybeConfirm 尝试把候选 guid 推进为真实播放会话：
+// 若该 guid 近期出现过真实取流（end>0），说明真在听 → 立即开会话（已佐证）。
+// 否则保持候选，等待取流佐证或后台超时回退。
+func (d *Detector) maybeConfirm(guid string) {
+	d.mu.Lock()
+
+	c, ok := d.candidates[guid]
+	if !ok || !c.metaReady {
+		d.mu.Unlock()
 
 		return
 	}
 
-	if username == "" {
-		d.logger.Debug(
-			"播放事件尚未识别出用户，跳过",
-			"歌曲", guid,
-		)
+	track, hasTrack := d.tracks[guid]
+	seen, recently := d.streamSeen[guid]
+	confirmedByStream := hasTrack && recently && time.Since(seen) < streamSeenWindow
 
+	d.mu.Unlock()
+
+	if !confirmedByStream {
+		// 尚无真实取流佐证，等取流或超时回退。
 		return
 	}
 
-	// 用 Background：scrobble 不应随单个请求结束而取消，
-	// 超时由各 scrobbler 自带的 http.Client.Timeout 兜底。
-	d.manager.Play(context.Background(), username, track)
+	d.manager.Play(context.Background(), c.user, track, true)
+
+	d.mu.Lock()
+	delete(d.candidates, guid)
+	d.mu.Unlock()
 }
 
 // HandleStreamProgress 用取流的 Content-Range 推算已播放位置，达标则 scrobble。
 //
 // 飞牛是边播边下（每块 Range 约 1MB），已下载到的最大偏移≈播放进度。
+// 当该 guid 存在 track_play 候选且出现“真实取流”（end>0），则视为取流佐证、开会话。
 func (d *Detector) HandleStreamProgress(
 	username string,
 	guid string,
@@ -170,6 +315,47 @@ func (d *Detector) HandleStreamProgress(
 	track, hasTrack := d.tracks[guid]
 	curTotal, curEnd := st.total, st.end
 
+	// 真实取流：下载到偏移 end>0（排除 bytes=0-0 探针）。
+	if end > 0 {
+		d.streamSeen[guid] = time.Now()
+
+		// 该 guid 有 track_play 候选且元数据已就绪 → 取流佐证，开会话。
+		if c, cand := d.candidates[guid]; cand && c.metaReady {
+			candUser := c.user
+			candTrack := track
+			delete(d.candidates, guid)
+			d.mu.Unlock()
+
+			d.logger.Debug(
+				"真实取流佐证播放",
+				"用户", username,
+				"歌曲", guid,
+			)
+			d.manager.Play(context.Background(), candUser, candTrack, true)
+
+			if !hasTrack || curTotal <= 0 || candTrack.Duration <= 0 {
+				return
+			}
+
+			position := time.Duration(
+				float64(curEnd) / float64(curTotal) * float64(candTrack.Duration),
+			)
+
+			d.logger.Debug(
+				"取流进度推算",
+				"用户", username,
+				"歌曲", guid,
+				"已下载", curEnd,
+				"总大小", curTotal,
+				"播放位置", position.String(),
+				"时长", candTrack.Duration.String(),
+			)
+			d.manager.CheckScrobble(context.Background(), position)
+
+			return
+		}
+	}
+
 	d.mu.Unlock()
 
 	if !hasTrack || curTotal <= 0 || track.Duration <= 0 {
@@ -192,6 +378,25 @@ func (d *Detector) HandleStreamProgress(
 	)
 
 	d.manager.CheckScrobble(context.Background(), position)
+}
+
+// trimTrackCache 在缓存超限时清理无候选、且无近期真实取流的条目，避免无限增长。
+func (d *Detector) trimTrackCache() {
+	if len(d.tracks) <= maxTrackCache {
+		return
+	}
+
+	for g := range d.tracks {
+		if _, cand := d.candidates[g]; cand {
+			continue
+		}
+
+		if _, seen := d.streamSeen[g]; seen {
+			continue
+		}
+
+		delete(d.tracks, g)
+	}
 }
 
 // parseMetadata 解析 /track/metadata 响应，duration 单位为毫秒。
