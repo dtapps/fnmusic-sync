@@ -38,9 +38,9 @@ usage() {
     sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'
 }
 
-log()  { printf '%s\n' "$*"; }
-info() { printf 'ℹ️  %s\n' "$*"; }
-ok()   { printf '✅ %s\n' "$*"; }
+log()  { printf '%s\n' "$*" >&2; }
+info() { printf 'ℹ️  %s\n' "$*" >&2; }
+ok()   { printf '✅ %s\n' "$*" >&2; }
 warn() { printf '⚠️  %s\n' "$*" >&2; }
 die()  { printf '❌ %s\n' "$*" >&2; exit 1; }
 

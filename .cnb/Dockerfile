@@ -6,7 +6,7 @@ FROM golang:1.27.0-trixie
 # https://github.com/upx/upx/releases
 # https://github.com/goreleaser/nfpm/releases
 # ==========================================
-ARG UPX_VERSION=5.2.0
+ARG UPX_VERSION=5.2.1
 ARG NFPM_VERSION=2.47.0
 
 # 1. 设置 Go 环境变量

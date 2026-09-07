@@ -12,7 +12,7 @@
 - **配置热加载**：改 `config.yaml` 立即生效（用户、凭证、阈值、日志级别），不用重启。
 - **日志双写**：同时输出到控制台(stderr)与日志文件 `/var/log/fnmusic-sync/fnmusic-sync.log`，自动切割、gzip 压缩、过期清理。
 - **服务自管理**：内置 `service install/uninstall/start/stop/restart/status`（基于 `kardianos/service`），不用手搓 unit 文件。
-- **自升级**：`fnmusic-sync self-upgrade` 或 `scripts/install.sh upgrade`，一键拉最新版本。
+- **自升级**：`fnmusic-sync self-upgrade`，一键拉最新版本。
 
 ## 工作原理
 
@@ -57,13 +57,15 @@ sudo sh install.sh
 常用变体：
 
 ```bash
-sudo ./scripts/install.sh upgrade                      # 升级，保留配置
-sudo ./scripts/install.sh upgrade --version v0.0.1     # 升级到指定版本（配置也取该版本的示例）
-sudo ./scripts/install.sh --dir /opt/bin               # 改安装目录
-sudo ./scripts/install.sh --config-dir /etc/fnmusic-sync
-sudo ./scripts/install.sh --log-dir /var/log/fnmusic-sync --state-dir /var/lib/fnmusic-sync
-sudo ./scripts/install.sh --no-service                 # 不装服务（fnOS 手动运行场景）
-sudo ./scripts/install.sh --file ./fnmusic-sync-linux-amd64.tar.gz   # 用本地包，不联网
+# 已安装二进制时，直接用它升级：
+sudo fnmusic-sync self-upgrade
+
+# 本地有脚本时，也可用（支持更多选项）：
+sudo ./install.sh upgrade                      # 升级，保留配置
+sudo ./install.sh upgrade --version v0.0.1     # 升级到指定版本
+sudo ./install.sh --no-service                 # 不装服务
+sudo ./install.sh --dir /opt/bin               # 改安装目录
+sudo ./install.sh --file ./fnmusic-sync-linux-amd64.tar.gz   # 用本地包
 ```
 
 无 systemd 的环境（如直接在 fnOS 上手动跑）脚本会跳过服务安装，直接前台运行即可。
@@ -106,8 +108,8 @@ make package-linux-all      # deb / rpm / apk
 
 | 场景 | 命令 |
 | --- | --- |
-| 脚本安装的环境 | `sudo ./scripts/install.sh upgrade`（或加 `--version vX.Y.Z`） |
-| 二进制自升级 | `sudo fnmusic-sync self-upgrade`（从仓库拉最新版原子替换自身） |
+| 已安装二进制 | `sudo fnmusic-sync self-upgrade`（从仓库拉最新版原子替换自身） |
+| 本地有脚本 | `sudo ./install.sh upgrade`（或加 `--version vX.Y.Z`，支持更多选项） |
 | 包管理器安装 | 下载新包覆盖安装，配置不会被覆盖 |
 
 升级**不会**覆盖 `/etc/fnmusic-sync/config.yaml`（里面是你的 token）。
@@ -253,11 +255,17 @@ tail -f /var/log/fnmusic-sync/fnmusic-sync.log
 ## 卸载
 
 ```bash
-sudo ./scripts/install.sh uninstall           # 卸载二进制与服务，保留配置
-sudo ./scripts/install.sh uninstall --purge   # 连配置、日志、状态一起删除
+# 已安装二进制时，直接用它卸载服务：
+sudo fnmusic-sync service uninstall
+
+# 再删除二进制本身：
+sudo rm /usr/local/bin/fnmusic-sync
+
+# 可选：连配置、日志、状态一起删除：
+sudo rm -rf /etc/fnmusic-sync /var/log/fnmusic-sync /var/lib/fnmusic-sync
 ```
 
-手动卸载：`sudo fnmusic-sync service uninstall`（或 `systemctl disable --now fnmusic-sync` 后删 `/etc/systemd/system/fnmusic-sync.service`）→ 删除二进制 →（可选）`rm -rf /etc/fnmusic-sync /var/log/fnmusic-sync /var/lib/fnmusic-sync`。
+> 没有 systemd 时（`service uninstall` 可能报错），直接 `kill` 进程再删二进制即可。
 
 卸载前程序若在运行会先停止并还原官方 socket，不会留下 502。
 
