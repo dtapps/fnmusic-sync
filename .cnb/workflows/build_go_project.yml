@@ -64,6 +64,7 @@
         # https://docs.cnb.cool/zh/plugin/public/cnbcool/changelog.html
         - name: 生成 Release 日志
           image: cnbcool/changelog
+          allowFailure: true  # 仓库首个 tag 时 changelog 插件无法生成日志，允许该 job 失败继续发布
           exports:
             latestChangeLog: LATEST_CHANGE_LOG
 
