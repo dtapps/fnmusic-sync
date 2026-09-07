@@ -64,13 +64,13 @@
         # https://docs.cnb.cool/zh/plugin/public/cnbcool/changelog.html
         - name: 生成 Release 日志
           image: cnbcool/changelog
+          allowFailure: true  # 仓库首个 tag 时 changelog 插件无法生成日志，允许该 job 失败继续发布
           exports:
             latestChangeLog: LATEST_CHANGE_LOG
 
         # 生成 Release 正文：预发布提示 + 发布信息表 + certflow 风格下载表 + 更新日志
         - name: 生成 Release 正文
           script: |
-            shopt -s nullglob
             CNB_BASE="${CNB_REPO_URL_HTTPS%/}/-"
             DL_BASE="${CNB_BASE}/releases/download/${INTERIOR_VERSION}"
 
@@ -105,6 +105,7 @@
               echo "|------|------|------|------|------|"
 
               for f in bin/*; do
+                [ -e "$f" ] || continue
                 [ -d "$f" ] && continue
                 fname=$(basename "$f")
                 [ "$fname" = "SHA256SUMS" ] && continue
