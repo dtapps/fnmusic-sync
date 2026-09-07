@@ -61,40 +61,10 @@
         - name: 清理二进制文件
           script: make clean-binaries
 
-        # 生成 Release 日志
-        # 使用 git log 直接生成变更日志，兼容首次发布（仓库尚无 tag）的场景。
-        # cnbcool/changelog 插件在仓库没有 tag 时会报错（git describe 找不到 tag），
-        # 且插件文档明确说明首个 tag 不支持生成 changelog。
+        # https://docs.cnb.cool/zh/plugin/public/cnbcool/changelog.html
         - name: 生成 Release 日志
-          script: |
-            set -e
-
-            # 获取最近的一个已有 tag（按创建时间排序），没有则返回空
-            PREV_TAG=$(git tag --sort=-creatordate | head -1 || true)
-            echo "最近 tag: ${PREV_TAG:-（无，首次发布）}"
-
-            # 生成变更日志
-            if [ -n "$PREV_TAG" ]; then
-              echo "==> 生成 ${PREV_TAG}..HEAD 之间的变更日志"
-              CHANGE_LOG=$(git log --pretty=format:'- %h %s' ${PREV_TAG}..HEAD --no-merges 2>/dev/null || \
-                git log --pretty=format:'- %h %s' --no-merges 2>/dev/null || echo '- 无变更')
-            else
-              echo "==> 仓库无 tag（首次发布），从首个 commit 生成全部变更日志"
-              CHANGE_LOG=$(git log --pretty=format:'- %h %s' --no-merges 2>/dev/null || \
-                git log --pretty=format:'- %h %s' 2>/dev/null || echo '- 首次发布')
-            fi
-
-            # 确保非空
-            if [ -z "$CHANGE_LOG" ]; then
-              CHANGE_LOG='- 首次发布'
-            fi
-
-            echo "变更日志内容："
-            echo "$CHANGE_LOG"
-
-            # 使用 base64 编码导出（changelog 含多行文本）
-            LATEST_CHANGE_LOG_B64=$(printf '%s' "$CHANGE_LOG" | base64 -w 0)
-            echo "##[set-output latestChangeLog=base64,${LATEST_CHANGE_LOG_B64}]"
+          image: cnbcool/changelog
+          allowFailure: true  # 仓库首个 tag 时 changelog 插件无法生成日志，允许该 job 失败继续发布
           exports:
             latestChangeLog: LATEST_CHANGE_LOG
 
