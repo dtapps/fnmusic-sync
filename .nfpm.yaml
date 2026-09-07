@@ -1,0 +1,47 @@
+# nfpm 配置文件
+# 用于打包 deb / rpm / apk
+# 文档: https://nfpm.goreleaser.com/configuration/
+# 占位符由 Makefile generate_nfpm_config 用 sed 替换:
+#   ${ARCH}    -> 包架构 (amd64/x86_64 或 arm64/aarch64，见 Makefile 调用)
+#   ${VERSION} -> 版本号
+
+name: fnmusic-sync
+arch: ${ARCH}
+platform: linux
+version: ${VERSION}
+release: 1
+section: default
+priority: optional
+maintainer: dtapp <13553695467@139.com>
+description: |
+  fnOS 飞牛音乐 Last.fm / ListenBrainz 自动 scrobble 透明代理。
+  接管 trim-music 的 unix socket，解析播放事件并推送到 Last.fm 与 ListenBrainz。
+vendor: dtapp
+homepage: https://cnb.cool/dtapp/fnmusic-sync
+license: MIT
+
+# 安装/卸载脚本（路径由 Makefile 打包时替换为注入变量后的生成脚本）
+scripts:
+  postinstall: ${POSTINSTALL}
+  preremove: ${PREREMOVE}
+
+# 源文件 -> 目标路径
+contents:
+  # 二进制文件
+  - src: ./bin/fnmusic-sync-linux-${ARCH}
+    dst: /usr/bin/fnmusic-sync
+    file_info:
+      mode: 0755
+      owner: root
+      group: root
+
+# deb 特定配置
+deb:
+  compression: xz
+
+# rpm 特定配置
+rpm:
+  compression: xz
+
+# apk 特定配置
+apk: {}

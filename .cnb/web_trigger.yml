@@ -1,0 +1,24 @@
+branch:
+  - buttons:
+      - name: 打包 Go 项目
+        description: 打包 Go 项目并发布 Release（可选是否预发布）
+        event: web_trigger_build_go_project # 触发的 CI 事件名
+        permissions:
+          roles:
+            - owner
+            - master
+            - developer
+        inputs:
+          version:
+            # 输入框
+            description: 请输入打包版本
+            required: true # 是否必填
+            type: input
+            default:
+          pre_release:
+            # 预发布开关
+            name: 预发布版本
+            description: 是否为预发布版本（预发布不会标记为稳定版）
+            required: false # 是否必填
+            type: switch
+            default: "false"

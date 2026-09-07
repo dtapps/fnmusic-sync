@@ -1,0 +1,60 @@
+# fnmusic-sync 配置示例
+# 复制为 /etc/fnmusic-sync/config.yaml 并按需修改。
+# 无需环境变量，全部配置都在本文件内。
+# 运行时修改本文件会被自动热加载（viper WatchConfig），无需重启即可生效（如增删用户、改凭证、调日志级别）。
+
+server:
+  listen_socket: /var/run/trim_music.socket   # 代理监听的 socket（接管官方路径）
+  upstream_socket: /var/run/trim_music_upstream.socket
+  socket_mode: 0          # 0 = 沿用官方 socket 权限（至少 0666）
+  upstream_wait: 30s      # 启动时等待官方后端就绪的超时
+
+# 每个用户各自配置自己的 Last.fm / ListenBrainz 账号（多用户隔离）。
+# key 必须与飞牛 /user/me 返回的用户名一致（从日志“识别到用户 用户名=xxx”确认）。
+users:
+  admin:
+    lastfm:
+      enabled: false
+      api_key: ""
+      api_secret: ""
+      # session_key 留空时：程序启动会打印一个 Last.fm 授权链接到日志，
+      # 在浏览器打开并点「同意」后，程序自动把 session_key 写回本文件并热加载生效，无需手动填。
+      # 也可手动填写用户授权后获得的会话密钥（auth.getSession 换取）。
+      session_key: ""     # 用户授权后获得的会话密钥
+    listenbrainz:
+      enabled: false
+      token: ""           # ListenBrainz 用户 Token（scrobble 只认这个）
+      username: ""        # 仅将来做歌单同步时需要（/1/user/{username}/playlists），现在可留空
+  # 第二个用户示例（去掉注释即可）：
+  # alice:
+  #   lastfm:
+  #     enabled: true
+  #     api_key: "xxxx"
+  #     api_secret: "xxxx"
+  #     session_key: "xxxx"
+  #   listenbrainz:
+  #     enabled: false
+  #     token: ""
+  #     username: ""
+
+playback:
+  # 触发 scrobble（记录到 Last.fm / ListenBrainz）的进度阈值：
+  #   auto        默认。听满 min(歌曲时长/2, 4分钟) 才记（Last.fm 官方规则）。
+  #   30s / 2m    固定时长阈值（如 30s：每首歌播满 30 秒即记，便于快速验证）。
+  #   50% / 0.5   按歌曲时长比例（50% = 播到一半）。
+  #   off         关闭判断，每次播放（收到 track_play）即推送，不判断进度。
+  #               注意：不符合 Last.fm “听满半曲/4分钟” 规范，试听、切歌也会记；
+  #               日常使用建议 auto 或 30s，off 仅用于快速验证。
+  # 修改本值会即时热加载，无需重启。
+  scrobble_threshold: auto
+
+playlist:
+  enabled: true
+  sync_interval: 30m
+
+logging:
+  level: info                # info / debug
+
+# 用户状态（是否启用各平台、累计推送次数、最近推送时间）由程序自动维护在
+# 单独的 state.yaml 中（默认与配置文件同目录，即 <配置目录>/state.yaml），无需在此手写。
+# 也可用 --state 指定其他路径。

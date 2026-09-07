@@ -1,0 +1,169 @@
+"**":
+  # 自定义按钮可触发的事件：web_trigger_*
+  web_trigger_build_go_project:
+    - runner:
+        tags: cnb:arch:amd64 # 指定 Runner 必须有这个标签
+        # cpus: 64 # 如有需要，可根据实际情况调整
+      services:
+        - docker # 启用 Docker 服务（用于 docker build/push）
+      docker:
+        build: .cnb/Dockerfile # 使用自定义 Dockerfile
+        volumes:
+          - /root/.cache/go-build:copy-on-write # 挂载 Go
+          - /go:copy-on-write # 挂载项目依赖目录（可选，根据需要）
+      stages:
+        - name: 验证 make 工具
+          script: make --version
+
+        - name: 验证 upx 工具
+          script: upx --version
+        
+        - name: 验证 nfpm 工具
+          script: nfpm --version
+
+        - name: 处理版本号与预发布选项
+          script: |
+            echo "原始 version: $version"
+
+            # 1. 如果输入没有 v 前缀，自动加上
+            if ! echo "$version" | grep -qE '^v'; then
+              version="v${version}"
+            fi
+
+            echo "处理 version: $version"
+
+            # 2. 通过 set-output 输出到 result
+            echo "##[set-output interior_version=$version]"
+
+            # 3. 预发布选项：由页面 switch 传入 pre_release（true/false），默认 false
+            pre_release="${pre_release:-false}"
+            if [ "$pre_release" != "true" ] && [ "$pre_release" != "false" ]; then
+              echo "警告：pre_release 值为 '${pre_release}'，仅支持 true/false，已回落到 false"
+              pre_release="false"
+            fi
+            echo "preRelease: $pre_release"
+
+            # 4. 通过 set-output 输出预发布选项
+            echo "##[set-output pre_release=$pre_release]"
+          exports:
+            interior_version: INTERIOR_VERSION
+            pre_release: PRE_RELEASE
+
+        - name: 安装依赖依赖
+          script: make deps
+
+        # - name: 构建 Linux 平台二进制文件
+        #   script: VERSION=${INTERIOR_VERSION} make build-linux-all
+
+        - name: 打包 Linux 安装包（deb / rpm / apk）
+          script: VERSION=${INTERIOR_VERSION} make package-linux-all
+
+        - name: 清理二进制文件
+          script: make clean-binaries
+
+        # https://docs.cnb.cool/zh/plugin/public/cnbcool/changelog.html
+        - name: 生成 Release 日志
+          image: cnbcool/changelog
+          exports:
+            latestChangeLog: LATEST_CHANGE_LOG
+
+        # 生成 Release 正文：预发布提示 + 发布信息表 + certflow 风格下载表 + 更新日志
+        - name: 生成 Release 正文
+          script: |
+            shopt -s nullglob
+            CNB_BASE="${CNB_REPO_URL_HTTPS%/}/-"
+            DL_BASE="${CNB_BASE}/releases/download/${INTERIOR_VERSION}"
+
+            if [ "${PRE_RELEASE}" = "true" ]; then
+              RELEASE_TYPE="🚧 预发布版本 (Pre-release)"
+            else
+              RELEASE_TYPE="✅ 正式发布版本 (Stable)"
+            fi
+            BUILD_TIME="$(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+
+            {
+              if [ "${PRE_RELEASE}" = "true" ]; then
+                echo "## ⚠️ 预发布版本"
+                echo ""
+                echo "> 这是预发布版本，可能包含未充分测试的功能。"
+                echo "> 如需稳定版本，请使用 [正式发布](${CNB_BASE}/releases)。"
+                echo ""
+              fi
+
+              echo "## 发布信息"
+              echo ""
+              echo "| 项目 | 内容 |"
+              echo "| --- | --- |"
+              echo "| 版本号 | ${INTERIOR_VERSION} |"
+              echo "| 发布类型 | ${RELEASE_TYPE} |"
+              echo "| 是否预发布 | ${PRE_RELEASE} |"
+              echo "| 构建时间 | ${BUILD_TIME} |"
+              echo ""
+              echo "## 下载"
+              echo ""
+              echo "| 平台 | 架构 | 文件 | 大小 | 说明 |"
+              echo "|------|------|------|------|------|"
+
+              for f in bin/*; do
+                [ -d "$f" ] && continue
+                fname=$(basename "$f")
+                [ "$fname" = "SHA256SUMS" ] && continue
+                fsize=$(ls -lh "$f" | awk '{print $5}')
+
+                PLAT="Linux"
+                ARCH="-"
+                DESC="其它"
+                case "$fname" in
+                  *-linux-*.tar.gz)
+                    ARCH="${fname#*linux-}"; ARCH="${ARCH%.tar.gz}"
+                    DESC="Linux 二进制压缩包" ;;
+                  *.deb)
+                    ARCH="${fname#fnmusic-sync_}"; ARCH="${ARCH%.deb}"
+                    DESC="Debian/Ubuntu 安装包" ;;
+                  *.rpm)
+                    ARCH="${fname#fnmusic-sync.}"; ARCH="${ARCH%.rpm}"
+                    DESC="Fedora/RHEL 安装包" ;;
+                  *.apk)
+                    ARCH="${fname#fnmusic-sync.}"; ARCH="${ARCH%.apk}"
+                    DESC="Alpine 安装包" ;;
+                esac
+
+                echo "| ${PLAT} | ${ARCH} | [${fname}](${DL_BASE}/${fname}) | ${fsize} | ${DESC} |"
+              done
+
+              echo ""
+              echo "## 更新内容"
+              echo ""
+              echo "${LATEST_CHANGE_LOG}"
+            } > release_body.md
+
+            cat release_body.md
+
+        # 生成 Release 选项文件（preRelease 按传入值动态设置），供 git:release 的 optionsFrom 引用
+        - name: 生成 Release 选项文件
+          script: |
+            cat > release_options.yml << EOF
+            tag: ${INTERIOR_VERSION}
+            title: "${INTERIOR_VERSION}"
+            descriptionFromFile: release_body.md
+            preRelease: ${PRE_RELEASE}
+            EOF
+
+        # https://docs.cnb.cool/zh/build/internal-steps.html#git-release
+        - name: 创建 Release
+          type: git:release
+          optionsFrom: release_options.yml
+
+        # https://docs.cnb.cool/zh/plugin/public/cnbcool/attachments.html
+        - name: 上传 Release 附件
+          image: cnbcool/attachments:latest
+          settings:
+            type: UPLOAD
+            tag: ${INTERIOR_VERSION}
+            attachments:
+              - "bin/*"
+          exports:
+            FILES: FILES
+
+        - name: 输出 Release 附件
+          script: echo $FILES
