@@ -5,8 +5,24 @@
 set -e
 
 BINARY="/usr/bin/__BINARY_NAME__"
+NAME="__BINARY_NAME__"
 
-# 卸载前若程序仍在运行，尝试停止（本工具为交互式 TUI，通常无后台进程）
+# 卸载前停止并移除 systemd 服务（若已安装）
+if command -v systemctl >/dev/null 2>&1; then
+    systemctl stop "$NAME" >/dev/null 2>&1 || true
+    systemctl disable "$NAME" >/dev/null 2>&1 || true
+fi
+
+if [ -x "$BINARY" ]; then
+    "$BINARY" service stop >/dev/null 2>&1 || true
+    "$BINARY" service uninstall >/dev/null 2>&1 || true
+fi
+
+# 清理 systemd unit 文件并重新加载
+rm -f "/etc/systemd/system/${NAME}.service" 2>/dev/null || true
+command -v systemctl >/dev/null 2>&1 && systemctl daemon-reload 2>/dev/null || true
+
+# 兜底：杀掉残留进程
 if command -v pidof >/dev/null 2>&1; then
     pids=$(pidof "$BINARY" 2>/dev/null || true)
     if [ -n "$pids" ]; then

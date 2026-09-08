@@ -17,12 +17,76 @@ update-deps:
 	go mod tidy
 	@echo "[Deps] 完成。"
 
-# 格式化
-format:
+# 格式化（Go + 前端 + 配置 + 文档 + 脚本）
+format: format-go format-frontend format-yaml format-markdown format-shell
+
+# 格式化 Go 代码
+format-go:
+	@echo "[Format] 格式化后端文件 (GO)..."
 	gofmt -w -s .
 	go fmt ./...
 	go fix ./...
-	go vet ./...	
+	go vet ./...
+
+# 格式化前端文件（HTML/CSS/JS）
+# 使用 prettier，无需全局安装，npx 自动临时下载
+format-frontend:
+	@echo "[Format] 格式化前端文件 (HTML/CSS/JS)..."
+	@npx --yes prettier@latest \
+		--write \
+		--tab-width 2 \
+		--semi true \
+		--single-quote true \
+		--trailing-comma all \
+		--print-width 120 \
+		--html-whitespace-sensitivity css \
+		"internal/webui/www/**/*.{html,css,js}" \
+		|| echo "⚠️  prettier 格式化失败，请确认 npx 可用"
+	@echo "[Format] 前端格式化完成。"
+
+# 格式化 YAML 文件（.yaml/.yml）
+format-yaml:
+	@echo "[Format] 格式化配置文件 (YAML)…"
+	@npx --yes prettier@latest \
+		--write \
+		--tab-width 2 \
+		--single-quote true \
+		--trailing-comma all \
+		--print-width 120 \
+		"configs/**/*.{yaml,yml}" \
+		".cnb/**/*.{yaml,yml}" \
+		".cnb.yml" \
+		".nfpm.yaml" \
+		|| echo "⚠️  prettier 格式化失败，请确认 npx 可用"
+	@echo "[Format] YAML 格式化完成。"
+
+# 格式化 Markdown 文件（.md）
+format-markdown:
+	@echo "[Format] 格式化文档 (Markdown)…"
+	@npx --yes prettier@latest \
+		--write \
+		--tab-width 2 \
+		--print-width 120 \
+		--prose-wrap preserve \
+		"**/*.md" \
+		|| echo "⚠️  prettier 格式化失败，请确认 npx 可用"
+	@echo "[Format] Markdown 格式化完成。"
+
+# 格式化 Shell 脚本（.sh）
+# 使用 shfmt，需安装：go install mvdan.cc/sh/v3/cmd/shfmt@latest
+# 退化为 shellcheck 检查（仅警告，不自动修复）
+format-shell:
+	@echo "[Format] 格式化脚本 (Shell)…"
+	@command -v shfmt >/dev/null 2>&1 && { \
+		find . -name "*.sh" -not -path "./.git/*" -not -path "./vendor/*" -not -path "./node_modules/*" -exec shfmt -w -i 2 -ci -bn -s {} + ; \
+		echo "[Format] Shell 格式化完成（shfmt）。" ; \
+	} || { \
+		echo "⚠️  shfmt 未安装，尝试 shellcheck 检查…" ; \
+		command -v shellcheck >/dev/null 2>&1 && { \
+			find . -name "*.sh" -not -path "./.git/*" -not -path "./vendor/*" -not -path "./node_modules/*" -exec shellcheck -S warning {} + || true ; \
+			echo "[Format] Shell 检查完成（shellcheck，仅检查未修复）。" ; \
+		} || echo "⚠️  shfmt 和 shellcheck 均未安装，跳过 Shell 格式化。" ; \
+	}
 
 #####################
 ## 构建相关
@@ -137,6 +201,25 @@ define clean_binary
 	fi
 endef
 
+# 定义清理压缩包文件逻辑：删除 .tar.gz / .zip 压缩包
+# 参数 $(1) 为二进制文件路径（据此推导压缩包名）
+# 源文件命名规范: {binary-name}-{os}-{arch}[.exe]
+define clean_archive
+	@SOURCE_FILE=$(1); \
+	BIN_NAME=$$(basename "$${SOURCE_FILE}"); \
+	if echo "$${BIN_NAME}" | grep -q "\.exe$$"; then \
+		ARCHIVE_NAME="$(BUILD_DIR)/$${BIN_NAME}.zip"; \
+	else \
+		ARCHIVE_NAME="$(BUILD_DIR)/$${BIN_NAME}.tar.gz"; \
+	fi; \
+	if [ -f "$${ARCHIVE_NAME}" ]; then \
+		rm -f "$${ARCHIVE_NAME}"; \
+		echo "  🗑️  已清理压缩包: $${ARCHIVE_NAME}"; \
+	else \
+		echo "  ⏭️  未找到压缩包，跳过: $${ARCHIVE_NAME}"; \
+	fi
+endef
+
 # 版本信息（支持外部传入）
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
@@ -159,6 +242,8 @@ LDFLAGS = -s -w \
 # CGO_ENABLED=0: 禁用 CGO，实现完全静态链接
 # CGO_ENABLED=1: 启用 CGO，实现动态链接
 # -trimpath: 移除本地路径，保护隐私
+# -ldflags: 注入版本信息并移除符号表
+# 注意：-tags 由 build_binary 的 $(6) 参数动态拼接，此处不含
 BUILD_CMD = CGO_ENABLED=0 go build -trimpath -ldflags="$(LDFLAGS)"
 
 # 构建所有 Linux 平台
@@ -166,7 +251,7 @@ build-all: clean \
 	build-linux-amd64 \
 	build-linux-arm64
 
-# 构建 Linux 平台
+# 构建 Linux 平台（不带标签 + 带标签）
 build-linux-all: build-linux-amd64 build-linux-arm64
 
 clean:
@@ -174,8 +259,8 @@ clean:
 	@rm -rf $(BUILD_DIR)
 	@mkdir -p $(BUILD_DIR)
 
-# 定义构建单个二进制文件的通用逻辑
-# 参数: $(1)=GOOS, $(2)=GOARCH, $(3)=描述信息, $(4)=扩展名(.exe 或空), $(5)=额外 env (如 GOARM=7 GOMIPS=softfloat)
+# 定义构建单个二进制文件的通用逻辑（编译 + UPX + .tar.gz）
+# 参数: $(1)=GOOS, $(2)=GOARCH, $(3)=描述信息, $(4)=扩展名(.exe 或空), $(5)=额外 env (如 GOARM=7 GOMIPS=softfloat), $(6)=build tags (为空则无)
 define build_binary
 	@echo ""
 	@echo "┌────────────────────────────────────────────────────────────"
@@ -186,11 +271,26 @@ define build_binary
 	$(call archive_binary,./$(BUILD_DIR)/$(BINARY_NAME)-$(1)-$(2)$(4))
 endef
 
+# 定义构建带 tag 二进制文件的逻辑（编译 + UPX + .tar.gz，输出名带 tag 前缀）
+# 参数: $(1)=GOOS, $(2)=GOARCH, $(3)=描述信息, $(4)=tag 名
+# 输出名: $(BINARY_NAME)-$(4)-$(1)-$(2)
+define build_tag_binary
+	@echo ""
+	@echo "┌────────────────────────────────────────────────────────────"
+	@echo "│ [构建] $(3)"
+	@echo "└────────────────────────────────────────────────────────────"
+	@cd $(BUILD_SRC_DIR) && GOOS=$(1) GOARCH=$(2) $(BUILD_CMD) -tags "$(4)" -o $(CURDIR)/$(BUILD_DIR)/$(BINARY_NAME)-$(4)-$(1)-$(2) .
+	$(call compress_file,./$(BUILD_DIR)/$(BINARY_NAME)-$(4)-$(1)-$(2))
+	$(call archive_binary,./$(BUILD_DIR)/$(BINARY_NAME)-$(4)-$(1)-$(2))
+endef
+
 build-linux-amd64:
-	$(call build_binary,linux,amd64,Linux x86_64,,)
+	$(call build_binary,linux,amd64,Linux x86_64,,,)
+	$(call build_tag_binary,linux,amd64,Linux x86_64 带标签,$(BUILD_TAG))
 
 build-linux-arm64:
-	$(call build_binary,linux,arm64,Linux ARM64,,)
+	$(call build_binary,linux,arm64,Linux ARM64,,,)
+	$(call build_tag_binary,linux,arm64,Linux ARM64 带标签,$(BUILD_TAG))
 
 # 清理裸二进制（保留 .tar.gz 压缩包供自升级下载，上传前执行）
 .PHONY: clean-binaries
@@ -198,7 +298,23 @@ clean-binaries:
 	@echo "[清理] 删除裸二进制（保留 .tar.gz 与安装包）..."
 	$(call clean_binary,./$(BUILD_DIR)/$(BINARY_NAME)-linux-amd64)
 	$(call clean_binary,./$(BUILD_DIR)/$(BINARY_NAME)-linux-arm64)
-	@echo "✓ 清理完成（bin/ 保留 .tar.gz + deb/rpm/apk）"
+	$(call clean_binary,./$(BUILD_DIR)/$(BINARY_NAME)-$(BUILD_TAG)-linux-amd64)
+	$(call clean_binary,./$(BUILD_DIR)/$(BINARY_NAME)-$(BUILD_TAG)-linux-arm64)
+	@echo "✓ 清理完成（bin/ 保留 .tar.gz + 安装包）"
+
+# 清理裸二进制 + .tar.gz 压缩包（保留安装包，上传前执行）
+.PHONY: clean-archives
+clean-archives:
+	@echo "[清理] 删除裸二进制 + .tar.gz 压缩包（保留安装包）..."
+	$(call clean_binary,./$(BUILD_DIR)/$(BINARY_NAME)-linux-amd64)
+	$(call clean_binary,./$(BUILD_DIR)/$(BINARY_NAME)-linux-arm64)
+	$(call clean_binary,./$(BUILD_DIR)/$(BINARY_NAME)-$(BUILD_TAG)-linux-amd64)
+	$(call clean_binary,./$(BUILD_DIR)/$(BINARY_NAME)-$(BUILD_TAG)-linux-arm64)
+	$(call clean_archive,./$(BUILD_DIR)/$(BINARY_NAME)-linux-amd64)
+	$(call clean_archive,./$(BUILD_DIR)/$(BINARY_NAME)-linux-arm64)
+	$(call clean_archive,./$(BUILD_DIR)/$(BINARY_NAME)-$(BUILD_TAG)-linux-amd64)
+	$(call clean_archive,./$(BUILD_DIR)/$(BINARY_NAME)-$(BUILD_TAG)-linux-arm64)
+	@echo "✓ 清理完成（bin/ 保留安装包）"
 
 #####################
 ## 打包 (Linux deb/rpm/apk)
@@ -252,8 +368,47 @@ define package_nfpm_formats
 	@echo "✓ 包已创建 (deb/rpm/apk): $(BINARY_NAME)"
 endef
 
-# 各打包目标统一依赖一次性构建全部架构（避免重复编译）
-package-linux-deb package-linux-rpm package-linux-apk: build-linux-all
+# 打包目录（飞牛 fnOS 应用包源码目录）
+FPKG_DIR = fpkg
+# 构建 tag 名
+BUILD_TAG = fpk
+
+# 从 git log 自动生成 changelog 文本（取上一个 tag 到 HEAD 的提交摘要）
+# 如果没有上一个 tag，则取最近 20 条提交
+# 可通过环境变量 CHANGELOG 覆盖（CI 可注入 git log 或自定义文本）
+CHANGELOG ?= $(shell \
+	prev_tag=$$(git describe --tags --abbrev=0 2>/dev/null); \
+	if [ -n "$$prev_tag" ]; then \
+		git log --oneline --no-decorate "$$prev_tag"..HEAD 2>/dev/null; \
+	else \
+		git log --oneline --no-decorate -20 2>/dev/null; \
+	fi | head -20 | sed 's/^[a-f0-9]* //' | tr '\n' ';' | sed 's/;$$/./' \
+)
+
+# 打包（单架构）：复制已构建好的带 tag 二进制到 fpkg/app/，再 fnpack build
+# 带 tag 二进制由 build-linux-amd64/arm64 构建，此处只打包
+# manifest 中的 __VERSION__ 和 __CHANGELOG__ 占位符在打包时替换为实际值
+# 参数: $(1)=GOARCH
+define build_fpk
+	@echo ""
+	@echo "┌────────────────────────────────────────────────────────────"
+	@echo "│ [打包] 创建 fpk 包 ($(1))"
+	@echo "└────────────────────────────────────────────────────────────"
+	@mkdir -p $(FPKG_DIR)/app
+	@cp $(BUILD_DIR)/$(BINARY_NAME)-$(BUILD_TAG)-linux-$(1) $(FPKG_DIR)/app/$(BINARY_NAME)
+	@cp $(FPKG_DIR)/manifest $(FPKG_DIR)/manifest.bak
+	@sed 's|__VERSION__|$(VERSION)|g' $(FPKG_DIR)/manifest.bak > $(FPKG_DIR)/manifest.tmp
+	@sed "s|__CHANGELOG__|$(CHANGELOG)|g" $(FPKG_DIR)/manifest.tmp > $(FPKG_DIR)/manifest
+	@rm -f $(FPKG_DIR)/manifest.tmp
+	@cd $(FPKG_DIR) && fnpack build
+	@mv $(FPKG_DIR)/$(BINARY_NAME).fpk $(BUILD_DIR)/$(BINARY_NAME)-$(1).fpk
+	@rm -f $(FPKG_DIR)/app/$(BINARY_NAME)
+	@mv $(FPKG_DIR)/manifest.bak $(FPKG_DIR)/manifest
+	@echo "✓ fpk 包已创建: $(BUILD_DIR)/$(BINARY_NAME)-$(1).fpk"
+endef
+
+# deb/rpm/apk/fpk 都复用 build-linux-all 的二进制（不带标签 + 带标签）
+package-linux-deb package-linux-rpm package-linux-apk package-linux-fpk: build-linux-all
 
 # 打包 Linux deb（全部 2 架构）
 .PHONY: package-linux-deb
@@ -285,12 +440,22 @@ package-linux-apk:
 	$(call package_nfpm_formats,amd64,amd64,amd64,x86_64)
 	$(call package_nfpm_formats,arm64,arm64,arm64,aarch64)
 
+# 打包 Linux fpk（FnOS，全部 2 架构）
+.PHONY: package-linux-fpk
+package-linux-fpk:
+	@echo ""
+	@echo "┌────────────────────────────────────────────────────────────"
+	@echo "│ [打包] 创建 Linux fpk 包 (amd64/arm64)..."
+	@echo "└────────────────────────────────────────────────────────────"
+	$(call build_fpk,amd64)
+	$(call build_fpk,arm64)
+
 # 打包所有 Linux deb/rpm/apk 包（构建一次，各格式复用）
 .PHONY: package-linux-all
-package-linux-all: package-linux-deb package-linux-rpm package-linux-apk
+package-linux-all: package-linux-deb package-linux-rpm package-linux-apk package-linux-fpk
 	@echo ""
 	@echo "╔════════════════════════════════════════════════════════════"
-	@echo "║ ✓ 所有包已创建 (deb/rpm/apk, 多架构)"
+	@echo "║ ✓ 所有包已创建 (deb/rpm/apk/fpk, 多架构)"
 	@echo "╚════════════════════════════════════════════════════════════"
 
 # 打包所有 Linux 包（deb/rpm/apk）

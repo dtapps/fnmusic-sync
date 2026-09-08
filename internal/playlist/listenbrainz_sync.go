@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"cnb.cool/dtapp/fnmusic-sync/internal/buildinfo"
 	"cnb.cool/dtapp/fnmusic-sync/internal/config"
 	"cnb.cool/dtapp/fnmusic-sync/internal/feiniu"
 	"cnb.cool/dtapp/fnmusic-sync/internal/scrobbler"
@@ -124,7 +125,7 @@ func (s *SyncService) syncUser(
 	)
 
 	// 创建飞牛音乐 API 客户端（直接使用传入的 token）
-	apiClient := feiniu.NewClient(s.cfg.Server.UpstreamSocket, token, s.logger, s.feiniuReqLog)
+	apiClient := feiniu.NewClient(buildinfo.DefaultUpstreamSocket, token, s.logger, s.feiniuReqLog)
 
 	// 第一步：获取飞牛音乐曲目列表，建立索引
 	s.logger.Info("正在获取飞牛音乐曲目列表",

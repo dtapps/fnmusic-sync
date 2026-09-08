@@ -12,6 +12,7 @@ import (
 	"net/http/httputil"
 	"os"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"cnb.cool/dtapp/fnmusic-sync/internal/playback"
@@ -50,7 +51,7 @@ type Config struct {
 	// 用于把"是否启用各平台"写入该用户的状态文件。
 	ProviderStatus func(username string) (lastfm, listenBrainz bool)
 
-	// LogDir 日志目录，debug 模式下抓包日志写入此目录。
+	// LogDir 日志目录，抓包日志写入此目录。
 	LogDir string
 	// LogMaxSize 抓包日志单文件大小上限(MB)，复用主日志配置。
 	LogMaxSize int
@@ -60,6 +61,9 @@ type Config struct {
 	LogMaxAge int
 	// LogCompress 抓包日志是否压缩，复用主日志配置。
 	LogCompress bool
+	// CaptureEnabled 控制抓包日志（capture.log）的开关，
+	// 由 --debug flag 控制。
+	CaptureEnabled *atomic.Bool
 }
 
 type Proxy struct {
@@ -116,7 +120,7 @@ func New(
 		p.cfg.ProviderStatus,
 	)
 
-	p.capture = NewCaptureLogger(cfg.LogDir, cfg.LogMaxSize, cfg.LogMaxBackups, cfg.LogMaxAge, cfg.LogCompress)
+	p.capture = NewCaptureLogger(cfg.LogDir, cfg.LogMaxSize, cfg.LogMaxBackups, cfg.LogMaxAge, cfg.LogCompress, cfg.CaptureEnabled)
 
 	// 播放识别 → scrobble 推送。
 	p.detector = playback.NewDetector(manager, logger)
@@ -221,7 +225,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// debug + capture 启用时，创建一条抓包记录（请求部分先暂存，响应返回时合并写出，
 	// 保证请求/响应成对成块，并发下不交错）。连接断开等未走到响应的情况由 defer 兜底写出。
-	if p.logger.Enabled(r.Context(), slog.LevelDebug) && p.capture != nil && !stream {
+	if p.capture != nil && !stream {
 		if entry := p.capture.Begin(r.Method, r.URL.Path, r.URL.RawQuery, r.Header, body); entry != nil {
 			r = r.WithContext(context.WithValue(r.Context(), captureEntryKey{}, entry))
 			defer entry.Finish(0, nil, nil, 0) // 兜底：响应未正常返回时仍写出请求部分
@@ -454,9 +458,9 @@ func (p *Proxy) modifyResponse(resp *http.Response) error {
 		"响应头", redactHeaders(resp.Header),
 	}
 
-	// 仅 debug 时才读取/搬运响应 body：否则每个响应都多一次 I/O，非 debug 下毫无必要。
-	// debug + capture 可用时，完整响应写入 capture.log，主日志不再打印响应体。
-	if p.logger.Enabled(resp.Request.Context(), slog.LevelDebug) {
+	// 仅开启请求日志时才读取/搬运响应 body：否则每个响应都多一次 I/O，非 debug 下毫无必要。
+	// capture 可用时，完整响应写入 capture.log，主日志不再打印响应体。
+	if p.capture != nil && p.capture.enabled != nil && p.capture.enabled.Load() {
 		ct := resp.Header.Get("Content-Type")
 		if !isPlaybackPath(resp.Request.URL.Path) &&
 			(strings.Contains(ct, "application/json") || strings.Contains(ct, "text/")) {

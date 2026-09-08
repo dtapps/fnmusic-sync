@@ -30,3 +30,11 @@ var BinaryName = "fnmusic-sync"
 func UserAgent() string {
 	return "cnb.cool/dtapp/fnmusic-sync/" + Version
 }
+
+// DefaultListenSocket 飞牛音乐监听 Unix Socket 路径（固定值，不可自定义）。
+// nginx ──► /var/run/trim_music.socket ──► Go Proxy
+const DefaultListenSocket = "/var/run/trim_music.socket"
+
+// DefaultUpstreamSocket 飞牛音乐上游 Unix Socket 路径（固定值，不可自定义）。
+// Go Proxy ──► /var/run/trim_music_upstream.socket ──► trim-music
+const DefaultUpstreamSocket = "/var/run/trim_music_upstream.socket"

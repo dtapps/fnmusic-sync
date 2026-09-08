@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"errors"
-	"flag"
 	"fmt"
 	"log/slog"
 	"os"
@@ -11,6 +10,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -24,105 +24,43 @@ import (
 )
 
 const (
-	defaultListenSocket   = "/var/run/trim_music.socket"
-	defaultUpstreamSocket = "/var/run/trim_music_upstream.socket"
-	defaultUpstreamWait   = 30 * time.Second
-	defaultConfigPath     = "/etc/fnmusic-sync/config.yaml"
-	defaultStatePath      = "/var/lib/fnmusic-sync/state.yaml"
-	defaultRunLockPath    = "/run/fnmusic-sync/run.lock"
+	// defaultUpstreamWait 等待上游 socket 就绪的超时时间。
+	defaultUpstreamWait = 30 * time.Second
 )
 
-type options struct {
-	check    bool
-	debug    bool
-	listen   string
-	upstream string
-	wait     time.Duration
-	config   string
-	state    string
-	logDir   string
-}
+// rt 在 main 启动时一次性检测，后续所有函数共用。
+var rt = detectRuntime()
 
 func main() {
-	// 子命令：固定位置参数，不参与 flag 解析。
-	if len(os.Args) > 1 {
-		switch os.Args[1] {
-		case "self-upgrade", "upgrade", "-u", "--self-upgrade":
-			handleSelfUpgrade()
-
-			return
-		case "version", "version-info", "-v", "--version":
-			printVersion()
-
-			return
-		case "service", "svc", "-s", "--service":
-			handleService(os.Args[2:])
-
-			return
-		}
+	if err := rootCmd.Execute(); err != nil {
+		fmt.Fprintf(os.Stderr, "❌ %v\n", err)
+		os.Exit(1)
 	}
+}
 
-	opts := options{
-		wait: defaultUpstreamWait,
-	}
-
-	defineFlags(&opts)
-	flag.Parse()
+// runProxy 是根命令的代理模式入口（不带子命令直接运行）。
+// 构造 logger 并启动代理服务。
+func runProxy() error {
+	opts := proxyFlags
 
 	// logger 必须先于 run 构造（run 内所有日志都用它），故此处预读一次配置：
 	// 日志目录固定、文件名固定，配置里只有级别与轮转策略（见 logging.go）。
 	logCfg := config.DefaultLogging()
 
-	if pre, perr := config.Load(opts.config); perr == nil {
+	if pre, perr := config.Load(rt.ConfigPath); perr == nil {
 		logCfg = pre.Logging
 	}
 
-	logger, levelVar, closeLog := newLogger(&opts, logCfg)
+	logger, levelVar, closeLog := newLogger(logCfg)
 	defer closeLog()
 
-	if err := run(opts, logger, levelVar); err != nil {
-		logger.Error("启动失败", "错误", err)
-
-		closeLog()
-
-		os.Exit(1)
-	}
+	return run(opts.check, opts.debug, opts.wait.Duration, logger, levelVar)
 }
 
-// defineFlags 注册命令行参数；--help 里一并列出子命令。
-func defineFlags(opts *options) {
-	flag.BoolVar(&opts.check, "check", false,
-		"只检查 socket 与 upstream 状态，不启动代理")
-	flag.BoolVar(&opts.debug, "debug", opts.debug,
-		"打印每个请求/响应的详细信息")
-	flag.StringVar(&opts.listen, "listen", opts.listen,
-		"代理监听的 unix socket（覆盖配置文件 server.listen_socket）")
-	flag.StringVar(&opts.upstream, "upstream", opts.upstream,
-		"官方 trim-music 的 unix socket（覆盖配置文件 server.upstream_socket）")
-	flag.DurationVar(&opts.wait, "upstream-wait", opts.wait,
-		"启动时等待官方后端就绪的超时时间")
-	flag.StringVar(&opts.config, "config",
-		defaultConfigPath,
-		"配置文件路径（yaml）")
-	flag.StringVar(&opts.state, "state",
-		defaultStatePath,
-		"用户状态文件路径（程序维护，记录各用户推送统计）")
-	flag.StringVar(&opts.logDir, "log-dir", opts.logDir,
-		"日志保存目录（默认 "+defaultLogDir+"，off 表示只输出控制台，不写文件）")
-
-	flag.Usage = func() {
-		out := flag.CommandLine.Output()
-
-		fmt.Fprintf(out, "用法：\n  %s [子命令] [参数]\n\n子命令：\n", buildinfo.BinaryName)
-		fmt.Fprint(out, "  version (-v | --version)       打印版本、Git 提交、构建时间与平台信息\n")
-		fmt.Fprint(out, "  self-upgrade (-u | upgrade)    升级自身二进制到仓库最新版本（写安装目录通常需要 sudo）\n")
-		fmt.Fprint(out, "  service (-s | svc)             安装/卸载/启停系统服务（install|uninstall|start|stop|restart|status，需 root）\n\n参数：\n")
-
-		flag.PrintDefaults()
-	}
-}
-
-func run(opts options, logger *slog.Logger, levelVar *slog.LevelVar) error {
+// run 启动代理服务的完整流程。
+// debug 参数控制请求日志（capture/feiniu/lastfm/listenbrainz）的开关，
+// 不影响 slog 主日志级别（由配置文件 logging.level 控制）。
+func run(doCheck, debug bool, wait time.Duration, logger *slog.Logger, levelVar *slog.LevelVar) error {
 	// 启动先打一行版本信息，日志里就能直接看出跑的是哪个包、什么时候编的。
 	logger.Info("版本信息",
 		"版本", buildinfo.Version,
@@ -131,46 +69,44 @@ func run(opts options, logger *slog.Logger, levelVar *slog.LevelVar) error {
 		"构建时间(本地)", localBuildTime(),
 		"Go版本", runtime.Version(),
 		"平台", runtime.GOOS+"/"+runtime.GOARCH,
+		"运行模式", rt.Mode.modeName(),
 	)
 
 	// 首次启动若没有配置文件：自动生成一份带示例的默认配置，便于直接编辑；
 	// 生成失败（如权限不足）则降级为纯代理模式并告警，不退出。
-	if opts.config != "" {
-		if _, statErr := os.Stat(opts.config); statErr != nil {
-			if werr := config.SaveDefault(opts.config); werr != nil {
-				logger.Warn("未找到配置文件且无法自动创建，使用内置默认配置（纯代理模式，不推送 scrobble）",
-					"路径", opts.config, "错误", werr, "示例", "configs/config.example.yaml")
-			} else {
-				logger.Info("已生成默认配置文件，编辑后程序会自动热加载",
-					"路径", opts.config, "示例", "configs/config.example.yaml")
-			}
+	if _, statErr := os.Stat(rt.ConfigPath); statErr != nil {
+		if werr := config.SaveDefault(rt.ConfigPath); werr != nil {
+			logger.Warn("未找到配置文件且无法自动创建，使用内置默认配置（纯代理模式，不推送 scrobble）",
+				"路径", rt.ConfigPath, "错误", werr, "示例", "configs/config.example.yaml")
+		} else {
+			logger.Info("已生成默认配置文件，编辑后程序会自动热加载",
+				"路径", rt.ConfigPath, "示例", "configs/config.example.yaml")
 		}
 	}
 
-	appCfg, err := config.Load(opts.config)
+	appCfg, err := config.Load(rt.ConfigPath)
 	if err != nil {
 		return err
 	}
 
-	// socket 路径优先级：命令行 --listen/--upstream > 配置文件 > 内置默认。
-	listen := resolveSocket(opts.listen, appCfg.Server.ListenSocket, defaultListenSocket)
-	upstream := resolveSocket(opts.upstream, appCfg.Server.UpstreamSocket, defaultUpstreamSocket)
-	wait := opts.wait
+	// socket 路径固定，不可自定义。
+	listen := buildinfo.DefaultListenSocket
+	upstream := buildinfo.DefaultUpstreamSocket
 	if d, perr := time.ParseDuration(appCfg.Server.UpstreamWait); perr == nil {
 		wait = d
 	}
 
-	// 解析实际日志目录，供主日志与抓包日志共用：
-	// 空值回退到默认目录（与 setupLogger 一致）；off/none/- 禁用文件日志，抓包也不写。
-	logDir := opts.logDir
-	if logDir == "" {
-		logDir = defaultLogDir
-	}
+	// 日志目录由运行模式决定，不可自定义。
+	logDir := rt.LogDir
 	if logDisabled(logDir) {
 		logDir = ""
 	}
 
-	if opts.check {
+	// 抓包/请求日志开关：仅由 --debug flag 控制，与 slog 级别完全解耦。
+	captureEnabled := atomic.Bool{}
+	captureEnabled.Store(debug)
+
+	if doCheck {
 		cfg := proxy.Config{
 			ListenSocket:   listen,
 			UpstreamSocket: upstream,
@@ -180,6 +116,7 @@ func run(opts options, logger *slog.Logger, levelVar *slog.LevelVar) error {
 			LogMaxBackups:  appCfg.Logging.MaxBackups,
 			LogMaxAge:      appCfg.Logging.MaxAge,
 			LogCompress:    appCfg.Logging.Compress,
+			CaptureEnabled: &captureEnabled,
 		}
 
 		p := proxy.New(cfg, playback.NewManager(map[string][]scrobbler.Scrobbler{}, logger), logger)
@@ -187,7 +124,7 @@ func run(opts options, logger *slog.Logger, levelVar *slog.LevelVar) error {
 		return check(context.Background(), listen, upstream, p, logger)
 	}
 
-	store := playback.NewUserStore(opts.state, logger)
+	store := playback.NewUserStore(rt.StatePath, logger)
 
 	manager := playback.NewManager(nil, logger)
 	manager.SetScrobbledHook(func(username, provider string) {
@@ -209,13 +146,14 @@ func run(opts options, logger *slog.Logger, levelVar *slog.LevelVar) error {
 		LogMaxBackups:  appCfg.Logging.MaxBackups,
 		LogMaxAge:      appCfg.Logging.MaxAge,
 		LogCompress:    appCfg.Logging.Compress,
+		CaptureEnabled: &captureEnabled,
 	}
 
 	// 创建三个客户端各自的请求日志记录器，格式与 capture.log 一致，仅文件名不同。
 	// 复用主日志的轮转配置（大小/份数/天数/压缩）。
-	feiniuReqLog := reqlog.New(logDir, "feiniu.log", appCfg.Logging.MaxSize, appCfg.Logging.MaxBackups, appCfg.Logging.MaxAge, appCfg.Logging.Compress, levelVar)
-	lfReqLog := reqlog.New(logDir, "lastfm.log", appCfg.Logging.MaxSize, appCfg.Logging.MaxBackups, appCfg.Logging.MaxAge, appCfg.Logging.Compress, levelVar)
-	lbReqLog := reqlog.New(logDir, "listenbrainz.log", appCfg.Logging.MaxSize, appCfg.Logging.MaxBackups, appCfg.Logging.MaxAge, appCfg.Logging.Compress, levelVar)
+	feiniuReqLog := reqlog.New(logDir, "feiniu.log", appCfg.Logging.MaxSize, appCfg.Logging.MaxBackups, appCfg.Logging.MaxAge, appCfg.Logging.Compress, &captureEnabled)
+	lfReqLog := reqlog.New(logDir, "lastfm.log", appCfg.Logging.MaxSize, appCfg.Logging.MaxBackups, appCfg.Logging.MaxAge, appCfg.Logging.Compress, &captureEnabled)
+	lbReqLog := reqlog.New(logDir, "listenbrainz.log", appCfg.Logging.MaxSize, appCfg.Logging.MaxBackups, appCfg.Logging.MaxAge, appCfg.Logging.Compress, &captureEnabled)
 	defer feiniuReqLog.Close()
 	defer lfReqLog.Close()
 	defer lbReqLog.Close()
@@ -233,7 +171,8 @@ func run(opts options, logger *slog.Logger, levelVar *slog.LevelVar) error {
 
 		manager.UpdateProviders(buildUserProviders(c, logger, lfReqLog, lbReqLog))
 		manager.SetScrobbleThreshold(c.Playback.ScrobbleThreshold)
-		levelVar.Set(parseLevel(c, opts.debug))
+		levelVar.Set(parseLevel(c))
+		captureEnabled.Store(debug)
 		playlistSync.UpdateConfig(c)
 
 		for name, u := range c.Users {
@@ -248,19 +187,17 @@ func run(opts options, logger *slog.Logger, levelVar *slog.LevelVar) error {
 	applyConfig(appCfg)
 
 	// 监听配置文件变化，热更新（修改 users 凭证 / 日志级别无需重启）。
-	if opts.config != "" {
-		if err := config.Watch(
-			opts.config,
-			func(c *config.Config) {
-				logger.Info("配置热更新")
-				applyConfig(c)
-			},
-			func(e error) {
-				logger.Warn("配置热更新失败，沿用旧配置", "错误", e)
-			},
-		); err != nil {
-			logger.Warn("配置监听启动失败，将不会热更新", "错误", err)
-		}
+	if err := config.Watch(
+		rt.ConfigPath,
+		func(c *config.Config) {
+			logger.Info("配置热更新")
+			applyConfig(c)
+		},
+		func(e error) {
+			logger.Warn("配置热更新失败，沿用旧配置", "错误", e)
+		},
+	); err != nil {
+		logger.Warn("配置监听启动失败，将不会热更新", "错误", err)
 	}
 
 	// Last.fm 授权辅助：对"已启用且填了 api_key/api_secret 但缺 session_key"的用户，
@@ -268,7 +205,7 @@ func run(opts options, logger *slog.Logger, levelVar *slog.LevelVar) error {
 	for name, u := range appCfg.Users {
 		lfm := u.LastFM
 		if lfm.Enabled && lfm.APIKey != "" && lfm.APISecret != "" && lfm.SessionKey == "" {
-			go startLastFMAuth(name, lfm.APIKey, lfm.APISecret, opts.config, logger, lfReqLog)
+			go startLastFMAuth(name, lfm.APIKey, lfm.APISecret, rt.ConfigPath, logger, lfReqLog)
 		}
 	}
 
@@ -277,7 +214,7 @@ func run(opts options, logger *slog.Logger, levelVar *slog.LevelVar) error {
 	for name, u := range appCfg.Users {
 		lb := u.ListenBrainz
 		if lb.Enabled && lb.Token != "" && lb.Username == "" {
-			go startListenBrainzUsernameLookup(name, lb.Token, opts.config, logger, lbReqLog)
+			go startListenBrainzUsernameLookup(name, lb.Token, rt.ConfigPath, logger, lbReqLog)
 		}
 	}
 
@@ -294,7 +231,7 @@ func run(opts options, logger *slog.Logger, levelVar *slog.LevelVar) error {
 	lock, occupied, lockErr := acquireRunLock()
 	if occupied {
 		return fmt.Errorf("已有实例在运行，拒绝重复启动（lock=%s）。请先停止现有实例：%s service stop",
-			defaultRunLockPath, buildinfo.BinaryName)
+			rt.RunLockPath, buildinfo.BinaryName)
 	}
 	if lockErr != nil {
 		logger.Warn("无法获取运行锁，跳过单实例保护（可能权限不足）", "错误", lockErr)
@@ -307,9 +244,10 @@ func run(opts options, logger *slog.Logger, levelVar *slog.LevelVar) error {
 	logger.Info("启动配置",
 		"监听", cfg.ListenSocket,
 		"上游", cfg.UpstreamSocket,
-		"调试", opts.debug,
-		"配置", opts.config,
-		"状态文件", opts.state,
+		"调试", debug,
+		"配置", rt.ConfigPath,
+		"状态文件", rt.StatePath,
+		"日志目录", rt.LogDir,
 		"进程号", os.Getpid(),
 	)
 
@@ -343,6 +281,14 @@ func run(opts options, logger *slog.Logger, levelVar *slog.LevelVar) error {
 	playlistSync.Start()
 	defer playlistSync.Stop()
 
+	// fpk 模式：启动 Web UI（统一网关监听 app.sock）
+	webUI, webUIErr := startWebUI(logger)
+	if webUIErr != nil {
+		logger.Warn("Web UI 启动失败（不影响代理功能）", "错误", webUIErr)
+	} else if webUI != nil {
+		defer webUI.Stop()
+	}
+
 	defer p.Close()
 
 	// 启动代理
@@ -354,24 +300,24 @@ func run(opts options, logger *slog.Logger, levelVar *slog.LevelVar) error {
 //   - occupied=true：锁已被其它实例持有，应视为"已在运行"拒绝启动；
 //   - err!=nil 且 occupied=false：通常是锁目录无权限（如本地非 root 调试），降级放行。
 func acquireRunLock() (lock *os.File, occupied bool, err error) {
-	dir := filepath.Dir(defaultRunLockPath)
+	dir := filepath.Dir(rt.RunLockPath)
 	if mkErr := os.MkdirAll(dir, 0o755); mkErr != nil {
 		return nil, false, fmt.Errorf("创建锁目录失败 %s: %w", dir, mkErr)
 	}
 
-	f, openErr := os.OpenFile(defaultRunLockPath, os.O_CREATE|os.O_RDWR, 0o644)
+	f, openErr := os.OpenFile(rt.RunLockPath, os.O_CREATE|os.O_RDWR, 0o644)
 	if openErr != nil {
-		return nil, false, fmt.Errorf("打开锁文件失败 %s: %w", defaultRunLockPath, openErr)
+		return nil, false, fmt.Errorf("打开锁文件失败 %s: %w", rt.RunLockPath, openErr)
 	}
 
 	if flockErr := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); flockErr != nil {
 		_ = f.Close()
 
 		if errors.Is(flockErr, syscall.EWOULDBLOCK) {
-			return nil, true, fmt.Errorf("锁已被其它实例持有 %s", defaultRunLockPath)
+			return nil, true, fmt.Errorf("锁已被其它实例持有 %s", rt.RunLockPath)
 		}
 
-		return nil, false, fmt.Errorf("加锁失败 %s: %w", defaultRunLockPath, flockErr)
+		return nil, false, fmt.Errorf("加锁失败 %s: %w", rt.RunLockPath, flockErr)
 	}
 
 	// 记录当前 PID，便于排查（仅信息用途，真正互斥靠 flock）。

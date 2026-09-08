@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"cnb.cool/dtapp/fnmusic-sync/internal/buildinfo"
 	"cnb.cool/dtapp/fnmusic-sync/internal/config"
 	"cnb.cool/dtapp/fnmusic-sync/internal/feiniu"
 	"cnb.cool/dtapp/fnmusic-sync/internal/lastfm"
@@ -39,7 +40,7 @@ func (s *SyncService) syncLastFMUser(ctx context.Context, token string, username
 		return nil
 	}
 	s.logger.Info("开始 Last.fm 智能歌单同步", "用户", username, "用户标识", strutil.FirstN8(token), "lastfm用户", lfm.Username)
-	apiClient := feiniu.NewClient(s.cfg.Server.UpstreamSocket, token, s.logger, s.feiniuReqLog)
+	apiClient := feiniu.NewClient(buildinfo.DefaultUpstreamSocket, token, s.logger, s.feiniuReqLog)
 	s.logger.Info("正在获取飞牛音乐曲目列表", "用户", username, "用户标识", strutil.FirstN8(token))
 	indexes, err := apiClient.BuildTrackIndexes(ctx)
 	if err != nil {

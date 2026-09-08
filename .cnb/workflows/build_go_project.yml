@@ -21,6 +21,9 @@
         - name: 验证 nfpm 工具
           script: nfpm --version
 
+        - name: 验证 fnpack 工具
+          script: fnpack --help
+
         - name: 处理版本号与预发布选项
           script: |
             echo "原始 version: $version"
@@ -55,11 +58,14 @@
         # - name: 构建 Linux 平台二进制文件
         #   script: VERSION=${INTERIOR_VERSION} make build-linux-all
 
-        - name: 打包 Linux 安装包（deb / rpm / apk）
+        - name: 打包 Linux 安装包（deb / rpm / apk / fpk）
           script: VERSION=${INTERIOR_VERSION} make package-linux-all
 
-        - name: 清理二进制文件
-          script: make clean-binaries
+        # - name: 清理二进制文件
+        #   script: make clean-binaries
+
+        - name: 清理二进制文件 + .tar.gz 压缩包
+          script: make clean-archives
 
         # https://docs.cnb.cool/zh/plugin/public/cnbcool/changelog.html
         - name: 生成 Release 日志
@@ -127,6 +133,9 @@
                   *.apk)
                     ARCH="${fname#fnmusic-sync.}"; ARCH="${ARCH%.apk}"
                     DESC="Alpine 安装包" ;;
+                  *.fpk)
+                    ARCH="${fname#fnmusic-sync-}"; ARCH="${ARCH%.fpk}"
+                    DESC="飞牛 fnOS 应用包" ;;
                 esac
 
                 echo "| ${PLAT} | ${ARCH} | [${fname}](${DL_BASE}/${fname}) | ${fsize} | ${DESC} |"

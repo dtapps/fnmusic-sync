@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"cnb.cool/dtapp/fnmusic-sync/internal/buildinfo"
+	"cnb.cool/dtapp/fnmusic-sync/internal/strutil"
 )
 
 // 构建时间的解析格式（全部用 time 包自带常量拼接，不写魔法字符串），
@@ -41,25 +42,50 @@ func localBuildTime() string {
 
 // printVersion 打印版本与构建信息（version 子命令）。
 // 版本/提交/构建时间由 Makefile 通过 -ldflags 注入，本地直接 go build 时为 dev。
+// 标签列按显示宽度对齐（中文字符占 2 列），值列左对齐。
 func printVersion() {
-	fmt.Printf("%s %s\n", buildinfo.BinaryName, buildinfo.Version)
-	fmt.Printf("  版本      %s\n", buildinfo.Version)
-	fmt.Printf("  Git提交   %s\n", buildinfo.GitCommit)
-	fmt.Printf("  构建时间  %s", buildinfo.BuildTime)
+	// 标签 → 值
+	type kv struct{ label, value string }
 
-	if local := localBuildTime(); local != buildinfo.BuildTime {
-		fmt.Printf("（本地 %s）", local)
+	rows := []kv{
+		{"版本", buildinfo.Version},
+		{"Git提交", buildinfo.GitCommit},
 	}
 
-	fmt.Println()
+	// 构建时间行需要特殊处理（可能附"（本地 …）"）
+	buildTimeVal := buildinfo.BuildTime
+	if local := localBuildTime(); local != buildinfo.BuildTime {
+		buildTimeVal = buildinfo.BuildTime + "（本地 " + local + "）"
+	}
+	rows = append(rows, kv{"构建时间", buildTimeVal})
 
-	fmt.Printf("  Go版本    %s\n", runtime.Version())
-	fmt.Printf("  平台      %s/%s\n", runtime.GOOS, runtime.GOARCH)
-	fmt.Printf("  配置      %s\n", defaultConfigPath)
-	fmt.Printf("  状态      %s\n", defaultStatePath)
-	fmt.Printf("  日志      %s\n", filepath.Join(defaultLogDir, defaultLogFile))
+	rows = append(rows,
+		kv{"Go版本", runtime.Version()},
+		kv{"平台", runtime.GOOS + "/" + runtime.GOARCH},
+		kv{"运行模式", rt.Mode.modeName()},
+		kv{"监听Socket", buildinfo.DefaultListenSocket},
+		kv{"上游Socket", buildinfo.DefaultUpstreamSocket},
+		kv{"配置", rt.ConfigPath},
+		kv{"状态", rt.StatePath},
+		kv{"日志", filepath.Join(rt.LogDir, defaultLogFile)},
+	)
 
 	if buildinfo.Version == "dev" {
-		fmt.Println("  说明      本地构建（未注入发布版本号）")
+		rows = append(rows, kv{"说明", "本地构建（未注入发布版本号）"})
+	}
+
+	// 计算最长标签的显示宽度，值列对齐到该位置
+	maxLabelWidth := 0
+	for _, r := range rows {
+		if w := strutil.DisplayWidth(r.label); w > maxLabelWidth {
+			maxLabelWidth = w
+		}
+	}
+
+	// 输出
+	fmt.Printf("%s %s\n", buildinfo.BinaryName, buildinfo.Version)
+	for _, r := range rows {
+		padded := strutil.PadRight(r.label, maxLabelWidth)
+		fmt.Printf("  %s  %s\n", padded, r.value)
 	}
 }

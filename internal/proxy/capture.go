@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"gopkg.in/natefinch/lumberjack.v2"
@@ -27,17 +28,20 @@ const captureLogFile = "capture.log"
 const defaultCaptureLogDir = "/var/log/fnmusic-sync"
 
 // CaptureLogger 请求抓包日志写入器（异步排队、完整记录）。
+// 通过 enabled 标志控制是否记录，与 slog 级别解耦。
 type CaptureLogger struct {
 	rotator *lumberjack.Logger
 	ch      chan []byte
 	stop    chan struct{}
 	wg      sync.WaitGroup
+	enabled *atomic.Bool
 }
 
 // NewCaptureLogger 创建抓包日志写入器。
 // dir 为空回退到默认目录（与 setupLogger 一致）；off/none/- 禁用文件日志返回 nil。
 // dir 不可写时返回 nil，调用方判断 nil 跳过抓包。
-func NewCaptureLogger(dir string, maxSize, maxBackups, maxAge int, compress bool) *CaptureLogger {
+// enabled 控制是否记录的原子标志，由外部（--debug 或配置热更新）设置。
+func NewCaptureLogger(dir string, maxSize, maxBackups, maxAge int, compress bool, enabled *atomic.Bool) *CaptureLogger {
 	switch strings.ToLower(strings.TrimSpace(dir)) {
 	case "off", "none", "-":
 		return nil
@@ -61,8 +65,9 @@ func NewCaptureLogger(dir string, maxSize, maxBackups, maxAge int, compress bool
 			LocalTime:  true,
 		},
 		// 缓冲较大，正常情况发送方不阻塞；worker 消费极快。
-		ch:   make(chan []byte, 4096),
-		stop: make(chan struct{}),
+		ch:      make(chan []byte, 4096),
+		stop:    make(chan struct{}),
+		enabled: enabled,
 	}
 
 	// 立即投递启动标记，便于确认抓包日志已就绪（异步写出，不阻塞请求处理）。
@@ -120,9 +125,13 @@ type captureEntry struct {
 }
 
 // Begin 在请求进入时创建一条抓包记录（仅暂存请求部分，不写出）。
+// 仅在 enabled 标志为 true 时才创建，其他情况返回 nil。
 // capture 不可用时返回 nil，调用方可直接忽略后续 Finish。
 func (c *CaptureLogger) Begin(method, path, query string, header http.Header, body []byte) *captureEntry {
 	if c == nil || c.rotator == nil {
+		return nil
+	}
+	if c.enabled != nil && !c.enabled.Load() {
 		return nil
 	}
 	return &captureEntry{c: c, method: method, path: path, query: query, reqHeader: header, reqBody: body}

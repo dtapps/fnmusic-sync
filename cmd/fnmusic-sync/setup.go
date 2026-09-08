@@ -69,19 +69,6 @@ func providerStatusOf(cfg *config.Config) func(username string) (bool, bool) {
 	}
 }
 
-// resolveSocket 解析 socket 路径：命令行优先，其次配置文件，最后内置默认。
-func resolveSocket(flagVal, cfgVal, fallback string) string {
-	if flagVal != "" {
-		return flagVal
-	}
-
-	if cfgVal != "" {
-		return cfgVal
-	}
-
-	return fallback
-}
-
 // socketModeFromConfig 从配置文件的 server.socket_mode 取 socket 权限。
 // 为 0 时由 takeover 的 effectiveMode 自动推断（继承官方 socket 权限）。
 func socketModeFromConfig(cfg *config.Config) os.FileMode {

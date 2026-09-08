@@ -11,12 +11,12 @@ package reqlog
 import (
 	"bytes"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"gopkg.in/natefinch/lumberjack.v2"
@@ -28,25 +28,25 @@ const defaultLogDir = "/var/log/fnmusic-sync"
 // Logger 请求日志写入器（异步排队、完整记录）。
 // 格式与 proxy.CaptureLogger 一致：请求+响应成对成块、敏感头打码、body 截断。
 //
-// 仅在日志级别为 debug 时才记录请求/响应（与 capture.log 条件一致），
-// 通过 levelVar 实时判断，支持配置热更新后自动生效。
+// 通过 enabled 标志控制是否记录，与 slog 级别解耦：
+// 由 --debug flag 开启。
 type Logger struct {
-	rotator  *lumberjack.Logger
-	ch       chan []byte
-	stop     chan struct{}
-	wg       sync.WaitGroup
-	levelVar *slog.LevelVar
+	rotator *lumberjack.Logger
+	ch      chan []byte
+	stop    chan struct{}
+	wg      sync.WaitGroup
+	enabled *atomic.Bool
 }
 
 // New 创建请求日志写入器。
 //   - dir 日志目录，为空回退到默认目录；off/none/- 禁用文件日志返回 nil。
 //   - filename 日志文件名（如 feiniu.log、lastfm.log、listenbrainz.log）。
 //   - maxSize/maxBackups/maxAge/compress 复用主日志的轮转配置。
-//   - levelVar 主日志的级别变量，用于实时判断是否 debug 级别。
-//     nil 时始终记录（不按级别过滤）。
+//   - enabled 控制是否记录的原子标志，由外部（--debug 或配置热更新）设置。
+//     为 nil 时始终记录。
 //
 // dir 不可写时返回 nil，调用方判断 nil 跳过日志。
-func New(dir, filename string, maxSize, maxBackups, maxAge int, compress bool, levelVar *slog.LevelVar) *Logger {
+func New(dir, filename string, maxSize, maxBackups, maxAge int, compress bool, enabled *atomic.Bool) *Logger {
 	switch strings.ToLower(strings.TrimSpace(dir)) {
 	case "off", "none", "-":
 		return nil
@@ -69,9 +69,9 @@ func New(dir, filename string, maxSize, maxBackups, maxAge int, compress bool, l
 			Compress:   compress,
 			LocalTime:  true,
 		},
-		ch:       make(chan []byte, 4096),
-		stop:     make(chan struct{}),
-		levelVar: levelVar,
+		ch:      make(chan []byte, 4096),
+		stop:    make(chan struct{}),
+		enabled: enabled,
 	}
 
 	// 立即投递启动标记，便于确认日志已就绪。
@@ -127,14 +127,13 @@ type Entry struct {
 }
 
 // Begin 在请求进入时创建一条记录（仅暂存请求部分，不写出）。
-// 仅在 debug 级别时才创建（与 capture.log 条件一致），其他级别返回 nil。
+// 仅在 enabled 标志为 true 时才创建，其他情况返回 nil。
 // logger 不可用时也返回 nil，调用方可直接忽略后续 Finish。
 func (l *Logger) Begin(method, path, query string, header http.Header, body []byte) *Entry {
 	if l == nil || l.rotator == nil {
 		return nil
 	}
-	// 与 capture.log 一致：仅 debug 级别时才记录请求/响应。
-	if l.levelVar != nil && l.levelVar.Level() > slog.LevelDebug {
+	if l.enabled != nil && !l.enabled.Load() {
 		return nil
 	}
 	return &Entry{l: l, method: method, path: path, query: query, reqHeader: header, reqBody: body}

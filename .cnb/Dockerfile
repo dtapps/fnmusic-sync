@@ -5,9 +5,11 @@ FROM golang:1.27.0-trixie
 # 定义版本变量
 # https://github.com/upx/upx/releases
 # https://github.com/goreleaser/nfpm/releases
+# https://developer.fnnas.com/docs/cli/fnpack/
 # ==========================================
 ARG UPX_VERSION=5.2.1
 ARG NFPM_VERSION=2.47.0
+ARG FNPACK_VERSION=1.2.3
 
 # 1. 设置 Go 环境变量
 ENV GO111MODULE=on
@@ -64,7 +66,20 @@ RUN ARCH=$(uname -m) && \
     echo "--- nfpm installed ---" && \
     nfpm --version
 
-# 6. 卸载不需要的工具，并清空所有 apt 缓存
+# 6. 安装 fnpack
+RUN ARCH=$(uname -m) && \
+    if [ "$ARCH" = "x86_64" ]; then FNPACK_ARCH="amd64"; \
+    elif [ "$ARCH" = "aarch64" ]; then FNPACK_ARCH="arm64"; \
+    else echo "Unsupported architecture: $ARCH" && exit 1; fi && \
+    \
+    FNPACK_URL="https://static2.fnnas.com/fnpack/fnpack-${FNPACK_VERSION}-linux-${FNPACK_ARCH}" && \
+    \
+    wget -q -O /usr/local/bin/fnpack "${FNPACK_URL}" && \
+    chmod +x /usr/local/bin/fnpack && \
+    echo "--- fnpack installed ---" && \
+    fnpack --help >/dev/null 2>&1 || true
+
+# 7. 卸载不需要的工具，并清空所有 apt 缓存
 RUN apt-get purge -y wget xz-utils && \
     apt-get autoremove -y && \
     apt-get clean && \

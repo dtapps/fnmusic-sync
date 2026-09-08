@@ -1,0 +1,21 @@
+[
+  {
+    "stepTitle": "卸载确认",
+    "items": [
+      {
+        "type": "tips",
+        "helpText": "卸载将移除 fnmusic-sync 应用二进制与服务。您可以选择是否保留配置与数据。"
+      },
+      {
+        "type": "switch",
+        "field": "wizard_keep_data",
+        "label": "保留配置与数据",
+        "initValue": "true"
+      },
+      {
+        "type": "tips",
+        "helpText": "开启：保留配置文件、日志和运行状态数据（推荐，方便日后重新安装恢复配置）。\n关闭：彻底删除所有配置、日志与状态数据。"
+      }
+    ]
+  }
+]

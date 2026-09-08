@@ -1,0 +1,17 @@
+appname                    = fnmusic-sync
+version                    = __VERSION__
+display_name               = 飞牛音乐 Scrobble 代理
+desc                       = 飞牛 fnOS 音乐 Last.fm / ListenBrainz 自动 scrobble 透明代理。接管 trim-music 的 unix socket，解析播放事件并推送到 Last.fm 与 ListenBrainz，同时支持智能歌单同步。
+platform                   = all
+source                     = thirdparty
+maintainer                 = dtapp
+maintainer_url             = https://cnb.cool/dtapp/fnmusic-sync
+distributor                = liguangchun
+distributor_url            = https://www.liguangchun.cn
+os_min_version             = 1.2.0
+desktop_uidir              = ui
+desktop_applaunchname      = fnmusic-sync.config
+ctl_stop                   = true
+checkport                  = false
+disable_authorization_path = true
+changelog                  = __CHANGELOG__
