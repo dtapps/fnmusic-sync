@@ -1,4 +1,7 @@
 {
+  "api-scope": [
+    "trim.system.getPlatformConfig"
+  ],
   "data-share": {
     "shares": [
       {

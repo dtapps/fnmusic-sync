@@ -1,0 +1,280 @@
+# 发布工作流
+# 手动触发，输入版本号后自动构建 Linux 安装包并发布 GitHub Release
+# https://github.com/actions/runner-images
+# https://github.com/actions/checkout
+# https://github.com/actions/setup-go
+# https://github.com/actions/setup-node
+# https://github.com/pnpm/action-setup
+# https://github.com/actions/upload-artifact
+# https://github.com/actions/download-artifact
+# https://github.com/softprops/action-gh-release
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '请输入打包版本'
+        required: true
+        type: string
+      prerelease:
+        description: '预发布版本'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      interior_version: ${{ steps.gen.outputs.interior_version }}
+      pre_release: ${{ steps.gen.outputs.pre_release }}
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v7
+
+      - name: 处理版本号与预发布选项
+        id: gen
+        shell: bash
+        run: |
+          echo "原始 version: ${{ inputs.version }}"
+
+          # 1. 如果输入没有 v 前缀，自动加上
+          VERSION="${{ inputs.version }}"
+          if ! echo "${VERSION}" | grep -qE '^v'; then
+            VERSION="v${VERSION}"
+          fi
+
+          echo "处理 version: ${VERSION}"
+          echo "interior_version=${VERSION}" >> $GITHUB_OUTPUT
+
+          # 2. 预发布选项校验（由页面 switch 传入 prerelease，默认 false）
+          PRE_RELEASE="${{ inputs.prerelease }}"
+          if [ "$PRE_RELEASE" != "true" ] && [ "$PRE_RELEASE" != "false" ]; then
+            echo "警告：pre_release 值为 '${PRE_RELEASE}'，仅支持 true/false，已回落到 false"
+            PRE_RELEASE="false"
+          fi
+          echo "preRelease: $PRE_RELEASE"
+          echo "pre_release=${PRE_RELEASE}" >> $GITHUB_OUTPUT
+
+  # 构建 + 打包 Linux 安装包（deb / rpm / apk / fpk）
+  build:
+    needs: prepare
+    runs-on: ubuntu-latest
+
+    # ==========================================
+    # 定义版本变量
+    # https://github.com/upx/upx/releases
+    # https://github.com/goreleaser/nfpm/releases
+    # https://developer.fnnas.com/docs/cli/fnpack/
+    # ==========================================
+    env:
+      UPX_VERSION: '5.2.1'
+      NFPM_VERSION: '2.47.0'
+      FNPACK_VERSION: '1.2.3'
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v7
+
+      - name: 安装 Go
+        uses: actions/setup-go@v7
+        with:
+          cache: true
+          go-version-file: 'go.mod'
+
+      - name: 安装 Pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          cache: true
+          package_json_file: 'cmd/frontend/package.json'
+          cache_dependency_path: 'cmd/frontend/pnpm-lock.yaml'
+
+      - name: 安装 Node.js
+        uses: actions/setup-node@v7
+        with:
+          cache: 'pnpm'
+          cache-dependency-path: 'cmd/frontend/pnpm-lock.yaml'
+          node-version-file: 'cmd/frontend/.nvmrc'
+
+      - name: 安装 upx 工具
+        shell: bash
+        run: |
+          UPX_DIR="upx-${UPX_VERSION}-amd64_linux"
+          UPX_URL="https://github.com/upx/upx/releases/download/v${UPX_VERSION}/${UPX_DIR}.tar.xz"
+
+          cd /tmp && \
+          wget -q -O upx.tar.xz "${UPX_URL}" && \
+          tar -xf upx.tar.xz && \
+          sudo mv ${UPX_DIR}/upx /usr/local/bin/upx && \
+          sudo chmod +x /usr/local/bin/upx && \
+          rm -rf upx.tar.xz ${UPX_DIR} && \
+          echo "--- UPX installed ---" && \
+          upx --version
+
+      - name: 安装 nfpm 工具
+        shell: bash
+        run: |
+          NFPM_URL="https://github.com/goreleaser/nfpm/releases/download/v${NFPM_VERSION}/nfpm_${NFPM_VERSION}_Linux_x86_64.tar.gz"
+
+          cd /tmp && \
+          wget -q -O nfpm.tar.gz "${NFPM_URL}" && \
+          tar -xf nfpm.tar.gz && \
+          sudo mv nfpm /usr/local/bin/nfpm && \
+          sudo chmod +x /usr/local/bin/nfpm && \
+          rm -rf nfpm.tar.gz && \
+          echo "--- nfpm installed ---" && \
+          nfpm --version
+
+      - name: 安装 fnpack 工具
+        shell: bash
+        run: |
+          FNPACK_URL="https://static2.fnnas.com/fnpack/fnpack-${FNPACK_VERSION}-linux-amd64"
+
+          sudo wget -q -O /usr/local/bin/fnpack "${FNPACK_URL}" && \
+          sudo chmod +x /usr/local/bin/fnpack && \
+          echo "--- fnpack installed ---" && \
+          fnpack --help || true
+
+      - name: 安装依赖
+        shell: bash
+        run: make deps
+
+      - name: 打包 Linux 安装包（deb / rpm / apk / fpk）
+        shell: bash
+        env:
+          VERSION: ${{ needs.prepare.outputs.interior_version }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION=${VERSION} REPO_SOURCE=github GITHUB_TOKEN="${GITHUB_TOKEN}" make package-linux-all
+
+      - name: 清理二进制文件 + .tar.gz 压缩包
+        shell: bash
+        run: make clean-archives
+
+      - name: 上传产物
+        uses: actions/upload-artifact@v7
+        with:
+          name: fnmusic-sync-release
+          path: bin/*
+          if-no-files-found: error
+          retention-days: 1
+
+  # 构建完成后，发布 GitHub Release
+  release:
+    needs: [build, prepare]
+    runs-on: ubuntu-latest
+
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: 下载所有产物
+        uses: actions/download-artifact@v8
+        with:
+          name: fnmusic-sync-release
+          path: release
+
+      - name: 生成 Release 正文
+        shell: bash
+        env:
+          INTERIOR_VERSION: ${{ needs.prepare.outputs.interior_version }}
+          PRE_RELEASE: ${{ needs.prepare.outputs.pre_release }}
+        run: |
+          REPO="${{ github.repository }}"
+          DL_BASE="https://github.com/${REPO}/releases/download/${INTERIOR_VERSION}"
+
+          if [ "${PRE_RELEASE}" = "true" ]; then
+            RELEASE_TYPE="🚧 预发布版本 (Pre-release)"
+          else
+            RELEASE_TYPE="✅ 正式发布版本 (Stable)"
+          fi
+          BUILD_TIME="$(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+
+          # 生成 changelog（取上一个 tag 到 HEAD 的提交摘要）
+          PREV_TAG=$(git tag --sort=-v:refname | head -2 | tail -1)
+          if [ -z "$PREV_TAG" ]; then
+            CHANGES="首次发布"
+          else
+            CHANGES=$(git log --pretty=format:"- %s" "${PREV_TAG}..HEAD" 2>/dev/null || echo "- 版本更新")
+          fi
+
+          {
+            if [ "${PRE_RELEASE}" = "true" ]; then
+              echo "## ⚠️ 预发布版本"
+              echo ""
+              echo "> 这是预发布版本，可能包含未充分测试的功能。"
+              echo "> 如需稳定版本，请使用 [正式发布](https://github.com/${REPO}/releases)。"
+              echo ""
+            fi
+
+            echo "## 发布信息"
+            echo ""
+            echo "| 项目 | 内容 |"
+            echo "| --- | --- |"
+            echo "| 版本号 | ${INTERIOR_VERSION} |"
+            echo "| 发布类型 | ${RELEASE_TYPE} |"
+            echo "| 是否预发布 | ${PRE_RELEASE} |"
+            echo "| 构建时间 | ${BUILD_TIME} |"
+            echo ""
+            echo "## 下载"
+            echo ""
+            echo "| 平台 | 架构 | 文件 | 大小 | 说明 |"
+            echo "|------|------|------|------|------|"
+
+            for f in release/*; do
+              [ -e "$f" ] || continue
+              [ -d "$f" ] && continue
+              fname=$(basename "$f")
+              [ "$fname" = "SHA256SUMS" ] && continue
+              fsize=$(ls -lh "$f" | awk '{print $5}')
+
+              PLAT="Linux"
+              ARCH="-"
+              DESC="其它"
+              case "$fname" in
+                *-linux-*.tar.gz)
+                  ARCH="${fname#*linux-}"; ARCH="${ARCH%.tar.gz}"
+                  DESC="Linux 二进制压缩包" ;;
+                *.deb)
+                  ARCH="${fname#fnmusic-sync_}"; ARCH="${ARCH%.deb}"
+                  DESC="Debian/Ubuntu 安装包" ;;
+                *.rpm)
+                  ARCH="${fname#fnmusic-sync.}"; ARCH="${ARCH%.rpm}"
+                  DESC="Fedora/RHEL 安装包" ;;
+                *.apk)
+                  ARCH="${fname#fnmusic-sync.}"; ARCH="${ARCH%.apk}"
+                  DESC="Alpine 安装包" ;;
+                *.fpk)
+                  ARCH="${fname#fnmusic-sync-}"; ARCH="${ARCH%.fpk}"
+                  DESC="飞牛 fnOS 应用包" ;;
+              esac
+
+              echo "| ${PLAT} | ${ARCH} | [${fname}](${DL_BASE}/${fname}) | ${fsize} | ${DESC} |"
+            done
+
+            echo ""
+            echo "## 更新内容"
+            echo ""
+            echo "${CHANGES}"
+          } > release_body.md
+
+          cat release_body.md
+
+      - name: 发布 Release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ needs.prepare.outputs.interior_version }}
+          name: ${{ needs.prepare.outputs.interior_version }}
+          draft: false
+          prerelease: ${{ needs.prepare.outputs.pre_release }}
+          body_path: release_body.md
+          files: release/*

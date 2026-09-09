@@ -21,4 +21,4 @@ branch:
             description: 是否为预发布版本（预发布不会标记为稳定版）
             required: false # 是否必填
             type: switch
-            default: "false"
+            default: 'false'

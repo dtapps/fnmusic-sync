@@ -1,4 +1,4 @@
-"**":
+'**':
   # 自定义按钮可触发的事件：web_trigger_*
   web_trigger_build_go_project:
     - runner:
@@ -11,19 +11,8 @@
         volumes:
           - /root/.cache/go-build:copy-on-write # 挂载 Go
           - /go:copy-on-write # 挂载项目依赖目录（可选，根据需要）
+      imports: https://cnb.cool/dtapp/envs/-/blob/main/update.yml # 导入外部环境变量/配置
       stages:
-        - name: 验证 make 工具
-          script: make --version
-
-        - name: 验证 upx 工具
-          script: upx --version
-        
-        - name: 验证 nfpm 工具
-          script: nfpm --version
-
-        - name: 验证 fnpack 工具
-          script: fnpack --help
-
         - name: 处理版本号与预发布选项
           script: |
             echo "原始 version: $version"
@@ -52,17 +41,11 @@
             interior_version: INTERIOR_VERSION
             pre_release: PRE_RELEASE
 
-        - name: 安装依赖依赖
+        - name: 安装依赖
           script: make deps
 
-        # - name: 构建 Linux 平台二进制文件
-        #   script: VERSION=${INTERIOR_VERSION} make build-linux-all
-
         - name: 打包 Linux 安装包（deb / rpm / apk / fpk）
-          script: VERSION=${INTERIOR_VERSION} make package-linux-all
-
-        # - name: 清理二进制文件
-        #   script: make clean-binaries
+          script: VERSION=${INTERIOR_VERSION} REPO_SOURCE=cnb CNB_TOKEN="$FNMUSIC_SYNC_TOKEN" make package-linux-all
 
         - name: 清理二进制文件 + .tar.gz 压缩包
           script: make clean-archives
@@ -70,11 +53,10 @@
         # https://docs.cnb.cool/zh/plugin/public/cnbcool/changelog.html
         - name: 生成 Release 日志
           image: cnbcool/changelog
-          allowFailure: true  # 仓库首个 tag 时 changelog 插件无法生成日志，允许该 job 失败继续发布
+          allowFailure: true # 仓库首个 tag 时 changelog 插件无法生成日志，允许该 job 失败继续发布
           exports:
             latestChangeLog: LATEST_CHANGE_LOG
 
-        # 生成 Release 正文：预发布提示 + 发布信息表 + certflow 风格下载表 + 更新日志
         - name: 生成 Release 正文
           script: |
             CNB_BASE="${CNB_REPO_URL_HTTPS%/}/-"
@@ -160,7 +142,7 @@
             EOF
 
         # https://docs.cnb.cool/zh/build/internal-steps.html#git-release
-        - name: 创建 Release
+        - name: 发布 Release
           type: git:release
           optionsFrom: release_options.yml
 
@@ -171,7 +153,7 @@
             type: UPLOAD
             tag: ${INTERIOR_VERSION}
             attachments:
-              - "bin/*"
+              - 'bin/*'
           exports:
             FILES: FILES
 

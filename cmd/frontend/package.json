@@ -1,0 +1,36 @@
+{
+  "name": "fnmusic-sync-frontend",
+  "version": "1.0.0",
+  "description": "飞牛音乐 Scrobble 代理 Web UI 前端",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "lint": "svelte-check --tsconfig ./tsconfig.json",
+    "format": "prettier --write --tab-width 2 --semi true --single-quote true --trailing-comma all --print-width 120 --html-whitespace-sensitivity css --plugin=prettier-plugin-svelte \"../../internal/webui/www/**/*.{html,css,js}\" \"!../../internal/webui/www/app.css\" \"!../../internal/webui/www/app.js\" \"src/**/*.{html,css,js,ts,svelte}\""
+  },
+  "packageManager": "pnpm@12.3.4",
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^7.3.0",
+    "@tailwindcss/postcss": "^4.3.3",
+    "@trimjs/web-app": "^0.4.2",
+    "@tsconfig/svelte": "^5.0.8",
+    "@types/node": "^22.20.2",
+    "autoprefixer": "^10.5.6",
+    "clsx": "^2.1.1",
+    "lucide-svelte": "^1.0.1",
+    "postcss": "^8.5.28",
+    "prettier": "^3.9.6",
+    "prettier-plugin-svelte": "^4.1.1",
+    "svelte": "^5.57.0",
+    "svelte-check": "^4.7.6",
+    "svelte-i18n": "^4.0.1",
+    "tailwind-merge": "^3.6.0",
+    "tailwind-variants": "^3.3.1",
+    "tailwindcss": "^4.3.3",
+    "tslib": "^2.8.1",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.0"
+  }
+}

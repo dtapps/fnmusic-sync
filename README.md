@@ -28,14 +28,14 @@ socket 绑定在 inode 上，用 `os.Rename`（mv）改名后官方后端仍能�
 
 ## 默认路径
 
-| 用途 | 传统安装 | fpk 安装 |
-| --- | --- | --- |
-| 二进制 | `/usr/bin/fnmusic-sync` | `/var/apps/fnmusic-sync/target/fnmusic-sync` |
-| 配置文件 | `/etc/fnmusic-sync/config.yaml` | `$TRIM_PKGETC/config.yaml` |
-| 状态文件 | `/var/lib/fnmusic-sync/state.yaml` | `$TRIM_PKGVAR/state.yaml` |
-| 日志文件 | `/var/log/fnmusic-sync/fnmusic-sync.log` | `$TRIM_PKGVAR/logs/fnmusic-sync.log` |
-| 代理监听 socket | `/var/run/trim_music.socket` | 同左 |
-| 官方 upstream socket | `/var/run/trim_music_upstream.socket` | 同左 |
+| 用途                 | 传统安装                                 | fpk 安装                                     |
+| -------------------- | ---------------------------------------- | -------------------------------------------- |
+| 二进制               | `/usr/bin/fnmusic-sync`                  | `/var/apps/fnmusic-sync/target/fnmusic-sync` |
+| 配置文件             | `/etc/fnmusic-sync/config.yaml`          | `$TRIM_PKGETC/config.yaml`                   |
+| 状态文件             | `/var/lib/fnmusic-sync/state.yaml`       | `$TRIM_PKGVAR/state.yaml`                    |
+| 日志文件             | `/var/log/fnmusic-sync/fnmusic-sync.log` | `$TRIM_PKGVAR/logs/fnmusic-sync.log`         |
+| 代理监听 socket      | `/var/run/trim_music.socket`             | 同左                                         |
+| 官方 upstream socket | `/var/run/trim_music_upstream.socket`    | 同左                                         |
 
 > fpk 模式下路径由飞牛 fnOS 环境变量（`TRIM_APPDEST`、`TRIM_PKGETC`、`TRIM_PKGVAR` 等）决定，程序启动时自动检测。
 
@@ -144,22 +144,22 @@ sudo fnmusic-sync service debug    # 开启 debug 模式并重启服务
 sudo fnmusic-sync service nodebug  # 关闭 debug 模式并重启服务
 ```
 
-| 子命令 | 说明 |
-| --- | --- |
-| `version` | 打印版本、Git 提交、构建时间、Go 版本、平台、配置/状态/日志路径 |
-| `self-upgrade` | 升级自身到仓库最新版本（自动检测包管理器，下载 deb/rpm/apk 安装并重启服务） |
-| `service install` | 安装系统服务（systemd，需 root）——安装脚本已自动执行 |
-| `service uninstall` | 卸载系统服务（需 root）——卸载脚本已自动执行 |
-| `service start` / `stop` / `restart` | 启停服务 |
-| `service status` | 查看运行状态 |
-| `service debug` | 开启 debug 模式（修改 ExecStart 加 --debug，daemon-reload + restart） |
-| `service nodebug` | 关闭 debug 模式（移除 --debug，daemon-reload + restart） |
+| 子命令                               | 说明                                                                        |
+| ------------------------------------ | --------------------------------------------------------------------------- |
+| `version`                            | 打印版本、Git 提交、构建时间、Go 版本、平台、配置/状态/日志路径             |
+| `self-upgrade`                       | 升级自身到仓库最新版本（自动检测包管理器，下载 deb/rpm/apk 安装并重启服务） |
+| `service install`                    | 安装系统服务（systemd，需 root）——安装脚本已自动执行                        |
+| `service uninstall`                  | 卸载系统服务（需 root）——卸载脚本已自动执行                                 |
+| `service start` / `stop` / `restart` | 启停服务                                                                    |
+| `service status`                     | 查看运行状态                                                                |
+| `service debug`                      | 开启 debug 模式（修改 ExecStart 加 --debug，daemon-reload + restart）       |
+| `service nodebug`                    | 关闭 debug 模式（移除 --debug，daemon-reload + restart）                    |
 
-| 参数 | 默认值 | 说明 |
-| --- | --- | --- |
-| `--upstream-wait` | `30s` | 等待官方后端就绪超时 |
-| `--check` | `false` | 只体检，不接管 |
-| `--debug` | `false` | 打印请求/响应详情（含脱敏后的鉴权头） |
+| 参数              | 默认值  | 说明                                  |
+| ----------------- | ------- | ------------------------------------- |
+| `--upstream-wait` | `30s`   | 等待官方后端就绪超时                  |
+| `--check`         | `false` | 只体检，不接管                        |
+| `--debug`         | `false` | 打印请求/响应详情（含脱敏后的鉴权头） |
 
 ## 配置
 
@@ -167,22 +167,22 @@ sudo fnmusic-sync service nodebug  # 关闭 debug 模式并重启服务
 
 ```yaml
 server:
-  socket_mode: 0          # 0 = 沿用官方 socket 权限（至少 0666）
-  upstream_wait: 30s      # 启动时等待官方后端就绪的超时
+  socket_mode: 0 # 0 = 沿用官方 socket 权限（至少 0666）
+  upstream_wait: 30s # 启动时等待官方后端就绪的超时
 
 users:
-  admin:                  # key 必须与飞牛 /user/me 返回的用户名一致
+  admin: # key 必须与飞牛 /user/me 返回的用户名一致
     lastfm:
       enabled: false
       api_key: ""
       api_secret: ""
-      session_key: ""     # 留空时启动会打印授权链接，点同意后自动写回并生效
-      username: ""       # Last.fm 用户名（授权后自动写回）
-      playlist:            # Last.fm 智能歌单同步（基于 scrobble 数据）
+      session_key: "" # 留空时启动会打印授权链接，点同意后自动写回并生效
+      username: "" # Last.fm 用户名（授权后自动写回）
+      playlist: # Last.fm 智能歌单同步（基于 scrobble 数据）
         top_tracks:
           enabled: false
           name: "LF {period} 最常听"
-          period: overall   # 7day/1month/3month/6month/12month/overall
+          period: overall # 7day/1month/3month/6month/12month/overall
           limit: 50
         loved_tracks:
           enabled: false
@@ -194,59 +194,59 @@ users:
           limit: 50
     listenbrainz:
       enabled: false
-      token: ""           # ListenBrainz 用户 Token
-      username: ""        # 歌单同步时必填（留空时自动获取并写回）
+      token: "" # ListenBrainz 用户 Token
+      username: "" # 歌单同步时必填（留空时自动获取并写回）
       playlist:
         daily_jams:
           enabled: false
           name: "LB 每日推荐"
-          limit: 0         # 0=不限制
+          limit: 50 # 0=不限制
         weekly_jams:
           enabled: false
           name: "LB 每周推荐"
-          limit: 0
+          limit: 50
         weekly_exploration:
           enabled: false
           name: "LB 每周探索"
-          limit: 0
+          limit: 50
         year_discoveries:
           enabled: false
-          name: "LB {year} 年度发现"  # {year} 自动替换
-          limit: 0
+          name: "LB {year} 年度发现" # {year} 自动替换
+          limit: 50
         year_missed:
           enabled: false
           name: "LB {year} 年度遗珠"
-          limit: 0
+          limit: 50
 
 playback:
-  scrobble_threshold: auto   # auto / 30s / 2m / 50% / off
+  scrobble_threshold: auto # auto / 30s / 2m / 50% / off
 
 playlist:
-  enabled: true          # 歌单同步总开关
-  sync_interval: 30m     # 同步间隔
+  enabled: true # 歌单同步总开关
+  sync_interval: 30m # 同步间隔
 
 logging:
-  level: info                # info / debug / warn / error
-  max_size: 3                # 单文件超过 3MB 自动切割（0 = 不按大小切割）
-  max_backups: 5             # 只保留最近 5 份历史日志（0 = 不限份数）
-  max_age: 7                 # 历史日志保留 7 天（0 = 不按时间过期）
-  compress: true             # 历史日志自动 gzip 压缩（.gz）
+  level: info # info / debug / warn / error
+  max_size: 3 # 单文件超过 3MB 自动切割（0 = 不按大小切割）
+  max_backups: 5 # 只保留最近 5 份历史日志（0 = 不限份数）
+  max_age: 7 # 历史日志保留 7 天（0 = 不按时间过期）
+  compress: true # 历史日志自动 gzip 压缩（.gz）
 ```
 
-| 段 | 说明 |
-| --- | --- |
-| `server` | socket 路径固定不可配；`socket_mode` 控制 socket 权限，`upstream_wait` 控制等待官方后端超时 |
-| `users` | 按飞牛用户名隔离的推送凭证，可配多个用户 |
-| `playback.scrobble_threshold` | `auto`=听满 min(时长/2, 4min)（Last.fm 规则）；`30s`/`2m`=固定时长；`50%`=按比例；`off`=收到播放即推（不建议日常用） |
-| `playlist` | 歌单同步总开关与间隔 |
-| `users.<name>.lastfm.playlist` | Last.fm 智能歌单同步（top_tracks / loved_tracks / recent_tracks） |
-| `users.<name>.listenbrainz.playlist` | ListenBrainz 推荐歌单同步 |
-| `users.<name>.listenbrainz.playlist.daily_jams` | 每日推荐歌单，需在 ListenBrainz 关注 [troi-bot](https://listenbrainz.org/user/troi-bot/) |
-| `users.<name>.listenbrainz.playlist.weekly_jams` | 每周推荐歌单 |
-| `users.<name>.listenbrainz.playlist.weekly_exploration` | 每周探索歌单（发现新音乐） |
-| `users.<name>.listenbrainz.playlist.year_discoveries` | 年度发现歌单（{year} 自动替换） |
-| `users.<name>.listenbrainz.playlist.year_missed` | 年度遗珠歌单（{year} 自动替换） |
-| `logging` | 日志级别与轮转策略（切割大小、保留份数、过期天数、是否压缩）。日志路径固定为 `/var/log/fnmusic-sync/fnmusic-sync.log`，**目录与文件名不可配** |
+| 段                                                      | 说明                                                                                                                                          |
+| ------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `server`                                                | socket 路径固定不可配；`socket_mode` 控制 socket 权限，`upstream_wait` 控制等待官方后端超时                                                   |
+| `users`                                                 | 按飞牛用户名隔离的推送凭证，可配多个用户                                                                                                      |
+| `playback.scrobble_threshold`                           | `auto`=听满 min(时长/2, 4min)（Last.fm 规则）；`30s`/`2m`=固定时长；`50%`=按比例；`off`=收到播放即推（不建议日常用）                          |
+| `playlist`                                              | 歌单同步总开关与间隔                                                                                                                          |
+| `users.<name>.lastfm.playlist`                          | Last.fm 智能歌单同步（top_tracks / loved_tracks / recent_tracks）                                                                             |
+| `users.<name>.listenbrainz.playlist`                    | ListenBrainz 推荐歌单同步                                                                                                                     |
+| `users.<name>.listenbrainz.playlist.daily_jams`         | 每日推荐歌单，需在 ListenBrainz 关注 [troi-bot](https://listenbrainz.org/user/troi-bot/)                                                      |
+| `users.<name>.listenbrainz.playlist.weekly_jams`        | 每周推荐歌单                                                                                                                                  |
+| `users.<name>.listenbrainz.playlist.weekly_exploration` | 每周探索歌单（发现新音乐）                                                                                                                    |
+| `users.<name>.listenbrainz.playlist.year_discoveries`   | 年度发现歌单（{year} 自动替换）                                                                                                               |
+| `users.<name>.listenbrainz.playlist.year_missed`        | 年度遗珠歌单（{year} 自动替换）                                                                                                               |
+| `logging`                                               | 日志级别与轮转策略（切割大小、保留份数、过期天数、是否压缩）。日志路径固定为 `/var/log/fnmusic-sync/fnmusic-sync.log`，**目录与文件名不可配** |
 
 ### Last.fm 授权
 
@@ -261,13 +261,13 @@ ListenBrainz 只需填 `token`，`username` 留空时自动获取并写回。
 
 支持将 ListenBrainz 的推荐歌单同步到飞牛音乐，按用户独立配置。
 
-| 歌单类型 | 说明 | 特殊要求 |
-| --- | --- | --- |
-| `daily_jams` | 每日推荐 | 需在 ListenBrainz 上关注 [`troi-bot`](https://listenbrainz.org/user/troi-bot/) |
-| `weekly_jams` | 每周推荐 | 无 |
-| `weekly_exploration` | 每周探索（发现新音乐） | 无 |
-| `year_discoveries` | 年度发现歌单 | 无（ListenBrainz 每年自动生成） |
-| `year_missed` | 年度遗珠歌单 | 无（ListenBrainz 每年自动生成） |
+| 歌单类型             | 说明                   | 特殊要求                                                                       |
+| -------------------- | ---------------------- | ------------------------------------------------------------------------------ |
+| `daily_jams`         | 每日推荐               | 需在 ListenBrainz 上关注 [`troi-bot`](https://listenbrainz.org/user/troi-bot/) |
+| `weekly_jams`        | 每周推荐               | 无                                                                             |
+| `weekly_exploration` | 每周探索（发现新音乐） | 无                                                                             |
+| `year_discoveries`   | 年度发现歌单           | 无（ListenBrainz 每年自动生成）                                                |
+| `year_missed`        | 年度遗珠歌单           | 无（ListenBrainz 每年自动生成）                                                |
 
 **开启条件：**
 
@@ -282,7 +282,7 @@ ListenBrainz 只需填 `token`，`username` 留空时自动获取并写回。
 
 ```yaml
 playlist:
-  enabled: true           # 歌单同步总开关
+  enabled: true # 歌单同步总开关
   sync_interval: 30m
 
 users:
@@ -290,28 +290,28 @@ users:
     listenbrainz:
       enabled: true
       token: "your-token"
-      username: "your-listenbrainz-username"  # 留空时自动获取并写回
+      username: "your-listenbrainz-username" # 留空时自动获取并写回
       playlist:
         daily_jams:
           enabled: true
           name: "LB 每日推荐"
-          limit: 0
+          limit: 50
         weekly_jams:
           enabled: true
           name: "LB 每周推荐"
-          limit: 0
+          limit: 50
         weekly_exploration:
           enabled: true
           name: "LB 每周探索"
-          limit: 0
+          limit: 50
         year_discoveries:
           enabled: true
           name: "LB {year} 年度发现"
-          limit: 0
+          limit: 50
         year_missed:
           enabled: true
           name: "LB {year} 年度遗珠"
-          limit: 0
+          limit: 50
 ```
 
 > ⚠️ **注意**：歌单同步从 ListenBrainz 的 `createdfor` 接口取"分享给你的"推荐歌单（daily-jams / weekly-jams / weekly-exploration，取最新一期），
@@ -336,13 +336,13 @@ ls -l /var/run/trim_music*.socket      # 两个都应为 srw-rw-rw-
 tail -f /var/log/fnmusic-sync/fnmusic-sync.log
 ```
 
-| 现象 | 原因与处理 |
-| --- | --- |
-| 飞牛音乐 502 | socket 权限不足：nginx 以 `www-data` 运行，代理 socket 必须允许 other 访问（`socket_mode: 0` 继承官方权限，至少 0666） |
-| 代理收不到任何请求 | 官方后端重启后重新绑定了原路径，重启代理重新接管 |
-| scrobble 不推送 | 用户名 key 与飞牛 `/user/me` 返回不一致、凭证未填全、或进度未到阈值（先用 `30s` 验证） |
-| Last.fm 401 INVALID TOKEN | token 失效，重新登录飞牛或重新走授权流程 |
-| 日志里只有控制台没有文件 | 日志目录不可写，看启动时的 WARN |
+| 现象                      | 原因与处理                                                                                                             |
+| ------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| 飞牛音乐 502              | socket 权限不足：nginx 以 `www-data` 运行，代理 socket 必须允许 other 访问（`socket_mode: 0` 继承官方权限，至少 0666） |
+| 代理收不到任何请求        | 官方后端重启后重新绑定了原路径，重启代理重新接管                                                                       |
+| scrobble 不推送           | 用户名 key 与飞牛 `/user/me` 返回不一致、凭证未填全、或进度未到阈值（先用 `30s` 验证）                                 |
+| Last.fm 401 INVALID TOKEN | token 失效，重新登录飞牛或重新走授权流程                                                                               |
+| 日志里只有控制台没有文件  | 日志目录不可写，看启动时的 WARN                                                                                        |
 
 ## 构建与发布
 
@@ -356,7 +356,7 @@ make clean-archives        # 清理裸二进制 + tar.gz，保留安装包
 
 版本号由 `git describe --tags` 决定，通过 `-ldflags -X` 注入到 `internal/buildinfo` 包，所以 `fnmusic-sync version` 能显示真实版本；本地 `go build` 不带 ldflags 时显示为 `dev`。
 
-CI（`.cnb/workflows/build_go_project.yml`）在打 tag 时构建并发布 Release，支持 `pre_release` 开关，Release 正文用表格标注版本号、发布类型与是否为预发布。
+CI（`.cnb/workflows/release.yml`）在打 tag 时构建并发布 Release，支持 `pre_release` 开关，Release 正文用表格标注版本号、发布类型与是否为预发布。
 
 ## 目录结构
 

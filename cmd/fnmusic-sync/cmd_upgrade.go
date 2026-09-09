@@ -4,23 +4,15 @@ package main
 
 import (
 	"fmt"
-	"io"
-	"net/http"
 	"os"
 	"os/exec"
-	"path/filepath"
-	"regexp"
 	"runtime"
 	"strings"
-	"time"
 
 	"cnb.cool/dtapp/fnmusic-sync/internal/buildinfo"
+	"cnb.cool/dtapp/fnmusic-sync/internal/updater"
 	"github.com/spf13/cobra"
 )
-
-// repoBase 是当前项目在 CNB 上的仓库地址（与 Makefile 的 PKG 对应），
-// 升级时从这里抓取 releases 并下载对应平台的安装包。
-const repoBase = "https://cnb.cool/dtapp/fnmusic-sync"
 
 // pkgManager 表示检测到的系统包管理器。
 type pkgManager struct {
@@ -104,12 +96,13 @@ func init() {
 	rootCmd.AddCommand(upgradeCmd)
 }
 
-// doSelfUpgrade 检查并升级当前二进制到 CNB 仓库的最新 release。
+// doSelfUpgrade 检查并升级当前二进制到最新 release。
+// 根据构建来源（CNB / GitHub）自动选择对应的下载源。
 func doSelfUpgrade() error {
 	arch := runtime.GOARCH
 	osName := runtime.GOOS
 
-	fmt.Printf("🔄 检查 %s 自身更新 (当前版本: %s, 平台: %s/%s)...\n", buildinfo.BinaryName, buildinfo.Version, osName, arch)
+	fmt.Printf("🔄 检查 %s 自身更新 (当前版本: %s, 平台: %s/%s, 来源: %s)...\n", buildinfo.BinaryName, buildinfo.Version, osName, arch, buildinfo.RepoSource)
 
 	// 检测系统包管理器
 	pm := detectPackageManager()
@@ -119,37 +112,40 @@ func doSelfUpgrade() error {
 		return nil
 	}
 
-	client := &http.Client{Timeout: 30 * time.Second}
+	client := updater.DefaultHTTPClient()
 
-	// 1. 抓取最新 tag
-	resp, err := client.Get(repoBase + "/-/releases")
+	// 1. 获取最新版本号
+	latestTag, err := updater.FetchLatestTag(client)
 	if err != nil {
-		return fmt.Errorf("无法连接到 CNB: %w", err)
-	}
-	body, _ := io.ReadAll(resp.Body)
-	_ = resp.Body.Close()
-
-	re := regexp.MustCompile(`releases/tag/(v\d+\.\d+\.\d+)`)
-	match := re.FindStringSubmatch(string(body))
-	if len(match) < 2 {
-		fmt.Println("❌ 无法从 CNB 页面解析最新版本号，请检查仓库是否公开。")
+		fmt.Printf("❌ %s\n", err.Error())
 		return nil
 	}
-	latestTag := match[1]
 
 	// 2. 版本比对（dev 视为未发布，强制更新）
-	if latestTag == buildinfo.Version && buildinfo.Version != "dev" {
+	if !updater.HasUpdate(latestTag) {
 		fmt.Printf("✅ 已是最新版本 (%s)，无需升级。\n", buildinfo.Version)
 		return nil
 	}
 
-	// 3. 拼接下载地址（Release 上传的是系统安装包 deb/rpm/apk）
+	// 3. 拼接下载地址
 	fileName := pm.packageFileName()
-	downloadURL := fmt.Sprintf("%s/-/releases/download/%s/%s", repoBase, latestTag, fileName)
+	downloadURL := updater.BuildDownloadURL(latestTag, fileName)
 
 	fmt.Printf("🚀 发现新版本: %s\n📥 正在拉取: %s\n", latestTag, downloadURL)
 
-	if err := doInstall(client, downloadURL, pm); err != nil {
+	// 4. 下载安装包
+	tmpFile, err := updater.DownloadFile(client, downloadURL, buildinfo.BinaryName+pm.ext)
+	if err != nil {
+		return fmt.Errorf("升级失败: %w", err)
+	}
+	defer func() { _ = os.Remove(tmpFile) }()
+
+	// 5. 调用系统包管理器安装（deb/rpm/apk 专属逻辑）
+	cmdName, cmdArgs := pm.installCommand(tmpFile)
+	cmd := exec.Command(cmdName, cmdArgs...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
 		if strings.Contains(err.Error(), "permission denied") || strings.Contains(err.Error(), "Operation not permitted") {
 			fmt.Println("💡 提示：请尝试使用 'sudo " + buildinfo.BinaryName + " self-upgrade' 运行")
 		}
@@ -160,51 +156,13 @@ func doSelfUpgrade() error {
 	// 当前进程就是 systemd 管理的服务进程，systemctl restart 会先发 SIGTERM
 	// 杀掉当前进程，所以用 nohup + 子 shell 异步执行，让命令在当前进程
 	// 退出后继续运行，完成 stop→start 的完整流程。
-	cmd := exec.Command("sh", "-c", fmt.Sprintf("nohup systemctl restart %s >/dev/null 2>&1 &", buildinfo.BinaryName))
-	if err := cmd.Start(); err != nil {
+	restartCmd := exec.Command("sh", "-c", fmt.Sprintf("nohup systemctl restart %s >/dev/null 2>&1 &", buildinfo.BinaryName))
+	if err := restartCmd.Start(); err != nil {
 		fmt.Printf("✨ 升级成功！请手动重启服务：%s service restart\n", buildinfo.BinaryName)
 		return nil
 	}
-	_ = cmd.Process.Release()
+	_ = restartCmd.Process.Release()
 
 	fmt.Printf("✨ 升级成功！服务正在重启，即将运行新版本 %s。\n", latestTag)
 	return nil
-}
-
-// doInstall 下载安装包到临时目录并调用系统包管理器安装。
-func doInstall(client *http.Client, url string, pm *pkgManager) error {
-	resp, err := client.Get(url)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode != 200 {
-		return fmt.Errorf("服务器返回错误状态码: %d (请检查该平台的 Release 附件是否存在: %s)", resp.StatusCode, url)
-	}
-
-	// 下载到临时文件
-	tmpDir := os.TempDir()
-	tmpFile := filepath.Join(tmpDir, buildinfo.BinaryName+pm.ext)
-	f, err := os.OpenFile(tmpFile, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
-	if err != nil {
-		return err
-	}
-	if _, err = io.Copy(f, resp.Body); err != nil {
-		_ = f.Close()
-		_ = os.Remove(tmpFile)
-		return err
-	}
-	if err := f.Close(); err != nil {
-		_ = os.Remove(tmpFile)
-		return err
-	}
-	defer func() { _ = os.Remove(tmpFile) }()
-
-	// 调用包管理器安装
-	cmdName, cmdArgs := pm.installCommand(tmpFile)
-	cmd := exec.Command(cmdName, cmdArgs...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd.Run()
 }

@@ -1,2 +1,2 @@
 include:
-  - .cnb/workflows/build_go_project.yml
+  - .cnb/workflows/release.yml

@@ -67,8 +67,8 @@ func setupLogger(
 	console := slog.NewTextHandler(os.Stderr, opts)
 	closeFn := func() {}
 
-	// 显式关闭文件日志：off / none / -
-	if logDisabled(dir) {
+	// 显式关闭文件日志：配置中 enabled=false 或日志目录被显式关闭
+	if !lg.Enabled || logDisabled(dir) {
 		return slog.New(console), "", closeFn
 	}
 

@@ -111,6 +111,10 @@ type PlaylistSourceConfig struct {
 // 注意：日志目录与文件名是代码常量（/var/log/fnmusic-sync/fnmusic-sync.log），
 // 不在这里暴露，配置里只放级别与轮转策略。
 type LoggingConfig struct {
+	// Enabled 控制是否写入日志文件（不影响控制台输出）。
+	// true = 写文件 + 控制台，false = 仅控制台。
+	Enabled bool `mapstructure:"enabled" json:"enabled"`
+	// Level 日志等级
 	Level string `mapstructure:"level" json:"level"`
 	// MaxSize 单个日志文件超过该大小(MB)后自动切割，0 = 不按大小切割。
 	MaxSize int `mapstructure:"max_size" json:"max_size"`
@@ -369,19 +373,19 @@ func userAccountToMap(u UserAccount) map[string]any {
 		"playlist": map[string]any{
 			"top_tracks": map[string]any{
 				"enabled": u.LastFM.Playlist.TopTracks.Enabled,
-				"name":     u.LastFM.Playlist.TopTracks.Name,
-				"period":   u.LastFM.Playlist.TopTracks.Period,
-				"limit":    u.LastFM.Playlist.TopTracks.Limit,
+				"name":    u.LastFM.Playlist.TopTracks.Name,
+				"period":  u.LastFM.Playlist.TopTracks.Period,
+				"limit":   u.LastFM.Playlist.TopTracks.Limit,
 			},
 			"loved_tracks": map[string]any{
 				"enabled": u.LastFM.Playlist.LovedTracks.Enabled,
-				"name":     u.LastFM.Playlist.LovedTracks.Name,
-				"limit":    u.LastFM.Playlist.LovedTracks.Limit,
+				"name":    u.LastFM.Playlist.LovedTracks.Name,
+				"limit":   u.LastFM.Playlist.LovedTracks.Limit,
 			},
 			"recent_tracks": map[string]any{
 				"enabled": u.LastFM.Playlist.RecentTracks.Enabled,
-				"name":     u.LastFM.Playlist.RecentTracks.Name,
-				"limit":    u.LastFM.Playlist.RecentTracks.Limit,
+				"name":    u.LastFM.Playlist.RecentTracks.Name,
+				"limit":   u.LastFM.Playlist.RecentTracks.Limit,
 			},
 		},
 	}
@@ -394,28 +398,28 @@ func userAccountToMap(u UserAccount) map[string]any {
 		"playlist": map[string]any{
 			"daily_jams": map[string]any{
 				"enabled": u.ListenBrainz.Playlist.DailyJams.Enabled,
-				"name":     u.ListenBrainz.Playlist.DailyJams.Name,
-				"limit":    u.ListenBrainz.Playlist.DailyJams.Limit,
+				"name":    u.ListenBrainz.Playlist.DailyJams.Name,
+				"limit":   u.ListenBrainz.Playlist.DailyJams.Limit,
 			},
 			"weekly_jams": map[string]any{
 				"enabled": u.ListenBrainz.Playlist.WeeklyJams.Enabled,
-				"name":     u.ListenBrainz.Playlist.WeeklyJams.Name,
-				"limit":    u.ListenBrainz.Playlist.WeeklyJams.Limit,
+				"name":    u.ListenBrainz.Playlist.WeeklyJams.Name,
+				"limit":   u.ListenBrainz.Playlist.WeeklyJams.Limit,
 			},
 			"weekly_exploration": map[string]any{
 				"enabled": u.ListenBrainz.Playlist.WeeklyExploration.Enabled,
-				"name":     u.ListenBrainz.Playlist.WeeklyExploration.Name,
-				"limit":    u.ListenBrainz.Playlist.WeeklyExploration.Limit,
+				"name":    u.ListenBrainz.Playlist.WeeklyExploration.Name,
+				"limit":   u.ListenBrainz.Playlist.WeeklyExploration.Limit,
 			},
 			"year_discoveries": map[string]any{
 				"enabled": u.ListenBrainz.Playlist.YearDiscoveries.Enabled,
-				"name":     u.ListenBrainz.Playlist.YearDiscoveries.Name,
-				"limit":    u.ListenBrainz.Playlist.YearDiscoveries.Limit,
+				"name":    u.ListenBrainz.Playlist.YearDiscoveries.Name,
+				"limit":   u.ListenBrainz.Playlist.YearDiscoveries.Limit,
 			},
 			"year_missed": map[string]any{
 				"enabled": u.ListenBrainz.Playlist.YearMissed.Enabled,
-				"name":     u.ListenBrainz.Playlist.YearMissed.Name,
-				"limit":    u.ListenBrainz.Playlist.YearMissed.Limit,
+				"name":    u.ListenBrainz.Playlist.YearMissed.Name,
+				"limit":   u.ListenBrainz.Playlist.YearMissed.Limit,
 			},
 		},
 	}
@@ -449,6 +453,7 @@ func SaveSettings(path string, playback PlaybackConfig, playlist PlaylistConfig,
 	v.Set("playlist.sync_interval", playlist.SyncInterval)
 
 	// logging
+	v.Set("logging.enabled", logging.Enabled)
 	v.Set("logging.level", logging.Level)
 	v.Set("logging.max_size", logging.MaxSize)
 	v.Set("logging.max_backups", logging.MaxBackups)
@@ -483,6 +488,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("playback.scrobble_threshold", "auto")
 	v.SetDefault("playlist.enabled", true)
 	v.SetDefault("playlist.sync_interval", "30m")
+	v.SetDefault("logging.enabled", true)
 	v.SetDefault("logging.level", "info")
 	v.SetDefault("logging.max_size", 3)
 	v.SetDefault("logging.max_backups", 5)

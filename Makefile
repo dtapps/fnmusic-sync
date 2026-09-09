@@ -1,24 +1,107 @@
+# 名称
 BINARY := fnmusic-sync
+
+# 包名
 PKG    := cnb.cool/dtapp/fnmusic-sync
 
-.PHONY: deps update-deps
+# 二进制文件名
+BINARY_NAME=fnmusic-sync
+
+# 前端项目目录
+FRONTEND_DIR = cmd/frontend
+
+# 后端项目目录
+BACKEND_DIR = cmd/fnmusic-sync
+
+# 飞牛项目目录
+FPKG_DIR = fpkg
+
+# 编译输出目录
+BUILD_DIR=bin
+
+# 版本信息（支持外部传入）
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
+COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+BUILDTIME ?= $(shell date -u '+%Y-%m-%d %H:%M:%S UTC')
+
+# 构建来源（标识当前二进制由哪个平台构建发布）
+# CNB 构建时注入 REPO_SOURCE=cnb，GitHub 构建时注入 REPO_SOURCE=github
+# 升级时根据此值选择从对应平台下载
+REPO_SOURCE ?= cnb
+
+# CNB 访问令牌（访问 CNB API release 列表时需要 Bearer 鉴权）
+# CNB 构建时通过环境变量 CNB_TOKEN 传入，为空时升级接口提示无法自动升级
+CNB_TOKEN ?=
+
+# GitHub 访问令牌（GitHub API 无 Token 也可用，但有速率限制，可以为空）
+# GitHub 构建时通过环境变量 GITHUB_TOKEN 传入
+GITHUB_TOKEN ?=
+
+# 路径（ldflags -X 注入版本变量的包路径，需与 go.mod 模块路径一致）
+PKG_PATH = cnb.cool/dtapp/fnmusic-sync/internal/buildinfo
+
+# ldflags 模板
+# -s -w: 移除符号表和调试信息，减小体积
+# -buildid=: 移除构建指纹
+# 所有构建信息统一注入到 buildinfo 包
+LDFLAGS = -s -w \
+	-X '$(PKG_PATH).Version=$(VERSION)' \
+	-X '$(PKG_PATH).GitCommit=$(COMMIT)' \
+	-X '$(PKG_PATH).BuildTime=$(BUILDTIME)' \
+	-X '$(PKG_PATH).BinaryName=$(BINARY_NAME)' \
+	-X '$(PKG_PATH).RepoSource=$(REPO_SOURCE)' \
+	-X '$(PKG_PATH).CnbToken=$(CNB_TOKEN)' \
+	-X '$(PKG_PATH).GithubToken=$(GITHUB_TOKEN)'
+
+# 统一定义构建命令
+# CGO_ENABLED=0: 禁用 CGO，实现完全静态链接
+# CGO_ENABLED=1: 启用 CGO，实现动态链接
+# -trimpath: 移除本地路径，保护隐私
+# -ldflags: 注入版本信息并移除符号表
+# 注意：-tags 由 build_binary 的 $(6) 参数动态拼接，此处不含
+BUILD_CMD = CGO_ENABLED=0 go build -trimpath -ldflags="$(LDFLAGS)"
+
+# 构建 tag 名
+BUILD_TAG = fpk
+
+# 功能开关（设置为 1 开启，0 关闭）
+ENABLE_UPX ?= 1
+ENABLE_ARCHIVE ?= 1
+
+# 检测是否存在 upx 压缩工具
+UPX = $(shell command -v upx 2> /dev/null)
+# 检测是否存在 tar 和 zip
+TAR = $(shell command -v tar 2> /dev/null)
+ZIP = $(shell command -v zip 2> /dev/null)
+
+# ==================== 开发 ====================
 
 # 安装依赖
+.PHONY: deps
 deps: 
 	@echo "[Deps] 安装依赖..."
 	go mod tidy
 	go mod download
+	@echo "[Deps] 安装前端依赖..."
+	pnpm --dir $(FRONTEND_DIR) install --frozen-lockfile --prefer-offline
 	@echo "[Deps] 完成。"
 
 # 更新依赖
+.PHONY: update-deps
 update-deps:
 	@echo "[Deps] 更新依赖..."
 	go get -u ./...
 	go mod tidy
+	@echo "[Deps] 更新前端依赖..."
+# 	pnpm --dir $(FRONTEND_DIR) update
+	pnpm --dir $(FRONTEND_DIR) update --latest
+	pnpm --dir $(FRONTEND_DIR) self-update
 	@echo "[Deps] 完成。"
 
+# ==================== 工具 ====================
+
 # 格式化（Go + 前端 + 配置 + 文档 + 脚本）
-format: format-go format-frontend format-yaml format-markdown format-shell
+format: format-go format-frontend format-yaml format-json format-markdown format-shell
 
 # 格式化 Go 代码
 format-go:
@@ -28,21 +111,25 @@ format-go:
 	go fix ./...
 	go vet ./...
 
-# 格式化前端文件（HTML/CSS/JS）
-# 使用 prettier，无需全局安装，npx 自动临时下载
+# 格式化前端文件（HTML/CSS/JS/TS/Svelte）
 format-frontend:
-	@echo "[Format] 格式化前端文件 (HTML/CSS/JS)..."
+	@echo "[Format] 格式化前端文件 (HTML/CSS/JS/TS/Svelte)..."
+	@cd $(FRONTEND_DIR) && pnpm run format \
+		|| echo "⚠️  prettier 格式化失败，请确认已运行 pnpm install"
+	@echo "[Format] 前端格式化完成。"
+
+# 格式化 JSON 文件
+format-json:
+	@echo "[Format] 格式化 JSON 文件..."
 	@npx --yes prettier@latest \
 		--write \
 		--tab-width 2 \
-		--semi true \
-		--single-quote true \
 		--trailing-comma all \
 		--print-width 120 \
-		--html-whitespace-sensitivity css \
-		"internal/webui/www/**/*.{html,css,js}" \
+		"cmd/frontend/src/lib/i18n/*.json" \
+		"cmd/frontend/tsconfig.json" \
 		|| echo "⚠️  prettier 格式化失败，请确认 npx 可用"
-	@echo "[Format] 前端格式化完成。"
+	@echo "[Format] JSON 格式化完成。"
 
 # 格式化 YAML 文件（.yaml/.yml）
 format-yaml:
@@ -56,6 +143,7 @@ format-yaml:
 		"configs/**/*.{yaml,yml}" \
 		".cnb/**/*.{yaml,yml}" \
 		".cnb.yml" \
+		".github/**/*.{yaml,yml}" \
 		".nfpm.yaml" \
 		|| echo "⚠️  prettier 格式化失败，请确认 npx 可用"
 	@echo "[Format] YAML 格式化完成。"
@@ -88,28 +176,19 @@ format-shell:
 		} || echo "⚠️  shfmt 和 shellcheck 均未安装，跳过 Shell 格式化。" ; \
 	}
 
-#####################
-## 构建相关
-#####################
+# ==================== 构建 ====================
 
-# 二进制文件名
-BINARY_NAME=fnmusic-sync
-
-# 主包源码目录（本项目 main 包位于 cmd/fnmusic-sync）
-BUILD_SRC_DIR ?= cmd/fnmusic-sync
-
-# 编译输出目录
-BUILD_DIR=bin
-
-# 功能开关（设置为 1 开启，0 关闭）
-ENABLE_UPX ?= 1
-ENABLE_ARCHIVE ?= 1
-
-# 检测是否存在 upx 压缩工具
-UPX = $(shell command -v upx 2> /dev/null)
-# 检测是否存在 tar 和 zip
-TAR = $(shell command -v tar 2> /dev/null)
-ZIP = $(shell command -v zip 2> /dev/null)
+# 构建前端（Svelte + Tailwind → internal/webui/www/）
+# 打包时同步 version 到 package.json，与 git tag 保持一致
+.PHONY: build-frontend
+build-frontend:
+	@echo ""
+	@echo "┌────────────────────────────────────────────────────────────"
+	@echo "│ [构建] Svelte 前端"
+	@echo "└────────────────────────────────────────────────────────────"
+	@cd $(FRONTEND_DIR) && sed -i.bak -E 's/("version"[[:space:]]*:[[:space:]]*")[^"]*(")/\1$(VERSION)\2/' package.json && rm -f package.json.bak
+	@cd $(FRONTEND_DIR) && pnpm build
+	@echo "✓ 构建完成。"
 
 # 定义压缩逻辑：参数 $(1) 为文件路径
 define compress_file
@@ -220,40 +299,6 @@ define clean_archive
 	fi
 endef
 
-# 版本信息（支持外部传入）
-VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
-COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
-BUILDTIME ?= $(shell date -u '+%Y-%m-%d %H:%M:%S UTC')
-
-# 路径（ldflags -X 注入版本变量的包路径，需与 go.mod 模块路径一致）
-PKG_PATH = cnb.cool/dtapp/fnmusic-sync/internal/buildinfo
-
-# ldflags 模板
-# -s -w: 移除符号表和调试信息，减小体积
-# -buildid=: 移除构建指纹
-# 所有构建信息统一注入到 buildinfo 包
-LDFLAGS = -s -w \
-	-X '$(PKG_PATH).Version=$(VERSION)' \
-	-X '$(PKG_PATH).GitCommit=$(COMMIT)' \
-	-X '$(PKG_PATH).BuildTime=$(BUILDTIME)' \
-	-X '$(PKG_PATH).BinaryName=$(BINARY_NAME)'
-
-# 统一定义构建命令
-# CGO_ENABLED=0: 禁用 CGO，实现完全静态链接
-# CGO_ENABLED=1: 启用 CGO，实现动态链接
-# -trimpath: 移除本地路径，保护隐私
-# -ldflags: 注入版本信息并移除符号表
-# 注意：-tags 由 build_binary 的 $(6) 参数动态拼接，此处不含
-BUILD_CMD = CGO_ENABLED=0 go build -trimpath -ldflags="$(LDFLAGS)"
-
-# 构建所有 Linux 平台
-build-all: clean \
-	build-linux-amd64 \
-	build-linux-arm64
-
-# 构建 Linux 平台（不带标签 + 带标签）
-build-linux-all: build-linux-amd64 build-linux-arm64
-
 clean:
 	@echo "[Clean] 清理构建目录..."
 	@rm -rf $(BUILD_DIR)
@@ -266,7 +311,7 @@ define build_binary
 	@echo "┌────────────────────────────────────────────────────────────"
 	@echo "│ [构建] $(3)"
 	@echo "└────────────────────────────────────────────────────────────"
-	@cd $(BUILD_SRC_DIR) && $(5) GOOS=$(1) GOARCH=$(2) $(BUILD_CMD) -o $(CURDIR)/$(BUILD_DIR)/$(BINARY_NAME)-$(1)-$(2)$(4) .
+	@cd $(BACKEND_DIR) && $(5) GOOS=$(1) GOARCH=$(2) $(BUILD_CMD) -o $(CURDIR)/$(BUILD_DIR)/$(BINARY_NAME)-$(1)-$(2)$(4) .
 	$(call compress_file,./$(BUILD_DIR)/$(BINARY_NAME)-$(1)-$(2)$(4))
 	$(call archive_binary,./$(BUILD_DIR)/$(BINARY_NAME)-$(1)-$(2)$(4))
 endef
@@ -279,18 +324,23 @@ define build_tag_binary
 	@echo "┌────────────────────────────────────────────────────────────"
 	@echo "│ [构建] $(3)"
 	@echo "└────────────────────────────────────────────────────────────"
-	@cd $(BUILD_SRC_DIR) && GOOS=$(1) GOARCH=$(2) $(BUILD_CMD) -tags "$(4)" -o $(CURDIR)/$(BUILD_DIR)/$(BINARY_NAME)-$(4)-$(1)-$(2) .
+	@cd $(BACKEND_DIR) && GOOS=$(1) GOARCH=$(2) $(BUILD_CMD) -tags "$(4)" -o $(CURDIR)/$(BUILD_DIR)/$(BINARY_NAME)-$(4)-$(1)-$(2) .
 	$(call compress_file,./$(BUILD_DIR)/$(BINARY_NAME)-$(4)-$(1)-$(2))
 	$(call archive_binary,./$(BUILD_DIR)/$(BINARY_NAME)-$(4)-$(1)-$(2))
 endef
 
+# 构建 Linux Amd64 平台（不带标签 + 带标签）
 build-linux-amd64:
 	$(call build_binary,linux,amd64,Linux x86_64,,,)
 	$(call build_tag_binary,linux,amd64,Linux x86_64 带标签,$(BUILD_TAG))
 
+# 构建 Linux Arm64 平台（不带标签 + 带标签）
 build-linux-arm64:
 	$(call build_binary,linux,arm64,Linux ARM64,,,)
 	$(call build_tag_binary,linux,arm64,Linux ARM64 带标签,$(BUILD_TAG))
+
+# 构建 Linux 平台（不带标签 + 带标签）
+build-linux-all: build-frontend build-linux-amd64 build-linux-arm64
 
 # 清理裸二进制（保留 .tar.gz 压缩包供自升级下载，上传前执行）
 .PHONY: clean-binaries
@@ -316,9 +366,7 @@ clean-archives:
 	$(call clean_archive,./$(BUILD_DIR)/$(BINARY_NAME)-$(BUILD_TAG)-linux-arm64)
 	@echo "✓ 清理完成（bin/ 保留安装包）"
 
-#####################
-## 打包 (Linux deb/rpm/apk)
-#####################
+# ==================== 打包 ====================
 
 # 生成 nfpm 临时配置文件（替换变量）
 # 参数: $(1)=架构名 (amd64 / x86_64 / aarch64)
@@ -367,11 +415,6 @@ define package_nfpm_formats
 	$(call cleanup_scripts)
 	@echo "✓ 包已创建 (deb/rpm/apk): $(BINARY_NAME)"
 endef
-
-# 打包目录（飞牛 fnOS 应用包源码目录）
-FPKG_DIR = fpkg
-# 构建 tag 名
-BUILD_TAG = fpk
 
 # 从 git log 自动生成 changelog 文本（取上一个 tag 到 HEAD 的提交摘要）
 # 如果没有上一个 tag，则取最近 20 条提交
@@ -450,7 +493,7 @@ package-linux-fpk:
 	$(call build_fpk,amd64)
 	$(call build_fpk,arm64)
 
-# 打包所有 Linux deb/rpm/apk 包（构建一次，各格式复用）
+# 打包所有 Linux deb/rpm/apk/fpk 包（构建一次，各格式复用）
 .PHONY: package-linux-all
 package-linux-all: package-linux-deb package-linux-rpm package-linux-apk package-linux-fpk
 	@echo ""
@@ -458,29 +501,30 @@ package-linux-all: package-linux-deb package-linux-rpm package-linux-apk package
 	@echo "║ ✓ 所有包已创建 (deb/rpm/apk/fpk, 多架构)"
 	@echo "╚════════════════════════════════════════════════════════════"
 
-# 打包所有 Linux 包（deb/rpm/apk）
+# 打包所有 Linux 包（deb/rpm/apk/fpk）
 .PHONY: package-linux
 package-linux: package-linux-all
 
-# 构建并打包所有 Linux 包
-.PHONY: package-all
-package-all: package-linux
-
 # ==================== 更新 / 拉取 ====================
 
-sync: ## 拉取最新并以 fast-forward 合并（保留本地未提交改动）
+sync: ## 拉取 CNB 最新并以 fast-forward 合并（保留本地未提交改动）
 	git fetch origin
 	git merge --ff-only origin/master
 	@echo "已同步 origin/master 最新代码，本地未提交改动已保留"
 
-pull: sync ## 拉取所有远程最新
+sync-github: ## 拉取 GitHub 最新并以 fast-forward 合并（保留本地未提交改动）
+	git fetch github
+	git merge --ff-only github/master
+	@echo "已同步 github/master 最新代码，本地未提交改动已保留"
 
 # ==================== 推送 ====================
 
 push: ## 推送到所有远程仓库
 	git push origin HEAD
+	git push github HEAD
 	@echo "推送完成！"
 
 push-force: ## 强制推送到所有远程仓库（忽略冲突）
 	git push --force origin HEAD
+	git push --force github HEAD
 	@echo "强制推送完成！"

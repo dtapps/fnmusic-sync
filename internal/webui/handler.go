@@ -21,7 +21,9 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -29,6 +31,8 @@ import (
 	"cnb.cool/dtapp/fnmusic-sync/internal/buildinfo"
 	"cnb.cool/dtapp/fnmusic-sync/internal/config"
 	"cnb.cool/dtapp/fnmusic-sync/internal/lastfm"
+	"cnb.cool/dtapp/fnmusic-sync/internal/updater"
+	"github.com/spf13/viper"
 )
 
 //go:embed www
@@ -150,6 +154,8 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	// 管理员级 API
 	mux.HandleFunc(gatewayPrefix+"/api/logs", s.requireAdmin(s.handleLogs))
 	mux.HandleFunc(gatewayPrefix+"/api/settings", s.requireAdmin(s.handleSettings))
+	mux.HandleFunc(gatewayPrefix+"/api/upgrade/check", s.requireAdmin(s.handleUpgradeCheck))
+	mux.HandleFunc(gatewayPrefix+"/api/upgrade", s.requireAdmin(s.handleUpgrade))
 
 	// 静态文件：从 www 子目录提取
 	wwwSub, err := fs.Sub(wwwFS, "www")
@@ -265,9 +271,10 @@ func (s *Server) serveEmbeddedFile(efs fs.FS, name string, w http.ResponseWriter
 
 // gatewayUser 从飞牛统一网关 Header 中提取当前用户信息。
 // 网关校验用户会话后，通过以下 Header 转发用户身份：
-//   X-Trim-Userid:   用户 UID（如 1000）
-//   X-Trim-Isadmin:  是否管理员（"true" 或 "false"）
-//   X-Trim-Username: 用户名（如 admin）
+//
+//	X-Trim-Userid:   用户 UID（如 1000）
+//	X-Trim-Isadmin:  是否管理员（"true" 或 "false"）
+//	X-Trim-Username: 用户名（如 admin）
 //
 // 非网关环境（如直接访问 app.sock）下，这些 Header 不存在，
 // 此时默认视为管理员（本地调试场景），以便开发测试。
@@ -364,7 +371,7 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 			"users":    map[string]any{},
 			"playback": cfg.Playback,
 			"playlist": cfg.Playlist,
-			"logging": cfg.Logging,
+			"logging":  cfg.Logging,
 		})
 		return
 	}
@@ -373,7 +380,7 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 		"users":    map[string]any{user.Username: userCfg},
 		"playback": cfg.Playback,
 		"playlist": cfg.Playlist,
-		"logging": cfg.Logging,
+		"logging":  cfg.Logging,
 	})
 }
 
@@ -388,9 +395,12 @@ func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	data, err := os.ReadFile(s.statePath)
-	if err != nil {
-		if os.IsNotExist(err) {
+	// 状态文件是 YAML 格式（由 viper 写入），不能用 json.Unmarshal 解析。
+	v := viper.New()
+	v.SetConfigType("yaml")
+	v.SetConfigFile(s.statePath)
+	if err := v.ReadInConfig(); err != nil {
+		if _, ok := err.(viper.ConfigFileNotFoundError); ok || os.IsNotExist(err) {
 			writeJSON(w, http.StatusOK, map[string]any{"users": map[string]any{}})
 			return
 		}
@@ -398,12 +408,7 @@ func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 尝试解析为 JSON
-	var raw map[string]any
-	if err := json.Unmarshal(data, &raw); err != nil {
-		writeJSON(w, http.StatusOK, map[string]any{"raw": string(data)})
-		return
-	}
+	raw := v.AllSettings()
 
 	user := readGatewayUser(r)
 	if user.IsAdmin {
@@ -440,11 +445,29 @@ func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 检查配置中是否关闭了文件日志
+	s.mu.RLock()
+	cfg := s.latestCfg
+	s.mu.RUnlock()
+	fileEnabled := true
+	if cfg != nil {
+		// Enabled 默认为 true，只有显式设为 false 才关闭
+		if !cfg.Logging.Enabled {
+			fileEnabled = false
+		}
+	}
+
+	if !fileEnabled {
+		writeJSON(w, http.StatusOK, map[string]any{"lines": []string{}, "file_enabled": false})
+		return
+	}
+
 	logFile := filepath.Join(s.logDir, "fnmusic-sync.log")
 	data, err := os.ReadFile(logFile)
 	if err != nil {
 		if os.IsNotExist(err) {
-			writeJSON(w, http.StatusOK, map[string]any{"lines": []string{}})
+			// 日志文件不存在（可能被配置为关闭）
+			writeJSON(w, http.StatusOK, map[string]any{"lines": []string{}, "file_enabled": false})
 			return
 		}
 		writeJSONError(w, http.StatusInternalServerError, "读取日志失败: "+err.Error())
@@ -457,7 +480,7 @@ func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
 		lines = lines[len(lines)-200:]
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{"lines": lines})
+	writeJSON(w, http.StatusOK, map[string]any{"lines": lines, "file_enabled": true})
 }
 
 // handleVersion GET 返回版本信息。
@@ -535,8 +558,9 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleUser 处理单个用户的增删改 API。
-//   POST   /api/user/{name}  → 新增或更新用户（body: UserAccount JSON）
-//   DELETE /api/user/{name}  → 删除用户（仅管理员）
+//
+//	POST   /api/user/{name}  → 新增或更新用户（body: UserAccount JSON）
+//	DELETE /api/user/{name}  → 删除用户（仅管理员）
 //
 // 权限规则：
 //   - 管理员可以 POST/DELETE 任意用户
@@ -613,8 +637,8 @@ func (s *Server) handleUser(w http.ResponseWriter, r *http.Request) {
 // lastfmAuthSession 保存正在进行中的 Last.fm 授权会话（token + 用户名）。
 // 授权完成后或超时后自动清理。同一用户同时只允许一个授权会话。
 type lastfmAuthSession struct {
-	token    string
-	username string
+	token     string
+	username  string
 	startedAt time.Time
 }
 
@@ -668,8 +692,8 @@ func (s *Server) handleLastFMAuth(w http.ResponseWriter, r *http.Request) {
 
 	// 记录授权会话，供轮询接口使用
 	lastfmAuthSessions.Store(req.Username, &lastfmAuthSession{
-		token:    token,
-		username: req.Username,
+		token:     token,
+		username:  req.Username,
 		startedAt: time.Now(),
 	})
 
@@ -738,7 +762,7 @@ func (s *Server) handleLastFMPoll(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeJSON(w, http.StatusOK, map[string]any{
 			"authorized": false,
-			"error":     err.Error(),
+			"error":      err.Error(),
 		})
 		return
 	}
@@ -770,8 +794,8 @@ func (s *Server) handleLastFMPoll(w http.ResponseWriter, r *http.Request) {
 	s.logger.Info("Last.fm 授权成功，session_key 已写回配置",
 		"用户", req.Username, "Last.fm账号", lfmUsername)
 	writeJSON(w, http.StatusOK, map[string]any{
-		"authorized":    true,
-		"session_key":   sk,
+		"authorized":      true,
+		"session_key":     sk,
 		"lastfm_username": lfmUsername,
 	})
 }
@@ -784,4 +808,94 @@ func writeJSON(w http.ResponseWriter, status int, data any) {
 func writeJSONError(w http.ResponseWriter, status int, msg string) {
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(map[string]string{"error": msg})
+}
+
+// ===== 升级相关 Handler =====
+// 公共逻辑（获取版本号、拼接下载地址、下载文件）抽到 internal/updater 包，
+// 这里只保留 HTTP handler 和 fpk 专属的 appcenter-cli 安装逻辑。
+
+// handleUpgradeCheck GET /api/upgrade/check
+// 检查最新版本，返回当前版本、最新版本、是否有更新。
+func (s *Server) handleUpgradeCheck(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", "GET")
+		writeJSONError(w, http.StatusMethodNotAllowed, "不支持的请求方法")
+		return
+	}
+
+	client := updater.DefaultHTTPClient()
+
+	latestTag, err := updater.FetchLatestTag(client)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"current_version": buildinfo.Version,
+		"latest_version":  latestTag,
+		"has_update":      updater.HasUpdate(latestTag),
+		"repo_source":     buildinfo.RepoSource,
+	})
+}
+
+// handleUpgrade POST /api/upgrade
+// 下载对应架构的 .fpk 安装包，通过 appcenter-cli install-fpk 安装（fpk 专属逻辑）。
+// 飞牛系统会自动执行 upgrade_init → 替换文件 → upgrade_callback → 重启应用。
+// 参考: https://developer.fnnas.com/docs/cli/appcentercli/
+func (s *Server) handleUpgrade(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", "POST")
+		writeJSONError(w, http.StatusMethodNotAllowed, "不支持的请求方法")
+		return
+	}
+
+	// 检测 appcenter-cli 是否可用（fpk 专属）
+	if _, err := exec.LookPath("appcenter-cli"); err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "未检测到 appcenter-cli 工具，请通过飞牛应用中心手动升级")
+		return
+	}
+
+	client := updater.DefaultHTTPClient()
+
+	// 1. 获取最新版本号
+	latestTag, err := updater.FetchLatestTag(client)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	// 2. 拼接 fpk 下载地址并下载
+	arch := runtime.GOARCH
+	fileName := fmt.Sprintf("%s-%s.fpk", buildinfo.BinaryName, arch)
+	downloadURL := updater.BuildDownloadURL(latestTag, fileName)
+
+	// 3. 下载 fpk 到临时目录
+	tmpFile, err := updater.DownloadFile(client, downloadURL, fileName)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	defer func() { _ = os.Remove(tmpFile) }()
+
+	// 4. 通过 appcenter-cli install-fpk 安装（fpk 专属逻辑）
+	s.logger.Info("开始通过 appcenter-cli 安装飞牛应用包", "版本", latestTag, "文件", tmpFile)
+	cmd := exec.Command("appcenter-cli", "install-fpk", tmpFile)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		s.logger.Error("appcenter-cli 安装失败", "错误", err, "输出", string(output))
+		writeJSONError(w, http.StatusInternalServerError, "安装失败: "+err.Error()+"\n"+string(output))
+		return
+	}
+
+	s.logger.Info("飞牛应用包安装成功，系统将自动重启应用", "版本", latestTag)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":             true,
+		"latest_version": latestTag,
+		"message":        "升级成功，飞牛系统正在自动重启应用",
+	})
 }

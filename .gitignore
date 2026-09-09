@@ -8,6 +8,9 @@
 .task
 .codebuddy
 
+# 开发相关
+/cmd/dev*
+
 # 测试相关
 *_test.go
 /tests
@@ -35,3 +38,8 @@
 
 # 文档
 /docs
+
+# 前端相关
+node_modules/
+dist/
+.vite/

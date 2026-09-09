@@ -1,0 +1,12 @@
+# 构建产物（已压缩，不需要格式化）
+internal/webui/www/app.css
+internal/webui/www/app.js
+
+# 依赖
+node_modules/
+
+# Go 产物
+*.exe
+*.dll
+*.so
+*.dylib

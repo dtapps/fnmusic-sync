@@ -26,9 +26,31 @@ var BuildTime = "unknown"
 // BinaryName 二进制文件名，由 Makefile 通过 -ldflags 注入。
 var BinaryName = "fnmusic-sync"
 
+// RepoSource 构建来源，标识当前二进制由哪个平台构建发布，由 Makefile 通过 -ldflags 注入。
+// 可选值: "cnb", "github"，默认空字符串表示未知来源。
+var RepoSource = ""
+
+// CnbToken CNB 访问令牌，由 Makefile 通过 -ldflags 注入。
+// CNB API 需要鉴权才能访问 release 列表接口，为空时升级接口将提示无法自动升级。
+var CnbToken = ""
+
+// GithubToken GitHub 访问令牌，由 Makefile 通过 -ldflags 注入。
+// GitHub API 在无 Token 时也可使用（有速率限制），因此可以为空。
+var GithubToken = ""
+
 // UserAgent 返回上报给第三方服务的 User-Agent（含版本号）。
 func UserAgent() string {
 	return "cnb.cool/dtapp/fnmusic-sync/" + Version
+}
+
+// IsCNB 返回当前二进制是否由 CNB 平台构建发布。
+func IsCNB() bool {
+	return RepoSource == "cnb"
+}
+
+// IsGitHub 返回当前二进制是否由 GitHub 平台构建发布。
+func IsGitHub() bool {
+	return RepoSource == "github"
 }
 
 // DefaultListenSocket 飞牛音乐监听 Unix Socket 路径（固定值，不可自定义）。

@@ -12,22 +12,22 @@ NAME="__BINARY_NAME__"
 
 # 创建配置 / 日志 / 状态目录（若包未通过 contents 创建）
 for d in "$ETC_DIR" "$LOG_DIR" "$DAT_DIR"; do
-    if [ ! -d "$d" ]; then
-        mkdir -p "$d" 2>/dev/null || true
-    fi
+  if [ ! -d "$d" ]; then
+    mkdir -p "$d" 2>/dev/null || true
+  fi
 done
 
 # 确保二进制可执行
 if [ -f "$BINARY" ]; then
-    chmod 0755 "$BINARY" 2>/dev/null || true
+  chmod 0755 "$BINARY" 2>/dev/null || true
 fi
 
 # 安装 systemd 服务并设置开机自启（若 systemd 可用）
 if command -v systemctl >/dev/null 2>&1 && [ -x "$BINARY" ]; then
-    # 注册 systemd 服务（kardianos/service）
-    "$BINARY" service install >/dev/null 2>&1 || true
-    # 设置开机自启并立即启动
-    systemctl enable --now "$NAME" >/dev/null 2>&1 || true
+  # 注册 systemd 服务（kardianos/service）
+  "$BINARY" service install >/dev/null 2>&1 || true
+  # 设置开机自启并立即启动
+  systemctl enable --now "$NAME" >/dev/null 2>&1 || true
 fi
 
 cat <<EOF

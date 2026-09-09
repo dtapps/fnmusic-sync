@@ -1,0 +1,54 @@
+# 推送工作流
+# https://github.com/actions/runner-images
+# https://github.com/actions/checkout
+# https://github.com/actions/setup-go
+# https://github.com/actions/setup-node
+# https://github.com/pnpm/action-setup
+name: PushRequest
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+    branches: ['**']
+
+permissions:
+  contents: read
+
+# 同一分支的多次 push 取消旧的运行，避免排队浪费。
+concurrency:
+  group: push-check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v7
+
+      - name: 安装 Go
+        uses: actions/setup-go@v7
+        with:
+          cache: true
+          go-version-file: 'go.mod'
+
+      - name: 安装 Pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          cache: true
+          package_json_file: 'cmd/frontend/package.json'
+          cache_dependency_path: 'cmd/frontend/pnpm-lock.yaml'
+
+      - name: 安装 Node.js
+        uses: actions/setup-node@v7
+        with:
+          cache: 'pnpm'
+          cache-dependency-path: 'cmd/frontend/pnpm-lock.yaml'
+          node-version-file: 'cmd/frontend/.nvmrc'
+
+      - name: 安装依赖
+        run: make deps
+
+      - name: 格式化（Go + 前端 + 配置 + 文档 + 脚本）
+        run: make format

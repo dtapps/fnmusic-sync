@@ -5,14 +5,14 @@
 secrets:
   scan:
     paths:
-      - vendor/**          # 跳过 vendor 依赖目录
-      - "**/*_test.go"     # 跳过 Go 测试文件
-      - "**/testdata/**"   # 跳过 Go 测试数据目录
+      - vendor/** # 跳过 vendor 依赖目录
+      - '**/*_test.go' # 跳过 Go 测试文件
+      - '**/testdata/**' # 跳过 Go 测试数据目录
 
 # 软件成分分析（依赖漏洞扫描）
 software-composition-analysis:
   scan:
     paths:
-      - vendor/**          # 跳过 vendor 依赖目录
-      - "**/*_test.go"     # 跳过 Go 测试文件
-      - "**/testdata/**"   # 跳过 Go 测试数据目录
+      - vendor/** # 跳过 vendor 依赖目录
+      - '**/*_test.go' # 跳过 Go 测试文件
+      - '**/testdata/**' # 跳过 Go 测试数据目录

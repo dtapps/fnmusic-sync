@@ -6,10 +6,12 @@ FROM golang:1.27.0-trixie
 # https://github.com/upx/upx/releases
 # https://github.com/goreleaser/nfpm/releases
 # https://developer.fnnas.com/docs/cli/fnpack/
+# https://github.com/nodejs/node/releases
 # ==========================================
 ARG UPX_VERSION=5.2.1
 ARG NFPM_VERSION=2.47.0
 ARG FNPACK_VERSION=1.2.3
+ARG NODE_VERSION=26.8.2
 
 # 1. 设置 Go 环境变量
 ENV GO111MODULE=on
@@ -79,7 +81,32 @@ RUN ARCH=$(uname -m) && \
     echo "--- fnpack installed ---" && \
     fnpack --help >/dev/null 2>&1 || true
 
-# 7. 卸载不需要的工具，并清空所有 apt 缓存
+# 7. 安装 Node.js 工具
+RUN ARCH=$(uname -m) && \
+    if [ "$ARCH" = "x86_64" ]; then NODE_ARCH="x64"; \
+    elif [ "$ARCH" = "aarch64" ]; then NODE_ARCH="arm64"; \
+    else echo "Unsupported architecture: $ARCH" && exit 1; fi && \
+    \
+    # 构建下载地址
+    NODE_DIR="node-v${NODE_VERSION}-linux-${NODE_ARCH}" && \
+    NODE_URL="https://nodejs.org/dist/v${NODE_VERSION}/${NODE_DIR}.tar.xz" && \
+    \
+    cd /tmp && \
+    wget -q -O node.tar.xz "${NODE_URL}" && \
+    tar -xJf node.tar.xz -C /usr/local --strip-components=1 && \
+    \
+    # 配置 npm/pnpm 使用腾讯云源
+    npm config set registry https://mirrors.cloud.tencent.com/npm/ && \
+    npm install -g pnpm && \
+    pnpm config set registry https://mirrors.cloud.tencent.com/npm/ && \
+    pnpm config set ignore-scripts false && \
+    \
+    # 清理
+    rm -rf node.tar.xz && \
+    echo "--- Node.js installed ---" && \
+    node -v && npm -v && pnpm -v
+
+# 8. 卸载不需要的工具，并清空所有 apt 缓存
 RUN apt-get purge -y wget xz-utils && \
     apt-get autoremove -y && \
     apt-get clean && \
