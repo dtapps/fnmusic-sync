@@ -70,11 +70,13 @@ jobs:
     # https://github.com/upx/upx/releases
     # https://github.com/goreleaser/nfpm/releases
     # https://developer.fnnas.com/docs/cli/fnpack/
+    # https://github.com/golangci/golangci-lint/releases
     # ==========================================
     env:
       UPX_VERSION: '5.2.1'
       NFPM_VERSION: '2.47.0'
       FNPACK_VERSION: '1.2.3'
+      GOLANGCI_LINT_VERSION: '2.13.2'
 
     steps:
       - name: 检出代码
@@ -138,6 +140,21 @@ jobs:
           sudo chmod +x /usr/local/bin/fnpack && \
           echo "--- fnpack installed ---" && \
           fnpack --help || true
+
+      - name: 安装 golangci-lint 工具
+        shell: bash
+        run: |
+          LINT_DIR="golangci-lint-${GOLANGCI_LINT_VERSION}-linux-amd64"
+          LINT_URL="https://github.com/golangci/golangci-lint/releases/download/v${GOLANGCI_LINT_VERSION}/${LINT_DIR}.tar.gz"
+
+          cd /tmp && \
+          wget -q -O lint.tar.gz "${LINT_URL}" && \
+          tar -xf lint.tar.gz && \
+          sudo mv ${LINT_DIR}/golangci-lint /usr/local/bin/golangci-lint && \
+          sudo chmod +x /usr/local/bin/golangci-lint && \
+          rm -rf lint.tar.gz ${LINT_DIR} && \
+          echo "--- golangci-lint installed ---" && \
+          golangci-lint --version
 
       - name: 安装依赖
         shell: bash

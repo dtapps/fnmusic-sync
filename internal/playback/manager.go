@@ -172,11 +172,11 @@ func (m *Manager) Play(
 
 	if noThreshold {
 		// 关闭阈值判断：每次播放即推送（不判断进度）。
-		m.CheckScrobble(context.Background(), track.Duration)
+		m.CheckScrobble(ctx, track.Duration)
 	} else {
 		// 兜底：只靠取流进度不够（客户端可能预加载整首、或音频直连 CDN 不经代理），
 		// 因此按"真实播放时长"定时检查一次，到点即判定达标。
-		go m.scheduleScrobble(session)
+		go m.scheduleScrobble(ctx, session)
 	}
 
 	m.logger.Info(
@@ -309,7 +309,7 @@ func (m *Manager) CheckScrobble(
 // 必要性：CheckScrobble 原本只在取流进度（Content-Range）到达时被调用，
 // 而客户端可能一次性预加载整首、或音频走 CDN 直连不经本代理，
 // 此时一个进度事件都没有，歌播完了也不会推送。这里按真实播放时长兜底。
-func (m *Manager) scheduleScrobble(session *Session) {
+func (m *Manager) scheduleScrobble(ctx context.Context, session *Session) {
 	m.mu.Lock()
 	threshold := m.thresholdFunc(session.Track.Duration)
 	m.mu.Unlock()
@@ -329,7 +329,7 @@ func (m *Manager) scheduleScrobble(session *Session) {
 
 	select {
 	case <-timer.C:
-		m.CheckScrobble(context.Background(), threshold)
+		m.CheckScrobble(ctx, threshold)
 	case <-session.done:
 	}
 }

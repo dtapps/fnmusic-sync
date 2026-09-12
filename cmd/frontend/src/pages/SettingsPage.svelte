@@ -99,7 +99,7 @@
     if (!confirm($_('upgrade.confirm_upgrade', { values: { version: upgradeInfo.latest_version } }))) return;
     upgrading = true;
     try {
-      const result = await doUpgrade();
+      await doUpgrade();
       showToast($_('upgrade.upgrade_success'), 'success');
       // 升级后应用会重启，延迟刷新页面
       setTimeout(() => window.location.reload(), 5000);

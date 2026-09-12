@@ -99,7 +99,8 @@
         </p>
       {:else}
         <pre
-          class="log-content"><!-- prettier-ignore -->{#each filteredLines as line}<span class={lineClass(line)}>{line}</span>{'\n'}{/each}</pre>
+          class="log-content"><!-- prettier-ignore -->{#each filteredLines as line, i (i)}<span class={lineClass(line)}>{line}</span>
+{/each}</pre>
       {/if}
     {/if}
   </Card>

@@ -4,4 +4,17 @@
 # 配置文件由程序首次启动时自动生成（config.SaveDefault），无需在此手动创建。
 # 所有配置项均通过飞牛桌面应用图标进入 Web 配置页面完成。
 
+LOG_FILE="${TRIM_PKGVAR}/upgrade.log"
+echo "$(date '+%Y-%m-%d %H:%M:%S') [install_callback] 开始执行 install_callback 脚本" >> "${LOG_FILE}" 2>/dev/null || true
+
+# 检查二进制文件信息
+if [ -f "${TRIM_APPDEST}/fnmusic-sync" ]; then
+    BIN_SIZE=$(stat -c%s "${TRIM_APPDEST}/fnmusic-sync" 2>/dev/null || stat -f%z "${TRIM_APPDEST}/fnmusic-sync" 2>/dev/null || echo "unknown")
+    echo "$(date '+%Y-%m-%d %H:%M:%S') [install_callback] 安装后二进制大小=${BIN_SIZE}" >> "${LOG_FILE}" 2>/dev/null || true
+else
+    echo "$(date '+%Y-%m-%d %H:%M:%S') [install_callback] ⚠️ 二进制文件不存在: ${TRIM_APPDEST}/fnmusic-sync" >> "${LOG_FILE}" 2>/dev/null || true
+fi
+
+echo "$(date '+%Y-%m-%d %H:%M:%S') [install_callback] install_callback 执行完成" >> "${LOG_FILE}" 2>/dev/null || true
+
 exit 0

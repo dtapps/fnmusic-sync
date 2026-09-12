@@ -880,19 +880,56 @@ func (s *Server) handleUpgrade(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	// 进程被飞牛系统杀掉后 defer 不会执行，但留着无害。
 	defer func() { _ = os.Remove(tmpFile) }()
 
-	// 4. 通过 appcenter-cli install-fpk 安装（fpk 专属逻辑）
+	// 4. 记录升级前的信息，便于诊断
+	exePath, _ := os.Executable()
+	s.logger.Info("升级前状态",
+		"当前版本", buildinfo.Version,
+		"目标版本", latestTag,
+		"二进制路径", exePath,
+		"fpk文件", tmpFile,
+		"文件大小", func() int64 {
+			if fi, e := os.Stat(tmpFile); e == nil {
+				return fi.Size()
+			}
+			return -1
+		}(),
+	)
+
+	// 5. 通过 appcenter-cli install-fpk 安装（fpk 专属逻辑）
 	s.logger.Info("开始通过 appcenter-cli 安装飞牛应用包", "版本", latestTag, "文件", tmpFile)
 	cmd := exec.Command("appcenter-cli", "install-fpk", tmpFile)
 	output, err := cmd.CombinedOutput()
+	outputStr := string(output)
+	s.logger.Info("appcenter-cli 输出", "输出", outputStr)
 	if err != nil {
-		s.logger.Error("appcenter-cli 安装失败", "错误", err, "输出", string(output))
-		writeJSONError(w, http.StatusInternalServerError, "安装失败: "+err.Error()+"\n"+string(output))
+		s.logger.Error("appcenter-cli 安装失败",
+			"错误", err,
+			"退出码", cmd.ProcessState.ExitCode(),
+			"输出", outputStr,
+		)
+		writeJSONError(w, http.StatusInternalServerError, "安装失败: "+err.Error()+"\n"+outputStr)
 		return
 	}
 
-	s.logger.Info("飞牛应用包安装成功，系统将自动重启应用", "版本", latestTag)
+	// appcenter-cli 返回 0 不一定代表真正安装成功，
+	// 检查输出中是否包含常见的错误/警告关键词
+	lowerOut := strings.ToLower(outputStr)
+	if strings.Contains(lowerOut, "error") || strings.Contains(lowerOut, "fail") {
+		s.logger.Error("appcenter-cli 输出包含错误关键词，可能未真正安装成功",
+			"输出", outputStr, "退出码", cmd.ProcessState.ExitCode())
+		writeJSONError(w, http.StatusInternalServerError,
+			"appcenter-cli 虽然返回成功，但输出包含错误信息:\n"+outputStr)
+		return
+	}
+
+	s.logger.Info("飞牛应用包安装成功，系统将自动重启应用",
+		"版本", latestTag,
+		"appcenter输出", outputStr,
+		"退出码", cmd.ProcessState.ExitCode(),
+	)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":             true,
 		"latest_version": latestTag,

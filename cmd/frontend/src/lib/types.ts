@@ -17,9 +17,9 @@ export interface VersionInfo {
 
 // ===== Last.fm 配置 =====
 export interface LastFmPlaylist {
-  top_tracks?: LastFmTopTracks;
-  loved_tracks?: LastFmLovedTracks;
-  recent_tracks?: LastFmRecentTracks;
+  top_tracks: LastFmTopTracks;
+  loved_tracks: LastFmLovedTracks;
+  recent_tracks: LastFmRecentTracks;
 }
 
 export interface LastFmTopTracks {
@@ -47,16 +47,16 @@ export interface LastFmConfig {
   api_secret?: string;
   session_key?: string;
   username?: string;
-  playlist?: LastFmPlaylist;
+  playlist: LastFmPlaylist;
 }
 
 // ===== ListenBrainz 配置 =====
 export interface ListenBrainzPlaylist {
-  daily_jams?: LBPlaylistItem;
-  weekly_jams?: LBPlaylistItem;
-  weekly_exploration?: LBPlaylistItem;
-  year_discoveries?: LBPlaylistItem;
-  year_missed?: LBPlaylistItem;
+  daily_jams: LBPlaylistItem;
+  weekly_jams: LBPlaylistItem;
+  weekly_exploration: LBPlaylistItem;
+  year_discoveries: LBPlaylistItem;
+  year_missed: LBPlaylistItem;
 }
 
 export interface LBPlaylistItem {
@@ -69,7 +69,7 @@ export interface ListenBrainzConfig {
   enabled?: boolean;
   token?: string;
   username?: string;
-  playlist?: ListenBrainzPlaylist;
+  playlist: ListenBrainzPlaylist;
 }
 
 // ===== 用户配置 =====

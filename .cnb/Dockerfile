@@ -7,11 +7,13 @@ FROM golang:1.27.0-trixie
 # https://github.com/goreleaser/nfpm/releases
 # https://developer.fnnas.com/docs/cli/fnpack/
 # https://github.com/nodejs/node/releases
+# https://github.com/golangci/golangci-lint/releases
 # ==========================================
 ARG UPX_VERSION=5.2.1
 ARG NFPM_VERSION=2.47.0
 ARG FNPACK_VERSION=1.2.3
 ARG NODE_VERSION=26.8.2
+ARG GOLANGCI_LINT_VERSION=2.13.2
 
 # 1. 设置 Go 环境变量
 ENV GO111MODULE=on
@@ -106,7 +108,27 @@ RUN ARCH=$(uname -m) && \
     echo "--- Node.js installed ---" && \
     node -v && npm -v && pnpm -v
 
-# 8. 卸载不需要的工具，并清空所有 apt 缓存
+# 8. 安装 golangci-lint 工具
+RUN ARCH=$(uname -m) && \
+    if [ "$ARCH" = "x86_64" ]; then LINT_ARCH="amd64"; \
+    elif [ "$ARCH" = "aarch64" ]; then LINT_ARCH="arm64"; \
+    else echo "Unsupported architecture: $ARCH" && exit 1; fi && \
+    \
+    # 构建下载地址
+    LINT_DIR="golangci-lint-${GOLANGCI_LINT_VERSION}-linux-${LINT_ARCH}" && \
+    LINT_URL="https://files.m.daocloud.io/github.com/golangci/golangci-lint/releases/download/v${GOLANGCI_LINT_VERSION}/${LINT_DIR}.tar.gz" && \
+    \
+    cd /tmp && \
+    wget -q -O lint.tar.gz "${LINT_URL}" && \
+    tar -xf lint.tar.gz && \
+    mv ${LINT_DIR}/golangci-lint /usr/local/bin/golangci-lint && \
+    chmod +x /usr/local/bin/golangci-lint && \
+    rm -rf lint.tar.gz ${LINT_DIR} && \
+    # 清理
+    echo "--- golangci-lint installed ---" && \
+    golangci-lint --version
+
+# 9. 卸载不需要的工具，并清空所有 apt 缓存
 RUN apt-get purge -y wget xz-utils && \
     apt-get autoremove -y && \
     apt-get clean && \

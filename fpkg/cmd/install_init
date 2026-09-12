@@ -2,4 +2,8 @@
 
 ### This script is called before the user installs the application.
 
+LOG_FILE="${TRIM_PKGVAR}/upgrade.log"
+mkdir -p "${TRIM_PKGVAR}" 2>/dev/null || true
+echo "$(date '+%Y-%m-%d %H:%M:%S') [install_init] 开始执行 install_init 脚本" >> "${LOG_FILE}" 2>/dev/null || true
+
 exit 0

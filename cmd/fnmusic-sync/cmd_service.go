@@ -212,7 +212,7 @@ func toggleDebug(enable bool) error {
 		return fmt.Errorf("unit 文件中未找到 ExecStart 行: %s", path)
 	}
 
-	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0644); err != nil {
+	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0644); err != nil { //nolint:gosec // path 为受控的 systemd unit 路径，非外部输入
 		return fmt.Errorf("写入 unit 文件失败: %w", err)
 	}
 

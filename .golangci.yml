@@ -1,0 +1,57 @@
+version: '2'
+
+linters:
+  enable:
+    # --- 核心 (Bug 预防) ---
+    - errcheck # 检查是否忽略了错误返回值
+    - govet # Go 官方检查可疑代码结构
+    - staticcheck # 静态分析，发现逻辑错误、废弃 API 等
+    - ineffassign # 检测无效赋值
+
+    # --- 代码质量 ---
+    - misspell # 检查拼写错误
+    - unconvert # 移除不必要的类型转换
+    - nilerr # 检查 if err != nil { return nil } 吞错误
+    - errorlint # 检查 errors.Is/As 使用，避免 == 比较 error
+
+    # --- 并发与安全 ---
+    - bodyclose # 检查 HTTP 响应体是否被关闭
+    - contextcheck # 检查 context 是否正确传递
+    - noctx # 检查 HTTP 请求是否传递了 context
+    - gosec # 安全检查，检测不安全代码
+
+  exclusions:
+    # 仅排除前端目录（非 Go 代码）与依赖目录。
+    # 注意：paths 里的正则是子串匹配，不要写裸词（如 ent），
+    # 否则会误匹配到含该字符串的路径（如 client.go），导致这些文件被整体跳过检查。
+    paths:
+      - cmd/devserver
+      - cmd/frontend
+      - vendor
+    rules:
+      # gosec 文件权限告警：桌面应用用 0755/0644 是合理的
+      - linters: [gosec]
+        text: 'G301|G302|G304|G306'
+      # gosec G104 与 errcheck 重复
+      - linters: [gosec]
+        text: 'G104'
+      # gosec exec.Command 变量参数：升级/服务管理代码中调用 dpkg/systemctl 是安全的
+      - linters: [gosec]
+        text: 'G204'
+      # lastfm: md5 是 Last.fm API 签名强制要求，非安全弱点（G501 导入 / G401 调用）
+      - path: internal/lastfm/client\.go
+        linters: [gosec]
+        text: 'G501|G401'
+      # listenbrainz: validateTokenEndpoint 只是 API 端点 URL，非凭据（G101）
+      - path: internal/listenbrainz/client\.go
+        linters: [gosec]
+        text: 'G101'
+      # errcheck: defer Close / 文件操作 / 日志写入忽略错误是常见写法
+      - linters: [errcheck]
+        text: 'Error return value of'
+      # contextcheck: 通知/DNS 服务调用不依赖 context
+      - linters: [contextcheck]
+        text: 'should pass the context parameter'
+      # noctx: 桌面应用中 exec.Command 和 client.Get 的 context 传递非关键
+      - linters: [noctx]
+        text: 'must not be called'

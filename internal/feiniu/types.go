@@ -211,7 +211,7 @@ func (c *Client) findPlaylistByName(ctx context.Context, name string) (*Playlist
 	var resp playlistListResponse
 	if err := c.doGet(ctx, url, &resp); err != nil {
 		// 搜索接口不可用时按"未找到"处理，由调用方创建。
-		return nil, nil
+		return nil, nil //nolint:nilerr
 	}
 
 	for _, p := range resp.Data.List {

@@ -72,5 +72,5 @@ func providerStatusOf(cfg *config.Config) func(username string) (bool, bool) {
 // socketModeFromConfig 从配置文件的 server.socket_mode 取 socket 权限。
 // 为 0 时由 takeover 的 effectiveMode 自动推断（继承官方 socket 权限）。
 func socketModeFromConfig(cfg *config.Config) os.FileMode {
-	return os.FileMode(cfg.Server.SocketMode) & os.ModePerm
+	return os.FileMode(cfg.Server.SocketMode) & os.ModePerm //nolint:gosec // SocketMode 为文件权限，已 & ModePerm 截断，不会溢出
 }

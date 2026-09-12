@@ -2,4 +2,17 @@
 
 ### This script is called after the user upgrades the application.
 
+LOG_FILE="${TRIM_PKGVAR}/upgrade.log"
+echo "$(date '+%Y-%m-%d %H:%M:%S') [upgrade_callback] 开始执行 upgrade_callback 脚本" >> ${LOG_FILE}
+
+# 检查升级后二进制文件信息
+if [ -f "${TRIM_APPDEST}/fnmusic-sync" ]; then
+    BIN_SIZE=$(stat -c%s "${TRIM_APPDEST}/fnmusic-sync" 2>/dev/null || stat -f%z "${TRIM_APPDEST}/fnmusic-sync" 2>/dev/null || echo "unknown")
+    echo "$(date '+%Y-%m-%d %H:%M:%S') [upgrade_callback] 升级后二进制大小=${BIN_SIZE}" >> ${LOG_FILE}
+else
+    echo "$(date '+%Y-%m-%d %H:%M:%S') [upgrade_callback] ⚠️ 二进制文件不存在: ${TRIM_APPDEST}/fnmusic-sync" >> ${LOG_FILE}
+fi
+
+echo "$(date '+%Y-%m-%d %H:%M:%S') [upgrade_callback] upgrade_callback 执行完成" >> ${LOG_FILE}
+
 exit 0

@@ -126,7 +126,7 @@ func New(
 	p.detector = playback.NewDetector(manager, logger)
 
 	p.reverse = &httputil.ReverseProxy{
-		Director:       p.director,
+		Rewrite:        p.rewrite,
 		Transport:      p.transport,
 		ErrorHandler:   p.errorHandler,
 		ModifyResponse: p.modifyResponse,
@@ -168,7 +168,7 @@ func (p *Proxy) Start(ctx context.Context, listener net.Listener) error {
 		p.logger.Info("收到退出信号，正在停止代理")
 
 		shutdownCtx, cancel := context.WithTimeout(
-			context.Background(),
+			context.WithoutCancel(ctx),
 			10*time.Second,
 		)
 		defer cancel()
@@ -329,9 +329,9 @@ func (p *Proxy) logDone(
 //
 // 注意：不能动 outreq.Host。nginx 的 proxy_pass 指向 unix socket 时
 // 默认下发 Host: unix，trim-music 可能依赖它，必须原样透传。
-func (p *Proxy) director(req *http.Request) {
-	req.URL.Scheme = "http"
-	req.URL.Host = "trim-music"
+func (p *Proxy) rewrite(r *httputil.ProxyRequest) {
+	r.Out.URL.Scheme = "http"
+	r.Out.URL.Host = "trim-music"
 }
 
 // bufferBody 复制请求体用于分析，同时保证 upstream 仍能读到完整 body。
@@ -449,15 +449,6 @@ func (p *Proxy) modifyResponse(resp *http.Response) error {
 		}
 	}
 
-	attrs := []any{
-		"状态码", resp.StatusCode,
-		"路径", resp.Request.URL.Path,
-		"查询", resp.Request.URL.RawQuery,
-		"内容类型", resp.Header.Get("Content-Type"),
-		"响应长度", resp.ContentLength,
-		"响应头", redactHeaders(resp.Header),
-	}
-
 	// 仅开启请求日志时才读取/搬运响应 body：否则每个响应都多一次 I/O，非 debug 下毫无必要。
 	// capture 可用时，完整响应写入 capture.log，主日志不再打印响应体。
 	if p.capture != nil && p.capture.enabled != nil && p.capture.enabled.Load() {
@@ -478,9 +469,6 @@ func (p *Proxy) modifyResponse(resp *http.Response) error {
 				if entry := captureEntryFromCtx(resp.Request.Context()); entry != nil {
 					// 请求 + 响应合并为一条记录一次性写出（capture.log），主日志不再重复。
 					entry.Finish(resp.StatusCode, resp.Header, body, resp.ContentLength)
-				} else {
-					// capture 不可用（nil/未启用/取流）时，响应摘要仍打主日志。
-					attrs = append(attrs, "响应体", truncate(string(body), maxLogBody))
 				}
 			}
 		}
@@ -560,22 +548,6 @@ func (c *countWriter) Flush() {
 // 否则流式响应和 WebSocket 会失效。
 func (c *countWriter) Unwrap() http.ResponseWriter {
 	return c.ResponseWriter
-}
-
-func redactHeaders(src http.Header) http.Header {
-	dst := make(http.Header, len(src))
-
-	for key, values := range src {
-		if isSensitiveHeader(key) {
-			dst[key] = []string{"<已脱敏>"}
-
-			continue
-		}
-
-		dst[key] = values
-	}
-
-	return dst
 }
 
 func isSensitiveHeader(key string) bool {

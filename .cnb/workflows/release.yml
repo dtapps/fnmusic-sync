@@ -3,7 +3,6 @@
   web_trigger_build_go_project:
     - runner:
         tags: cnb:arch:amd64 # 指定 Runner 必须有这个标签
-        # cpus: 64 # 如有需要，可根据实际情况调整
       services:
         - docker # 启用 Docker 服务（用于 docker build/push）
       docker:

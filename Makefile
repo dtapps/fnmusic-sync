@@ -109,7 +109,6 @@ format-go:
 	gofmt -w -s .
 	go fmt ./...
 	go fix ./...
-	go vet ./...
 
 # 格式化前端文件（HTML/CSS/JS/TS/Svelte）
 format-frontend:
@@ -145,6 +144,7 @@ format-yaml:
 		".cnb.yml" \
 		".github/**/*.{yaml,yml}" \
 		".nfpm.yaml" \
+		".golangci.yml" \
 		|| echo "⚠️  prettier 格式化失败，请确认 npx 可用"
 	@echo "[Format] YAML 格式化完成。"
 
@@ -175,6 +175,28 @@ format-shell:
 			echo "[Format] Shell 检查完成（shellcheck，仅检查未修复）。" ; \
 		} || echo "⚠️  shfmt 和 shellcheck 均未安装，跳过 Shell 格式化。" ; \
 	}
+
+# 检查（Go + HTML/CSS/JS/TS/Svelte）
+check: lint-go lint-go-fix lint-frontend
+
+# Go 代码检查（有 issue 即停止）
+lint-go:
+	@echo "[Lint] Go 代码检查 (go vet + golangci-lint)..."
+	go vet ./...
+	golangci-lint run ./...
+
+# Go 代码检查（自动修复）
+lint-go-fix:
+	@echo "[Lint] Go 代码检查（自动修复）..."
+	golangci-lint run --fix ./...
+
+# 前端代码检查（类型 + ESLint + 格式只读校验，错误即停止）
+lint-frontend:
+	@echo "[Lint] 前端代码检查 (svelte-check + eslint + prettier)..."
+	@test -d $(FRONTEND_DIR)/node_modules || { echo "⚠️  前端依赖未安装，请先运行: make deps"; exit 1; }
+	@cd $(FRONTEND_DIR) && pnpm run lint
+	@cd $(FRONTEND_DIR) && pnpm run format:check
+	@echo "✓ 前端代码检查通过。"
 
 # ==================== 构建 ====================
 

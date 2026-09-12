@@ -15,6 +15,7 @@
     resolveTheme,
     resolveLanguage,
     onPlatformConfigUpdate,
+    platformConfig,
   } from '$lib/stores';
   import { getVersion, getCurrentUser, getConfig, getState, getLogs } from '$lib/api';
   import { formatBuildTime } from '$lib/utils';

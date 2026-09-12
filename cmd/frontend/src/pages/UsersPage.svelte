@@ -89,11 +89,6 @@
     const apiSecret = user.lastfm?.api_secret?.trim() || '';
     return !!(apiKey && apiSecret && name in ($config.users || {}));
   }
-
-  function handleAuth(name: string) {
-    authStates[name] = authStates[name] || { status: 'idle', message: '' };
-    authStates = { ...authStates };
-  }
 </script>
 
 <section>
@@ -233,7 +228,7 @@
       {@const user = createEmptyUser()}
       <UserEditCard {name} {user} onSave={() => handleSave(name)} canAuth={false} />
     {:else}
-      {#each userEntries as [name, user] (name)}
+      {#each userEntries as [name] (name)}
         <UserEditCard
           {name}
           bind:user={users[name]}
