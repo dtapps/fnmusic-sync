@@ -1,5 +1,5 @@
 # nfpm 配置文件
-# 用于打包 deb / rpm / apk
+# 用于打包 deb
 # 文档: https://nfpm.goreleaser.com/configuration/
 # 占位符由 Makefile generate_nfpm_config 用 sed 替换:
 #   ${ARCH}    -> 包架构 (amd64/x86_64 或 arm64/aarch64，见 Makefile 调用)
@@ -38,10 +38,3 @@ contents:
 # deb 特定配置
 deb:
   compression: xz
-
-# rpm 特定配置
-rpm:
-  compression: xz
-
-# apk 特定配置
-apk: {}

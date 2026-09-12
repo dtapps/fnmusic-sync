@@ -60,7 +60,7 @@ jobs:
           echo "preRelease: $PRE_RELEASE"
           echo "pre_release=${PRE_RELEASE}" >> $GITHUB_OUTPUT
 
-  # 构建 + 打包 Linux 安装包（deb / rpm / apk / fpk）
+  # 构建 + 打包 Linux 安装包（deb/fpk）
   build:
     needs: prepare
     runs-on: ubuntu-latest
@@ -143,7 +143,7 @@ jobs:
         shell: bash
         run: make deps
 
-      - name: 打包 Linux 安装包（deb / rpm / apk / fpk）
+      - name: 打包 Linux 安装包（deb/fpk）
         shell: bash
         env:
           VERSION: ${{ needs.prepare.outputs.interior_version }}
@@ -241,18 +241,9 @@ jobs:
               ARCH="-"
               DESC="其它"
               case "$fname" in
-                *-linux-*.tar.gz)
-                  ARCH="${fname#*linux-}"; ARCH="${ARCH%.tar.gz}"
-                  DESC="Linux 二进制压缩包" ;;
                 *.deb)
                   ARCH="${fname#fnmusic-sync_}"; ARCH="${ARCH%.deb}"
                   DESC="Debian/Ubuntu 安装包" ;;
-                *.rpm)
-                  ARCH="${fname#fnmusic-sync.}"; ARCH="${ARCH%.rpm}"
-                  DESC="Fedora/RHEL 安装包" ;;
-                *.apk)
-                  ARCH="${fname#fnmusic-sync.}"; ARCH="${ARCH%.apk}"
-                  DESC="Alpine 安装包" ;;
                 *.fpk)
                   ARCH="${fname#fnmusic-sync-}"; ARCH="${ARCH%.fpk}"
                   DESC="飞牛 fnOS 应用包" ;;

@@ -10,7 +10,7 @@ import (
 type RuntimeMode int
 
 const (
-	// ModeTraditional 传统安装模式（deb/rpm/apk/脚本安装到 /usr/bin）。
+	// ModeTraditional 传统安装模式（deb/脚本安装到 /usr/bin）。
 	ModeTraditional RuntimeMode = iota
 	// ModeFPK 飞牛 fnOS fpk 安装模式（通过应用中心安装到 /var/apps/fnmusic-sync）。
 	ModeFPK

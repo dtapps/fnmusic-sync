@@ -51,7 +51,7 @@ RUN ARCH=$(uname -m) && \
     echo "--- UPX installed ---" && \
     upx --version
 
-# 5. 安装 nfpm (用于打包 deb/rpm/apk，一份配置三种格式)
+# 5. 安装 nfpm (用于打包 deb，一份配置三种格式)
 RUN ARCH=$(uname -m) && \
     if [ "$ARCH" = "x86_64" ]; then NFPM_ARCH="x86_64"; \
     elif [ "$ARCH" = "aarch64" ]; then NFPM_ARCH="arm64"; \

@@ -16,13 +16,13 @@ import (
 
 // pkgManager 表示检测到的系统包管理器。
 type pkgManager struct {
-	name string // dpkg / rpm / apk
-	arch string // 包管理器对应的架构名（amd64→amd64/x86_64, arm64→arm64/aarch64）
-	ext  string // .deb / .rpm / .apk
+	name string // dpkg
+	arch string // 包管理器对应的架构名（amd64, arm64）
+	ext  string // .deb
 }
 
 // detectPackageManager 检测当前系统的包管理器，返回 nil 表示不支持。
-// 优先级：dpkg > rpm > apk（三者互斥，同时存在的极端情况按常见发行版习惯处理）。
+// 优先级：dpkg（三者互斥，同时存在的极端情况按常见发行版习惯处理）。
 func detectPackageManager() *pkgManager {
 	arch := runtime.GOARCH
 
@@ -35,38 +35,17 @@ func detectPackageManager() *pkgManager {
 		return &pkgManager{name: "dpkg", arch: pa, ext: ".deb"}
 	}
 
-	// rpm（Fedora/RHEL/openSUSE）
-	if _, err := exec.LookPath("rpm"); err == nil {
-		pa := "x86_64"
-		if arch == "arm64" {
-			pa = "aarch64"
-		}
-		return &pkgManager{name: "rpm", arch: pa, ext: ".rpm"}
-	}
-
-	// apk（Alpine）
-	if _, err := exec.LookPath("apk"); err == nil {
-		pa := "x86_64"
-		if arch == "arm64" {
-			pa = "aarch64"
-		}
-		return &pkgManager{name: "apk", arch: pa, ext: ".apk"}
-	}
-
 	return nil
 }
 
 // packageFileName 根据包管理器类型和架构拼接安装包文件名。
 // deb: fnmusic-sync_{arch}.deb
-// rpm: fnmusic-sync.{arch}.rpm
-// apk: fnmusic-sync.{arch}.apk
 func (pm *pkgManager) packageFileName() string {
 	switch pm.name {
 	case "dpkg":
 		return fmt.Sprintf("%s_%s%s", buildinfo.BinaryName, pm.arch, pm.ext)
-	default: // rpm / apk
-		return fmt.Sprintf("%s.%s%s", buildinfo.BinaryName, pm.arch, pm.ext)
 	}
+	return ""
 }
 
 // installCommand 返回安装指定包文件所需的命令和参数。
@@ -74,19 +53,15 @@ func (pm *pkgManager) installCommand(pkgPath string) (string, []string) {
 	switch pm.name {
 	case "dpkg":
 		return "dpkg", []string{"-i", pkgPath}
-	case "rpm":
-		return "rpm", []string{"-Uvh", "--force", pkgPath}
-	case "apk":
-		return "apk", []string{"add", "--allow-untrusted", "--force-overwrite", pkgPath}
 	}
 	return "", nil
 }
 
 // upgradeCmd 是 `fnmusic-sync self-upgrade` 子命令。
-// 下载对应平台的系统安装包（deb/rpm/apk）并调用包管理器安装（需 sudo）。
+// 下载对应平台的系统安装包（deb）并调用包管理器安装（需 sudo）。
 var upgradeCmd = &cobra.Command{
 	Use:   "self-upgrade",
-	Short: "下载并安装最新版本系统安装包（deb/rpm/apk，需 sudo）",
+	Short: "下载并安装最新版本系统安装包（deb，需 sudo）",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return doSelfUpgrade()
 	},
@@ -107,7 +82,7 @@ func doSelfUpgrade() error {
 	// 检测系统包管理器
 	pm := detectPackageManager()
 	if pm == nil {
-		fmt.Println("❌ 未检测到支持的包管理器（dpkg/rpm/apk），无法自动升级。")
+		fmt.Println("❌ 未检测到支持的包管理器（dpkg），无法自动升级。")
 		fmt.Println("   请手动下载安装包进行升级。")
 		return nil
 	}
@@ -140,7 +115,7 @@ func doSelfUpgrade() error {
 	}
 	defer func() { _ = os.Remove(tmpFile) }()
 
-	// 5. 调用系统包管理器安装（deb/rpm/apk 专属逻辑）
+	// 5. 调用系统包管理器安装（deb 专属逻辑）
 	cmdName, cmdArgs := pm.installCommand(tmpFile)
 	cmd := exec.Command(cmdName, cmdArgs...)
 	cmd.Stdout = os.Stdout

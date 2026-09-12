@@ -83,27 +83,21 @@ installed_version() {
   fi
 }
 
-# 检测系统包管理器，输出: "deb amd64" / "rpm x86_64" / "apk x86_64"
+# 检测系统包管理器，输出: "deb amd64"
 detect_package_info() {
   arch=$(uname -m)
   case "$arch" in
     x86_64 | amd64)
       pkg_arch="amd64"
-      rpm_arch="x86_64"
       ;;
     aarch64 | arm64)
       pkg_arch="arm64"
-      rpm_arch="aarch64"
       ;;
     *) die "不支持的 CPU 架构: $arch（当前仅支持 amd64/arm64）" ;;
   esac
 
   if command -v dpkg >/dev/null 2>&1; then
     printf "deb %s" "$pkg_arch"
-  elif command -v rpm >/dev/null 2>&1; then
-    printf "rpm %s" "$rpm_arch"
-  elif command -v apk >/dev/null 2>&1; then
-    printf "apk %s" "$rpm_arch"
   else
     echo ""
   fi
@@ -115,8 +109,6 @@ package_filename() {
   pkg_arch="$2"
   case "$pkg_type" in
     deb) printf "%s_%s.deb" "$BINARY" "$pkg_arch" ;;
-    rpm) printf "%s.%s.rpm" "$BINARY" "$pkg_arch" ;;
-    apk) printf "%s.%s.apk" "$BINARY" "$pkg_arch" ;;
   esac
 }
 
@@ -126,8 +118,6 @@ install_package() {
   pkg_file="$2"
   case "$pkg_type" in
     deb) dpkg -i "$pkg_file" ;;
-    rpm) rpm -Uvh --force "$pkg_file" ;;
-    apk) apk add --allow-untrusted --force-overwrite "$pkg_file" ;;
   esac
 }
 
@@ -137,7 +127,7 @@ download_and_install() {
 
   pkg_info=$(detect_package_info)
   if [ -z "$pkg_info" ]; then
-    die "未检测到支持的包管理器（dpkg/rpm/apk），无法自动安装。"
+    die "未检测到支持的包管理器（dpkg），无法自动安装。"
   fi
 
   pkg_type=$(echo "$pkg_info" | awk '{print $1}')
@@ -242,7 +232,7 @@ do_install() {
   log "查看版本：${BINARY} version"
   log "体检：    ${BINARY} --check"
   log "升级：    sudo ${BINARY} self-upgrade"
-  log "卸载：    sudo apt remove ${BINARY} / sudo rpm -e ${BINARY} / sudo apk del ${BINARY}"
+  log "卸载：    sudo apt remove ${BINARY}
 }
 
 do_uninstall() {
@@ -268,10 +258,6 @@ do_uninstall() {
   # 用包管理器卸载
   if command -v dpkg >/dev/null 2>&1; then
     dpkg -r "$BINARY" 2>/dev/null || true
-  elif command -v rpm >/dev/null 2>&1; then
-    rpm -e "$BINARY" 2>/dev/null || true
-  elif command -v apk >/dev/null 2>&1; then
-    apk del "$BINARY" 2>/dev/null || true
   fi
 
   # 确保二进制被删除

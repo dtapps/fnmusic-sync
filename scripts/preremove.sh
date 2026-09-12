@@ -1,6 +1,6 @@
 #!/bin/sh
 # __BINARY_NAME__ 卸载前脚本 (preremove)
-# 由 nfpm 在 deb/rpm/apk 卸载前自动执行
+# 由 nfpm 在 deb 卸载前自动执行
 # 注：本脚本中的 __BINARY_NAME__ 由 Makefile 打包时替换为真实二进制名
 set -e
 

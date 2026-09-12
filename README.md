@@ -12,7 +12,7 @@
 - **配置热加载**：改 `config.yaml` 立即生效（用户、凭证、阈值、日志级别），不用重启。
 - **日志双写**：同时输出到控制台(stderr)与日志文件 `/var/log/fnmusic-sync/fnmusic-sync.log`，自动切割、gzip 压缩、过期清理。
 - **一键安装**：安装脚本自动下载系统安装包、注册 systemd 服务、设置开机自启并启动，无需手动操作。
-- **自升级**：`fnmusic-sync self-upgrade` 自动检测系统包管理器（dpkg/rpm/apk），下载对应安装包并安装，升级后自动重启服务。
+- **自升级**：`fnmusic-sync self-upgrade` 自动检测系统包管理器（dpkg），下载对应安装包并安装，升级后自动重启服务。
 - **ListenBrainz 推荐歌单同步**：自动同步 ListenBrainz 的 daily_jams、weekly_jams、weekly_exploration、year_discoveries、year_missed 推荐歌单到飞牛音乐。
 - **Last.fm 智能歌单同步**：基于 scrobble 数据自动生成 top_tracks（最常听）、loved_tracks（红心收藏）、recent_tracks（最近播放）歌单。
 
@@ -47,7 +47,7 @@ socket 绑定在 inode 上，用 `os.Rename`（mv）改名后官方后端仍能�
 curl -fsSL https://cnb.cool/dtapp/fnmusic-sync/-/git/raw/main/scripts/install.sh | sudo sh
 ```
 
-脚本会自动完成：检测包管理器 → 下载 deb/rpm/apk 安装包 → 安装 → 注册 systemd 服务 → 设置开机自启 → 启动服务。配置文件由程序首次启动时自动生成。
+脚本会自动完成：检测包管理器 → 下载 deb 安装包 → 安装 → 注册 systemd 服务 → 设置开机自启 → 启动服务。配置文件由程序首次启动时自动生成。
 
 ### 升级
 
@@ -72,25 +72,21 @@ curl -fsSL https://cnb.cool/dtapp/fnmusic-sync/-/git/raw/main/scripts/install.sh
 
 # 方式二：包管理器卸载（卸载前自动停止并移除服务）
 sudo apt remove fnmusic-sync          # deb 系（Debian/Ubuntu）
-sudo rpm -e fnmusic-sync              # rpm 系（Fedora/RHEL/openSUSE）
-sudo apk del fnmusic-sync              # apk 系（Alpine）
 
 # 连配置、日志、状态一起删除：
 sudo sh install.sh uninstall --purge
-# 或：sudo apt purge fnmusic-sync / sudo apk del --purge fnmusic-sync
+# 或：sudo apt purge fnmusic-sync
 ```
 
 ### 其他安装方式
 
 <details>
-<summary>手动下载 deb/rpm/apk</summary>
+<summary>手动下载 deb</summary>
 
 从 Release 附件下载对应架构的包安装（包内 postinstall 脚本自动创建目录、注册服务并启动）：
 
 ```bash
 sudo dpkg -i fnmusic-sync_amd64.deb     # Debian / Ubuntu
-sudo rpm -i fnmusic-sync.x86_64.rpm      # RHEL / CentOS / openSUSE
-sudo apk add fnmusic-sync.x86_64.apk     # Alpine
 ```
 
 </details>
@@ -101,7 +97,7 @@ sudo apk add fnmusic-sync.x86_64.apk     # Alpine
 ```bash
 make build-linux-amd64      # 产物 bin/fnmusic-sync-linux-amd64
 make build-linux-all        # 2 个 Linux 架构（带标签 + 不带标签）
-make package-linux-all      # deb / rpm / apk / fpk
+make package-linux-all      # deb / fpk
 ```
 
 构建/发布矩阵：**amd64 / arm64**（CI 打 Release 时交叉编译并上传附件）。
@@ -144,16 +140,16 @@ sudo fnmusic-sync service debug    # 开启 debug 模式并重启服务
 sudo fnmusic-sync service nodebug  # 关闭 debug 模式并重启服务
 ```
 
-| 子命令                               | 说明                                                                        |
-| ------------------------------------ | --------------------------------------------------------------------------- |
-| `version`                            | 打印版本、Git 提交、构建时间、Go 版本、平台、配置/状态/日志路径             |
-| `self-upgrade`                       | 升级自身到仓库最新版本（自动检测包管理器，下载 deb/rpm/apk 安装并重启服务） |
-| `service install`                    | 安装系统服务（systemd，需 root）——安装脚本已自动执行                        |
-| `service uninstall`                  | 卸载系统服务（需 root）——卸载脚本已自动执行                                 |
-| `service start` / `stop` / `restart` | 启停服务                                                                    |
-| `service status`                     | 查看运行状态                                                                |
-| `service debug`                      | 开启 debug 模式（修改 ExecStart 加 --debug，daemon-reload + restart）       |
-| `service nodebug`                    | 关闭 debug 模式（移除 --debug，daemon-reload + restart）                    |
+| 子命令                               | 说明                                                                  |
+| ------------------------------------ | --------------------------------------------------------------------- |
+| `version`                            | 打印版本、Git 提交、构建时间、Go 版本、平台、配置/状态/日志路径       |
+| `self-upgrade`                       | 升级自身到仓库最新版本（自动检测包管理器，下载 deb 安装并重启服务）   |
+| `service install`                    | 安装系统服务（systemd，需 root）——安装脚本已自动执行                  |
+| `service uninstall`                  | 卸载系统服务（需 root）——卸载脚本已自动执行                           |
+| `service start` / `stop` / `restart` | 启停服务                                                              |
+| `service status`                     | 查看运行状态                                                          |
+| `service debug`                      | 开启 debug 模式（修改 ExecStart 加 --debug，daemon-reload + restart） |
+| `service nodebug`                    | 关闭 debug 模式（移除 --debug，daemon-reload + restart）              |
 
 | 参数              | 默认值  | 说明                                  |
 | ----------------- | ------- | ------------------------------------- |
@@ -349,7 +345,7 @@ tail -f /var/log/fnmusic-sync/fnmusic-sync.log
 ```bash
 make build-linux-amd64     # 单架构
 make build-linux-all       # amd64/arm64（带标签 + 不带标签）
-make package-linux-all     # deb + rpm + apk + fpk
+make package-linux-all     # deb + fpk
 make clean-binaries        # 清理裸二进制，保留 tar.gz/安装包
 make clean-archives        # 清理裸二进制 + tar.gz，保留安装包
 ```

@@ -1,6 +1,6 @@
 #!/bin/sh
 # __BINARY_NAME__ 安装后脚本 (postinstall)
-# 由 nfpm 在 deb/rpm/apk 安装后自动执行
+# 由 nfpm 在 deb 安装后自动执行
 # 注：本脚本中的 __BINARY_NAME__ 由 Makefile 打包时替换为真实二进制名
 set -e
 
@@ -49,9 +49,7 @@ ${NAME} 安装完成！
 
 卸载（自动停止并移除服务）：
   sudo apt remove ${NAME}          # deb 系（Debian/Ubuntu）
-  sudo rpm -e ${NAME}              # rpm 系（Fedora/RHEL/openSUSE）
-  sudo apk del ${NAME}             # apk 系（Alpine）
-  # 连配置一起删除：sudo apt purge ${NAME} / sudo apk del --purge ${NAME}
+  # 连配置一起删除：sudo apt purge ${NAME}
 
 配置文件由首次启动自动生成（${ETC_DIR}/config.yaml），修改后自动热加载。
 EOF

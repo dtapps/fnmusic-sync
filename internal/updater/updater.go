@@ -1,6 +1,6 @@
 // Package updater 提供统一的升级公共逻辑：获取最新版本号、拼接下载地址、下载文件。
 //
-// 不同安装方式（deb/rpm/apk 包管理器安装、fpk 通过 appcenter-cli 安装）
+// 不同安装方式（deb 包管理器安装、fpk 通过 appcenter-cli 安装）
 // 只需各自实现安装步骤，版本检查和下载逻辑统一调用本包。
 package updater
 

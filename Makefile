@@ -369,7 +369,7 @@ clean-archives:
 # ==================== 打包 ====================
 
 # 生成 nfpm 临时配置文件（替换变量）
-# 参数: $(1)=架构名 (amd64 / x86_64 / aarch64)
+# 参数: $(1)=架构名 (amd64)
 define generate_nfpm_config
 	@sed -e 's|$${ARCH}|$(1)|g' -e 's|$${VERSION}|$(VERSION)|g' \
 	     -e 's|$${POSTINSTALL}|.nfpm-scripts/postinstall.sh|g' \
@@ -391,29 +391,15 @@ define cleanup_scripts
 	@rm -rf .nfpm-scripts
 endef
 
-# 打包单个架构的 deb/rpm/apk 包
-# 参数: $(1)=GOARCH (amd64/arm64/mips/mipsle/arm), $(2)=deb 架构名, $(3)=deb 文件名后缀
-# 参数: $(4)=rpm/apk 架构名 (x86_64/aarch64/mips/mipsel/arm)
+# 打包单个架构的 deb 包
+# 参数: $(1)=GOARCH, $(2)=deb 架构名 (amd64/arm64), $(3)=deb 文件名后缀
 define package_nfpm_formats
 	$(call prepare_scripts)
-	@if [ "$(1)" != "$(4)" ]; then \
-		cp $(BUILD_DIR)/$(BINARY_NAME)-linux-$(1) $(BUILD_DIR)/$(BINARY_NAME)-linux-$(4); \
-	fi
 	$(call generate_nfpm_config,$(2))
 	nfpm package -p deb -f .nfpm-$(2).yaml -t $(BUILD_DIR)/$(BINARY_NAME)_$(3).deb
 	@rm -f .nfpm-$(2).yaml
-	@echo "✓ deb 包已创建: $(BUILD_DIR)/$(BINARY_NAME)_$(3).deb"
-	$(call generate_nfpm_config,$(4))
-	nfpm package -p rpm -f .nfpm-$(4).yaml -t $(BUILD_DIR)/$(BINARY_NAME).$(4).rpm
-	@echo "✓ rpm 包已创建: $(BUILD_DIR)/$(BINARY_NAME).$(4).rpm"
-	nfpm package -p apk -f .nfpm-$(4).yaml -t $(BUILD_DIR)/$(BINARY_NAME).$(4).apk
-	@echo "✓ apk 包已创建: $(BUILD_DIR)/$(BINARY_NAME).$(4).apk"
-	@rm -f .nfpm-$(4).yaml
-	@if [ "$(1)" != "$(4)" ]; then \
-		rm -f $(BUILD_DIR)/$(BINARY_NAME)-linux-$(4); \
-	fi
 	$(call cleanup_scripts)
-	@echo "✓ 包已创建 (deb/rpm/apk): $(BINARY_NAME)"
+	@echo "✓ deb 包已创建: $(BUILD_DIR)/$(BINARY_NAME)_$(3).deb"
 endef
 
 # 从 git log 自动生成 changelog 文本（取上一个 tag 到 HEAD 的提交摘要）
@@ -450,8 +436,8 @@ define build_fpk
 	@echo "✓ fpk 包已创建: $(BUILD_DIR)/$(BINARY_NAME)-$(1).fpk"
 endef
 
-# deb/rpm/apk/fpk 都复用 build-linux-all 的二进制（不带标签 + 带标签）
-package-linux-deb package-linux-rpm package-linux-apk package-linux-fpk: build-linux-all
+# deb/fpk 都复用 build-linux-all 的二进制（不带标签 + 带标签）
+package-linux-deb package-linux-fpk: build-linux-all
 
 # 打包 Linux deb（全部 2 架构）
 .PHONY: package-linux-deb
@@ -460,28 +446,8 @@ package-linux-deb:
 	@echo "┌────────────────────────────────────────────────────────────"
 	@echo "│ [打包] 创建 Linux deb 包 (amd64/arm64)..."
 	@echo "└────────────────────────────────────────────────────────────"
-	$(call package_nfpm_formats,amd64,amd64,amd64,x86_64)
-	$(call package_nfpm_formats,arm64,arm64,arm64,aarch64)
-
-# 打包 Linux rpm（全部 2 架构）
-.PHONY: package-linux-rpm
-package-linux-rpm:
-	@echo ""
-	@echo "┌────────────────────────────────────────────────────────────"
-	@echo "│ [打包] 创建 Linux rpm 包 (x86_64/aarch64)..."
-	@echo "└────────────────────────────────────────────────────────────"
-	$(call package_nfpm_formats,amd64,amd64,amd64,x86_64)
-	$(call package_nfpm_formats,arm64,arm64,arm64,aarch64)
-
-# 打包 Linux apk（Alpine，全部 2 架构）
-.PHONY: package-linux-apk
-package-linux-apk:
-	@echo ""
-	@echo "┌────────────────────────────────────────────────────────────"
-	@echo "│ [打包] 创建 Linux apk 包 (x86_64/aarch64)..."
-	@echo "└────────────────────────────────────────────────────────────"
-	$(call package_nfpm_formats,amd64,amd64,amd64,x86_64)
-	$(call package_nfpm_formats,arm64,arm64,arm64,aarch64)
+	$(call package_nfpm_formats,amd64,amd64,amd64)
+	$(call package_nfpm_formats,arm64,arm64,arm64)
 
 # 打包 Linux fpk（FnOS，全部 2 架构）
 .PHONY: package-linux-fpk
@@ -493,15 +459,15 @@ package-linux-fpk:
 	$(call build_fpk,amd64)
 	$(call build_fpk,arm64)
 
-# 打包所有 Linux deb/rpm/apk/fpk 包（构建一次，各格式复用）
+# 打包所有 Linux deb/fpk 包（构建一次，各格式复用）
 .PHONY: package-linux-all
-package-linux-all: package-linux-deb package-linux-rpm package-linux-apk package-linux-fpk
+package-linux-all: package-linux-deb package-linux-fpk
 	@echo ""
 	@echo "╔════════════════════════════════════════════════════════════"
-	@echo "║ ✓ 所有包已创建 (deb/rpm/apk/fpk, 多架构)"
+	@echo "║ ✓ 所有包已创建 (deb/fpk, 多架构)"
 	@echo "╚════════════════════════════════════════════════════════════"
 
-# 打包所有 Linux 包（deb/rpm/apk/fpk）
+# 打包所有 Linux 包（deb/fpk）
 .PHONY: package-linux
 package-linux: package-linux-all
 
