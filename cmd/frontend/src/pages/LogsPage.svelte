@@ -41,9 +41,12 @@
     return 'info';
   }
 
+  // 反转顺序，最新日志显示在顶部（无需滚动到底部查看最新内容）
+  let orderedLines = $derived(allLines.slice().reverse());
+
   let filteredLines = $derived.by(() => {
-    if (filter === 'all') return allLines;
-    return allLines.filter((line) => extractLevel(line) === filter);
+    if (filter === 'all') return orderedLines;
+    return orderedLines.filter((line) => extractLevel(line) === filter);
   });
 
   // 按等级给日志行着色

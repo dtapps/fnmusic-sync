@@ -9,7 +9,9 @@
 package webui
 
 import (
+	"archive/tar"
 	"bytes"
+	"compress/gzip"
 	"context"
 	"embed"
 	"encoding/json"
@@ -23,9 +25,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"cnb.cool/dtapp/fnmusic-sync/internal/buildinfo"
@@ -842,9 +847,10 @@ func (s *Server) handleUpgradeCheck(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleUpgrade POST /api/upgrade
-// 下载对应架构的 .fpk 安装包，通过 appcenter-cli install-fpk 安装（fpk 专属逻辑）。
-// 飞牛系统会自动执行 upgrade_init → 替换文件 → upgrade_callback → 重启应用。
-// 参考: https://developer.fnnas.com/docs/cli/appcentercli/
+// 下载对应架构的 .fpk 安装包，调用飞牛官方升级命令 appcenter-cli install-local，
+// 由飞牛完成「停止 → 卸载 → 重装 → 启动」的标准升级流程，并刷新 App Center 版本元数据。
+// 说明：飞牛开放 API 未提供应用自升级能力，:8000 的升级接口又只认 Web 会话 Cookie；
+// 而 appcenter-cli 运行在系统上下文、无需浏览器 Cookie，是对已安装应用执行官方升级的正确入口。
 func (s *Server) handleUpgrade(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 
@@ -854,8 +860,9 @@ func (s *Server) handleUpgrade(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 检测 appcenter-cli 是否可用（fpk 专属）
-	if _, err := exec.LookPath("appcenter-cli"); err != nil {
+	// 升级过程需要 stop/start 应用，依赖 appcenter-cli
+	appcenterCLI, err := exec.LookPath("appcenter-cli")
+	if err != nil {
 		writeJSONError(w, http.StatusInternalServerError, "未检测到 appcenter-cli 工具，请通过飞牛应用中心手动升级")
 		return
 	}
@@ -898,41 +905,146 @@ func (s *Server) handleUpgrade(w http.ResponseWriter, r *http.Request) {
 		}(),
 	)
 
-	// 5. 通过 appcenter-cli install-fpk 安装（fpk 专属逻辑）
-	s.logger.Info("开始通过 appcenter-cli 安装飞牛应用包", "版本", latestTag, "文件", tmpFile)
-	cmd := exec.Command("appcenter-cli", "install-fpk", tmpFile)
-	output, err := cmd.CombinedOutput()
-	outputStr := string(output)
-	s.logger.Info("appcenter-cli 输出", "输出", outputStr)
+	// 5. 解包工作区（staging 需保留到重启脚本执行完，故不在此 defer 删除）
+	staging, err := os.MkdirTemp("", "fnmusic-upgrade-")
 	if err != nil {
-		s.logger.Error("appcenter-cli 安装失败",
-			"错误", err,
-			"退出码", cmd.ProcessState.ExitCode(),
-			"输出", outputStr,
-		)
-		writeJSONError(w, http.StatusInternalServerError, "安装失败: "+err.Error()+"\n"+outputStr)
+		writeJSONError(w, http.StatusInternalServerError, "创建临时目录失败: "+err.Error())
+		return
+	}
+	outerDir := filepath.Join(staging, "outer")
+	if err := os.MkdirAll(outerDir, 0o755); err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "创建临时目录失败: "+err.Error())
 		return
 	}
 
-	// appcenter-cli 返回 0 不一定代表真正安装成功，
-	// 检查输出中是否包含常见的错误/警告关键词
-	lowerOut := strings.ToLower(outputStr)
-	if strings.Contains(lowerOut, "error") || strings.Contains(lowerOut, "fail") {
-		s.logger.Error("appcenter-cli 输出包含错误关键词，可能未真正安装成功",
-			"输出", outputStr, "退出码", cmd.ProcessState.ExitCode())
-		writeJSONError(w, http.StatusInternalServerError,
-			"appcenter-cli 虽然返回成功，但输出包含错误信息:\n"+outputStr)
+	// 6. 解包 fpk 外层 tar.gz（得到 app.tgz / cmd / config / manifest / wizard / 图标 等）。
+	//    app.tgz 由后续 appcenter-cli install-local 自行读取，无需在此二次解包。
+	if err := extractTarGz(tmpFile, outerDir); err != nil {
+		s.logger.Error("解包 fpk 外层失败", "错误", err)
+		writeJSONError(w, http.StatusInternalServerError, "解包 fpk 失败: "+err.Error())
 		return
 	}
 
-	s.logger.Info("飞牛应用包安装成功，系统将自动重启应用",
-		"版本", latestTag,
-		"appcenter输出", outputStr,
-		"退出码", cmd.ProcessState.ExitCode(),
+	// 8. 确定目标运行目录（TRIM_APPDEST），并据此推导应用所在卷序号。
+	//    install-local 在升级场景下会忽略 -v 参数，这里仅作兼容保留。
+	appDest := os.Getenv("TRIM_APPDEST")
+	if appDest == "" {
+		appDest = filepath.Join("/var/apps", buildinfo.BinaryName, "target")
+	}
+	volume := detectVolumeFromPath(appDest)
+
+	s.logger.Info("升级前状态",
+		"当前版本", buildinfo.Version,
+		"目标版本", latestTag,
+		"运行目录", appDest,
+		"fpk文件", tmpFile,
 	)
+
+	// 9. 调用飞牛官方升级命令 appcenter-cli install-local。
+	//    它会对已安装应用执行「停止 → 卸载 → 重装 → 启动」的标准升级流程，
+	//    并刷新 App Center 的版本元数据（这正是此前「自行覆盖文件」方案缺失、导致版本号不更新的部分）。
+	//    该命令执行时会先停止当前正在运行的本进程，因此必须在返回 HTTP 响应之后、
+	//    以脱离会话（setsid）的方式在后台执行，确保进程被停止后升级仍能继续完成。
+	upgradeCmdStr := "sleep 1; " + appcenterCLI + " install-local -d " + outerDir +
+		" -v " + strconv.Itoa(volume) + "; rm -rf " + staging
+	s.logger.Info("执行官方升级命令", "命令", upgradeCmdStr)
+
+	upgradeCmd := exec.Command("bash", "-c", upgradeCmdStr)
+	upgradeCmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	if err := upgradeCmd.Start(); err != nil {
+		s.logger.Error("启动官方升级命令失败", "错误", err)
+		writeJSONError(w, http.StatusInternalServerError, "启动升级失败: "+err.Error())
+		return
+	}
+	// 不 Wait：让命令在后台独立运行，应用被停止时本进程随之退出亦无妨。
+
+	if f, ok := w.(http.Flusher); ok {
+		f.Flush()
+	}
+
+	s.logger.Info("已触发官方后台升级，应用即将重启", "版本", latestTag)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":             true,
 		"latest_version": latestTag,
-		"message":        "升级成功，飞牛系统正在自动重启应用",
+		"message":        "已通过飞牛应用中心执行升级，应用正在重启以完成升级",
 	})
+}
+
+// detectVolumeFromPath 从 TRIM_APPDEST 路径（如 /vol1/@appcenter/fnmusic-sync）
+// 推导应用所在卷序号，供 appcenter-cli install-local -v 使用。
+// 说明：升级场景下 install-local 会忽略 -v 参数，此处仅作兼容保留，默认返回卷 1。
+func detectVolumeFromPath(appDest string) int {
+	re := regexp.MustCompile(`/vol(\d+)/`)
+	if m := re.FindStringSubmatch(appDest); m != nil {
+		if v, err := strconv.Atoi(m[1]); err == nil {
+			return v
+		}
+	}
+	return 1
+}
+
+// extractTarGz 解压 gzip 压缩的 tar 到 dest 目录。
+func extractTarGz(src, dest string) error {
+	f, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	gz, err := gzip.NewReader(f)
+	if err != nil {
+		return fmt.Errorf("gzip 解压失败: %w", err)
+	}
+	defer gz.Close()
+	tr := tar.NewReader(gz)
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return fmt.Errorf("读取 tar 失败: %w", err)
+		}
+		target, err := safeJoin(dest, hdr.Name)
+		if err != nil {
+			return err
+		}
+		switch hdr.Typeflag {
+		case tar.TypeDir:
+			if err := os.MkdirAll(target, os.ModeDir|os.FileMode(hdr.Mode&0o777)); err != nil {
+				return err
+			}
+		case tar.TypeReg:
+			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+				return err
+			}
+			out, err := os.OpenFile(target, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, os.FileMode(hdr.Mode&0o777))
+			if err != nil {
+				return err
+			}
+			if _, err := io.Copy(out, tr); err != nil {
+				out.Close()
+				return err
+			}
+			out.Close()
+		default:
+			// 跳过符号链接/硬链接等；fpk 内不应包含，忽略即可。
+			continue
+		}
+	}
+	return nil
+}
+
+// safeJoin 将 tar 内的条目名安全拼接进 base，防止路径穿越。
+func safeJoin(base, name string) (string, error) {
+	clean := filepath.Clean("/" + name)
+	rel := strings.TrimPrefix(clean, "/")
+	if rel == "" || rel == ".." || strings.HasPrefix(rel, "../") {
+		return "", fmt.Errorf("非法的 tar 路径: %s", name)
+	}
+	target := filepath.Join(base, rel)
+	baseClean := filepath.Clean(base)
+	if target != baseClean && !strings.HasPrefix(target, baseClean+string(os.PathSeparator)) {
+		return "", fmt.Errorf("非法的 tar 路径: %s", name)
+	}
+	return target, nil
 }

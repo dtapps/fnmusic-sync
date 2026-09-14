@@ -21,6 +21,10 @@ BUILD_DIR=bin
 
 # 版本信息（支持外部传入）
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
+# 包版本号：去掉 git tag 的 v 前缀。
+# Debian / fnOS 包元数据（manifest version、deb version、npm package.json version）
+# 不使用 v 前缀；而二进制内部版本与下载链接仍使用带 v 的 VERSION（与 git tag 保持一致）。
+PKG_VERSION = $(patsubst v%,%,$(VERSION))
 COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 BUILDTIME ?= $(shell date -u '+%Y-%m-%d %H:%M:%S UTC')
 
@@ -208,7 +212,7 @@ build-frontend:
 	@echo "┌────────────────────────────────────────────────────────────"
 	@echo "│ [构建] Svelte 前端"
 	@echo "└────────────────────────────────────────────────────────────"
-	@cd $(FRONTEND_DIR) && sed -i.bak -E 's/("version"[[:space:]]*:[[:space:]]*")[^"]*(")/\1$(VERSION)\2/' package.json && rm -f package.json.bak
+	@cd $(FRONTEND_DIR) && sed -i.bak -E 's/("version"[[:space:]]*:[[:space:]]*")[^"]*(")/\1$(PKG_VERSION)\2/' package.json && rm -f package.json.bak
 	@cd $(FRONTEND_DIR) && pnpm build
 	@echo "✓ 构建完成。"
 
@@ -393,7 +397,7 @@ clean-archives:
 # 生成 nfpm 临时配置文件（替换变量）
 # 参数: $(1)=架构名 (amd64)
 define generate_nfpm_config
-	@sed -e 's|$${ARCH}|$(1)|g' -e 's|$${VERSION}|$(VERSION)|g' \
+	@sed -e 's|$${ARCH}|$(1)|g' -e 's|$${VERSION}|$(PKG_VERSION)|g' \
 	     -e 's|$${POSTINSTALL}|.nfpm-scripts/postinstall.sh|g' \
 	     -e 's|$${PREREMOVE}|.nfpm-scripts/preremove.sh|g' \
 	     .nfpm.yaml > .nfpm-$(1).yaml
@@ -448,7 +452,7 @@ define build_fpk
 	@mkdir -p $(FPKG_DIR)/app
 	@cp $(BUILD_DIR)/$(BINARY_NAME)-$(BUILD_TAG)-linux-$(1) $(FPKG_DIR)/app/$(BINARY_NAME)
 	@cp $(FPKG_DIR)/manifest $(FPKG_DIR)/manifest.bak
-	@sed 's|__VERSION__|$(VERSION)|g' $(FPKG_DIR)/manifest.bak > $(FPKG_DIR)/manifest.tmp
+	@sed 's|__VERSION__|$(PKG_VERSION)|g' $(FPKG_DIR)/manifest.bak > $(FPKG_DIR)/manifest.tmp
 	@sed "s|__CHANGELOG__|$(CHANGELOG)|g" $(FPKG_DIR)/manifest.tmp > $(FPKG_DIR)/manifest
 	@rm -f $(FPKG_DIR)/manifest.tmp
 	@cd $(FPKG_DIR) && fnpack build
