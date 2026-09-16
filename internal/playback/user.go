@@ -125,6 +125,32 @@ func parseUsername(body []byte) string {
 	return ""
 }
 
+// ParseLoginToken 从 /user/password-login 等登录响应里解析新签发的 userToken 与用户名。
+// 响应形如 {"code":0,"data":{"userToken":"...","user":{"name":"admin",...}}}。
+func ParseLoginToken(body []byte) (token, name string) {
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal(body, &top); err != nil {
+		return "", ""
+	}
+
+	rawData, ok := top["data"]
+	if !ok {
+		return "", ""
+	}
+
+	var data struct {
+		UserToken string `json:"userToken"`
+		User      struct {
+			Name string `json:"name"`
+		} `json:"user"`
+	}
+	if err := json.Unmarshal(rawData, &data); err != nil {
+		return "", ""
+	}
+
+	return data.UserToken, data.User.Name
+}
+
 // Update 用 /user/me 响应体更新缓存，返回解析到的用户名（空表示未识别）。
 func (c *UserCache) Update(key string, body []byte) string {
 	name := parseUsername(body)
@@ -132,20 +158,42 @@ func (c *UserCache) Update(key string, body []byte) string {
 		return ""
 	}
 
+	c.Register(key, name)
+
+	return name
+}
+
+// Register 直接登记一个已知 token → 用户名 的映射。
+//
+// 典型场景：客户端 token 过期后重新调用 /user/password-login 拿到新的 userToken，
+// 代理从登录响应里同时解析出 userToken 与用户名，主动登记。
+// 这样客户端一旦切换到新 token，scrobble / 歌单同步立即生效，
+// 既不依赖异步探测（探测复用触发请求的认证头，而音乐服务常要求随请求变化的签名，
+// 直接复用会 401，导致新 token 始终探测失败、用户名解析不出来），
+// 也不会因旧 token 失效而丢掉这一期间的播放记录。
+// 对比只处理"过期 token"的 InvalidateToken：这里补上"检查新获取 token"这一环。
+func (c *UserCache) Register(key, name string) {
+	if key == "" || name == "" {
+		return
+	}
+
 	c.mu.Lock()
 	u, ok := c.byKey[key]
+	isNew := !ok
 	if !ok {
 		u = &User{Key: key}
 		c.byKey[key] = u
 	}
-	// 用户名未变化则不重复打日志：被动拦截与主动探测可能各成功一次。
-	unchanged := ok && u.Name == name
+	nameChanged := u.Name != name
 	u.Name = name
+	// 新 token 已确认有效，清掉可能的失败标记，避免被 failedTTL 挡住。
+	delete(c.failed, key)
 	onIdentified := c.onUserIdentified
 	c.mu.Unlock()
 
-	if unchanged {
-		return name
+	// 已识别过且用户名未变：仅静默更新，不重复打日志 / 触发回调。
+	if !isNew && !nameChanged {
+		return
 	}
 
 	c.logger.Info(
@@ -163,13 +211,11 @@ func (c *UserCache) Update(key string, body []byte) string {
 		c.store.Ensure(name, lastfm, lb)
 	}
 
-	// 首次识别到新用户，触发回调（如歌单同步）。
+	// 首次识别到新用户（或用户名发生变化），触发回调（如歌单同步）。
 	// 在锁外调用，避免回调内反向操作 UserCache 导致死锁。
 	if onIdentified != nil {
 		go onIdentified(key, name)
 	}
-
-	return name
 }
 
 // Resolve 返回已缓存的用户名（可能为空）。

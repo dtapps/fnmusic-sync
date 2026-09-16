@@ -449,6 +449,34 @@ func (p *Proxy) modifyResponse(resp *http.Response) error {
 		}
 	}
 
+	// 客户端 token 过期后会重新调用 /user/password-login 获取新的 userToken。
+	// 主动从响应里解析新 token + 用户名并登记：客户端一切换到新 token，
+	// scrobble / 同步立即生效，不再依赖异步探测（探测头常被签名机制挡成 401），
+	// 也不会因旧 token 失效而丢掉这一期间的播放记录。
+	// 这正是"检查新获取的 token"这一环——此前只处理了"过期 token"（InvalidateToken）。
+	if strings.Contains(resp.Request.URL.Path, "/user/password-login") {
+		if b, rerr := io.ReadAll(io.LimitReader(resp.Body, 1<<16)); rerr == nil {
+			// 读完必须塞回，否则客户端拿不到登录响应、拿不到新 token。
+			resp.Body = io.NopCloser(io.MultiReader(bytes.NewReader(b), resp.Body))
+
+			if tok, name := playback.ParseLoginToken(b); tok != "" && name != "" {
+				p.userCache.Register(tok, name)
+
+				// 这次登录用的是旧（已过期）token，现在已轮换，把它从缓存剔除，
+				// 避免旧 token 残留在活跃列表里反复打上游。
+				if uc := userFromCtx(resp.Request.Context()); uc.Source == "music-token" && uc.Key != "" && uc.Key != tok {
+					p.userCache.InvalidateToken(uc.Key)
+				}
+
+				p.logger.Info(
+					"从登录响应登记新 token",
+					"用户标识", strutil.FirstN8(tok),
+					"用户名", name,
+				)
+			}
+		}
+	}
+
 	// 仅开启请求日志时才读取/搬运响应 body：否则每个响应都多一次 I/O，非 debug 下毫无必要。
 	// capture 可用时，完整响应写入 capture.log，主日志不再打印响应体。
 	if p.capture != nil && p.capture.enabled != nil && p.capture.enabled.Load() {
