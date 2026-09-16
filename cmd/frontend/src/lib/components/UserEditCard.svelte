@@ -3,6 +3,7 @@
   import { showToast, currentUser } from '$lib/stores';
   import { startLastFmAuth, pollLastFmAuth } from '$lib/api';
   import type { UserAccount } from '$lib/types';
+  import { errMessage } from '$lib/utils';
   import { Button, Card, Input, Select, Switch, Collapsible, PasswordInput } from './index';
 
   // 导出 AuthState 类型
@@ -61,10 +62,10 @@
       window.open(resp.auth_url, '_blank');
       localAuthState = { status: 'pending', message: $_('lastfm.auth_opened') };
       pollAuth(apiKey, apiSecret);
-    } catch (e: any) {
+    } catch (e) {
       localAuthState = {
         status: 'error',
-        message: $_('lastfm.auth_failed', { values: { message: e.message } }),
+        message: $_('lastfm.auth_failed', { values: { message: errMessage(e) } }),
       };
     }
   }
@@ -112,12 +113,12 @@
         });
         localAuthState = { status: 'pending', message: waitMsg };
         setTimeout(poll, 3000);
-      } catch (e: any) {
+      } catch (e) {
         if (attempts >= maxAttempts) {
           localAuthState = {
             status: 'error',
             message: $_('lastfm.auth_poll_failed', {
-              values: { message: e.message },
+              values: { message: errMessage(e) },
             }),
           };
           return;

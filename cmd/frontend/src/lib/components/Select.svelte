@@ -2,12 +2,7 @@
   import type { HTMLSelectAttributes } from 'svelte/elements';
   import { cn } from '$lib/utils';
 
-  let {
-    class: className = '',
-    value = $bindable(),
-    children,
-    ...restProps
-  }: HTMLSelectAttributes & { value?: any } = $props();
+  let { class: className = '', value = $bindable(), children, ...restProps }: HTMLSelectAttributes = $props();
 </script>
 
 <select

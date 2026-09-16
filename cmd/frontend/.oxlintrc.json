@@ -1,0 +1,16 @@
+{
+  "env": {
+    "browser": true
+  },
+  "ignorePatterns": [
+    "dist",
+    "build",
+    "node_modules",
+    ".svelte-check"
+  ],
+  "rules": {
+    "no-unused-vars": ["warn", { "argsIgnorePattern": "^_", "varsIgnorePattern": "^_" }],
+    "no-explicit-any": "warn",
+    "no-console": "off"
+  }
+}

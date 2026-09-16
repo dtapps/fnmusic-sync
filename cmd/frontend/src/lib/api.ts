@@ -1,13 +1,14 @@
 // 飞牛音乐 Scrobble 代理 - API 封装
+import type { VersionInfo, AppConfig, StateData, UserAccount, LogData } from './types';
 
 // 从 Go 模板注入的 window.BaseURL 获取前缀路径
-const BASE_URL = (window as any).BaseURL || '/app/fnmusic-sync';
+const BASE_URL = window.BaseURL || '/app/fnmusic-sync';
 const API = `${BASE_URL}/api`;
 
 /**
  * 通用 API 调用函数
  */
-export async function apiCall<T = any>(path: string, method: string = 'GET', body?: any): Promise<T> {
+export async function apiCall<T = unknown>(path: string, method: string = 'GET', body?: unknown): Promise<T> {
   const opts: RequestInit = { method, headers: {} };
   if (body) {
     opts.headers = { 'Content-Type': 'application/json' };
@@ -24,7 +25,7 @@ export async function apiCall<T = any>(path: string, method: string = 'GET', bod
 // ===== API 方法 =====
 
 export function getVersion() {
-  return apiCall<any>('/version');
+  return apiCall<VersionInfo>('/version');
 }
 
 export function getCurrentUser() {
@@ -32,18 +33,18 @@ export function getCurrentUser() {
 }
 
 export function getConfig() {
-  return apiCall<any>('/config');
+  return apiCall<AppConfig>('/config');
 }
 
 export function getState() {
-  return apiCall<any>('/state');
+  return apiCall<StateData>('/state');
 }
 
 export function getLogs() {
-  return apiCall<{ lines: string[] }>('/logs');
+  return apiCall<LogData>('/logs');
 }
 
-export function saveUser(name: string, data: any) {
+export function saveUser(name: string, data: UserAccount) {
   return apiCall(`/user/${encodeURIComponent(name)}`, 'POST', data);
 }
 
@@ -51,7 +52,7 @@ export function deleteUser(name: string) {
   return apiCall(`/user/${encodeURIComponent(name)}`, 'DELETE');
 }
 
-export function saveSettings(settings: any) {
+export function saveSettings(settings: AppConfig) {
   return apiCall('/settings', 'PUT', settings);
 }
 

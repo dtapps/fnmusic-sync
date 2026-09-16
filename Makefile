@@ -94,13 +94,44 @@ deps:
 .PHONY: update-deps
 update-deps:
 	@echo "[Deps] 更新依赖..."
+	go version
 	go get -u ./...
 	go mod tidy
+	
 	@echo "[Deps] 更新前端依赖..."
+	pnpm --version
+	pnpm --dir $(FRONTEND_DIR) self-update
 # 	pnpm --dir $(FRONTEND_DIR) update
 	pnpm --dir $(FRONTEND_DIR) update --latest
-	pnpm --dir $(FRONTEND_DIR) self-update
 	@echo "[Deps] 完成。"
+
+# 启动本地开发后端（模拟飞牛网关 + API，监听 :8080）
+.PHONY: dev-server
+dev-server:
+	@echo "[Dev] 启动本地开发后端 (Go API :8080)..."
+	@go run ./cmd/devserver
+
+# 开发模式启动前端 dev server
+.PHONY: dev-frontend
+dev-frontend:
+	@echo "[Frontend] 启动 Vite dev server..."
+	@echo "  API proxy: /app/fnmusic-sync/api -> http://localhost:8080"
+	@echo "  请确保 Go 后端在 8080 端口运行"
+	@cd $(FRONTEND_DIR) && pnpm dev
+
+# 同时启动前端和后端开发服务器（需要两个终端，或用 tmux）
+.PHONY: dev
+dev:
+	@echo "╔══════════════════════════════════════════════════════════════"
+	@echo "║ 🚀 本地开发模式启动说明"
+	@echo "╠══════════════════════════════════════════════════════════════"
+	@echo "║ 需要两个终端分别运行："
+	@echo "║   终端 1: make dev-server   (Go 后端 API :8080)"
+	@echo "║   终端 2: make dev-frontend (Vite 前端 :5173)"
+	@echo "║"
+	@echo "║ 访问 http://localhost:5173 即可热更新开发"
+	@echo "║ 后端 API 也可直接访问 http://localhost:8080/app/fnmusic-sync/"
+	@echo "╚══════════════════════════════════════════════════════════════"
 
 # ==================== 工具 ====================
 
@@ -501,13 +532,13 @@ package-linux: package-linux-all
 
 sync: ## 拉取 CNB 最新并以 fast-forward 合并（保留本地未提交改动）
 	git fetch origin
-	git merge --ff-only origin/master
-	@echo "已同步 origin/master 最新代码，本地未提交改动已保留"
+	git merge --ff-only origin/main
+	@echo "已同步 origin/main 最新代码，本地未提交改动已保留"
 
 sync-github: ## 拉取 GitHub 最新并以 fast-forward 合并（保留本地未提交改动）
 	git fetch github
-	git merge --ff-only github/master
-	@echo "已同步 github/master 最新代码，本地未提交改动已保留"
+	git merge --ff-only github/main
+	@echo "已同步 github/main 最新代码，本地未提交改动已保留"
 
 # ==================== 推送 ====================
 

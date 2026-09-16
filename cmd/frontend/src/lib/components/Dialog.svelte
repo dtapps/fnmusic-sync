@@ -1,7 +1,8 @@
 <script lang="ts">
   import { cn } from '$lib/utils';
+  import type { Snippet } from 'svelte';
 
-  let { open = $bindable(false), children }: { open?: boolean; children?: any } = $props();
+  let { open = $bindable(false), children }: { open?: boolean; children?: Snippet } = $props();
 </script>
 
 {#if open}

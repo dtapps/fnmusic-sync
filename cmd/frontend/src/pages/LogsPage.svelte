@@ -1,6 +1,7 @@
 <script lang="ts">
   import { _ } from 'svelte-i18n';
   import { getLogs } from '$lib/api';
+  import { errMessage } from '$lib/utils';
   import { Button, Card } from '$lib/components';
 
   type LogLevel = 'all' | 'debug' | 'info' | 'warn' | 'error';
@@ -13,11 +14,11 @@
   async function refresh() {
     loading = true;
     try {
-      const data: any = await getLogs();
+      const data = await getLogs();
       allLines = data.lines || [];
       fileEnabled = data.file_enabled !== false;
-    } catch (e: any) {
-      allLines = [e.message];
+    } catch (e) {
+      allLines = [errMessage(e)];
       fileEnabled = true;
     } finally {
       loading = false;

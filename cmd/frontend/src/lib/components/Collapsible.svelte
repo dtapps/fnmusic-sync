@@ -1,5 +1,6 @@
 <script lang="ts">
   import { cn } from '$lib/utils';
+  import type { Snippet } from 'svelte';
 
   let {
     open = $bindable(false),
@@ -10,8 +11,8 @@
   }: {
     open?: boolean;
     title?: string;
-    children?: any;
-    headerExtra?: any;
+    children?: Snippet;
+    headerExtra?: Snippet;
     class?: string;
   } = $props();
 </script>

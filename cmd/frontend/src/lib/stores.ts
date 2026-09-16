@@ -3,6 +3,7 @@
 import { writable } from 'svelte/store';
 import { _, locale } from 'svelte-i18n';
 import { get } from 'svelte/store';
+import { errMessage } from './utils';
 import type { CurrentUser, AppConfig, VersionInfo, StateData } from './types';
 import { getConfig } from './api';
 
@@ -186,8 +187,8 @@ export async function reloadConfig() {
   try {
     const cfg = await getConfig();
     config.set(cfg);
-  } catch (e: any) {
-    const msg = get(_)('common.load_failed', { values: { message: e.message } });
+  } catch (e) {
+    const msg = get(_)('common.load_failed', { values: { message: errMessage(e) } });
     showToast(msg, 'error');
   }
 }

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { _ } from 'svelte-i18n';
   import { currentUser, config, showToast, reloadConfig } from '$lib/stores';
+  import { errMessage } from '$lib/utils';
   import { saveUser, deleteUser as apiDeleteUser } from '$lib/api';
   import { createEmptyUser, type UserAccount } from '$lib/types';
   import { Button, Card, Badge, Dialog, Input } from '$lib/components';
@@ -65,8 +66,8 @@
       localDirty = false;
       await reloadConfig();
       showToast($_('users.saved'));
-    } catch (e: any) {
-      showToast($_('users.save_failed', { values: { message: e.message } }), 'error');
+    } catch (e) {
+      showToast($_('users.save_failed', { values: { message: errMessage(e) } }), 'error');
     }
   }
 
@@ -77,8 +78,8 @@
       localDirty = false;
       await reloadConfig();
       showToast($_('users.deleted'));
-    } catch (e: any) {
-      showToast($_('users.delete_failed', { values: { message: e.message } }), 'error');
+    } catch (e) {
+      showToast($_('users.delete_failed', { values: { message: errMessage(e) } }), 'error');
     }
   }
 

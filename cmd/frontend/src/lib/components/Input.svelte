@@ -2,7 +2,7 @@
   import type { HTMLInputAttributes } from 'svelte/elements';
   import { cn } from '$lib/utils';
 
-  let { class: className = '', value = $bindable(), ...restProps }: HTMLInputAttributes & { value?: any } = $props();
+  let { class: className = '', value = $bindable(), ...restProps }: HTMLInputAttributes = $props();
 </script>
 
 <input

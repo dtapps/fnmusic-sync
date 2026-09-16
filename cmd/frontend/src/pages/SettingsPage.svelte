@@ -12,6 +12,7 @@
   } from '$lib/stores';
   import type { ThemeMode, LanguageMode } from '$lib/stores';
   import { saveSettings, checkUpgrade, doUpgrade } from '$lib/api';
+  import { errMessage } from '$lib/utils';
   import { Card, Select, Switch, Input, Button, Badge } from '$lib/components';
 
   let scrobbleThreshold = $state('auto');
@@ -74,8 +75,8 @@
       };
       await saveSettings(settings);
       await reloadConfig();
-    } catch (e: any) {
-      showToast($_('settings.save_failed', { values: { message: e.message } }), 'error');
+    } catch (e) {
+      showToast($_('settings.save_failed', { values: { message: errMessage(e) } }), 'error');
     } finally {
       saving = false;
     }
@@ -87,8 +88,8 @@
     upgradeInfo = null;
     try {
       upgradeInfo = await checkUpgrade();
-    } catch (e: any) {
-      showToast($_('upgrade.check_failed', { values: { message: e.message } }), 'error');
+    } catch (e) {
+      showToast($_('upgrade.check_failed', { values: { message: errMessage(e) } }), 'error');
     } finally {
       upgradeChecking = false;
     }
@@ -103,8 +104,8 @@
       showToast($_('upgrade.upgrade_success'), 'success');
       // 升级后应用会重启，延迟刷新页面
       setTimeout(() => window.location.reload(), 5000);
-    } catch (e: any) {
-      showToast($_('upgrade.upgrade_failed', { values: { message: e.message } }), 'error');
+    } catch (e) {
+      showToast($_('upgrade.upgrade_failed', { values: { message: errMessage(e) } }), 'error');
     } finally {
       upgrading = false;
     }
