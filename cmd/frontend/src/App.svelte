@@ -24,6 +24,7 @@
   import SettingsPage from './pages/SettingsPage.svelte';
   import StatePage from './pages/StatePage.svelte';
   import LogsPage from './pages/LogsPage.svelte';
+  import UserListPage from './pages/UserListPage.svelte';
   import { BASE_URL } from '$lib/api';
   import { getPlatformConfig, onThemeChange, onLanguageChange, isHostEnvironment } from '$lib/trim';
 
@@ -132,6 +133,15 @@
       {#if $currentUser.isAdmin}
         <button
           class="px-3 sm:px-4 py-1.5 sm:py-2 rounded-md text-xs sm:text-sm whitespace-nowrap transition-colors cursor-pointer shrink-0
+            {$activeTab === 'users_list'
+            ? 'bg-primary text-primary-foreground'
+            : 'text-muted-foreground hover:bg-muted'}"
+          onclick={() => setActiveTab('users_list')}>{$_('tabs.users_list')}</button
+        >
+      {/if}
+      {#if $currentUser.isAdmin}
+        <button
+          class="px-3 sm:px-4 py-1.5 sm:py-2 rounded-md text-xs sm:text-sm whitespace-nowrap transition-colors cursor-pointer shrink-0
             {$activeTab === 'settings' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'}"
           onclick={() => setActiveTab('settings')}>{$_('tabs.settings')}</button
         >
@@ -154,6 +164,8 @@
   <main class="p-3 sm:p-6">
     {#if $activeTab === 'users'}
       <UsersPage />
+    {:else if $activeTab === 'users_list'}
+      <UserListPage />
     {:else if $activeTab === 'settings'}
       <SettingsPage />
     {:else if $activeTab === 'state'}

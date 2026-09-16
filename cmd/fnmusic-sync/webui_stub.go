@@ -12,6 +12,6 @@ type webUIStopper interface {
 }
 
 // startWebUI 在传统安装模式下不启动 Web UI（没有统一网关）。
-func startWebUI(logger *slog.Logger) (webUIStopper, error) {
+func startWebUI(logger *slog.Logger, _ any) (webUIStopper, error) {
 	return nil, nil
 }

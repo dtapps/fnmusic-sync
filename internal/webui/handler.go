@@ -36,6 +36,7 @@ import (
 	"cnb.cool/dtapp/fnmusic-sync/internal/buildinfo"
 	"cnb.cool/dtapp/fnmusic-sync/internal/config"
 	"cnb.cool/dtapp/fnmusic-sync/internal/lastfm"
+	"cnb.cool/dtapp/fnmusic-sync/internal/strutil"
 	"cnb.cool/dtapp/fnmusic-sync/internal/updater"
 	"github.com/spf13/viper"
 )
@@ -43,26 +44,35 @@ import (
 //go:embed www
 var wwwFS embed.FS
 
+// ActiveUserProvider 提供当前已通过 token 识别的活跃用户列表。
+// 由 internal/playback.UserCache 实现（ActiveUsers 返回 token→用户名 映射）。
+// 通过接口解耦，避免 webui 直接依赖 playback 包。
+type ActiveUserProvider interface {
+	ActiveUsers() map[string]string
+}
+
 // Server 提供 Web 配置界面 HTTP 服务。
 type Server struct {
-	configPath string
-	statePath  string
-	logDir     string
-	logger     *slog.Logger
-	httpServer *http.Server
-	listener   net.Listener
-	mu         sync.RWMutex
-	latestCfg  *config.Config
+	configPath   string
+	statePath    string
+	logDir       string
+	logger       *slog.Logger
+	httpServer   *http.Server
+	listener     net.Listener
+	mu           sync.RWMutex
+	latestCfg    *config.Config
+	userProvider ActiveUserProvider
 }
 
 // NewServer 创建 Web UI 服务。
 // configPath/statePath/logDir 由 runtime 模式决定（fpk 模式下使用 TRIM_* 变量）。
-func NewServer(configPath, statePath, logDir string, logger *slog.Logger) *Server {
+func NewServer(configPath, statePath, logDir string, logger *slog.Logger, userProvider ActiveUserProvider) *Server {
 	return &Server{
-		configPath: configPath,
-		statePath:  statePath,
-		logDir:     logDir,
-		logger:     logger,
+		configPath:   configPath,
+		statePath:    statePath,
+		logDir:       logDir,
+		logger:       logger,
+		userProvider: userProvider,
 	}
 }
 
@@ -159,6 +169,7 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	// 管理员级 API
 	mux.HandleFunc(gatewayPrefix+"/api/logs", s.requireAdmin(s.handleLogs))
 	mux.HandleFunc(gatewayPrefix+"/api/settings", s.requireAdmin(s.handleSettings))
+	mux.HandleFunc(gatewayPrefix+"/api/users", s.requireAdmin(s.handleActiveUsers))
 	mux.HandleFunc(gatewayPrefix+"/api/upgrade/check", s.requireAdmin(s.handleUpgradeCheck))
 	mux.HandleFunc(gatewayPrefix+"/api/upgrade", s.requireAdmin(s.handleUpgrade))
 
@@ -802,6 +813,32 @@ func (s *Server) handleLastFMPoll(w http.ResponseWriter, r *http.Request) {
 		"authorized":      true,
 		"session_key":     sk,
 		"lastfm_username": lfmUsername,
+	})
+}
+
+// handleActiveUsers GET 返回当前通过 token 识别的活跃用户列表。
+// 仅管理员可访问。token 为敏感凭证，仅返回前 8 位用于展示，避免完整泄露。
+func (s *Server) handleActiveUsers(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", "GET")
+		writeJSONError(w, http.StatusMethodNotAllowed, "不支持的请求方法")
+		return
+	}
+
+	users := make([]map[string]string, 0)
+	if s.userProvider != nil {
+		for k, v := range s.userProvider.ActiveUsers() {
+			users = append(users, map[string]string{
+				"token":    strutil.FirstN8(k),
+				"username": v,
+			})
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"users": users,
 	})
 }
 

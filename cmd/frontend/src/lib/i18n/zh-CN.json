@@ -6,9 +6,19 @@
   },
   "tabs": {
     "users": "用户配置",
+    "users_list": "用户列表",
     "settings": "全局设置",
     "state": "运行状态",
     "logs": "日志"
+  },
+  "users_list": {
+    "title": "用户列表",
+    "desc": "通过 token 识别的当前在线用户",
+    "empty": "暂无在线用户",
+    "username": "用户名",
+    "token": "Token 标识",
+    "online_count": "当前在线 {count} 人",
+    "load_failed": "加载用户列表失败: {message}"
   },
   "users": {
     "add_user": "+ 添加用户",

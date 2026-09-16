@@ -6,9 +6,19 @@
   },
   "tabs": {
     "users": "Users",
+    "users_list": "User List",
     "settings": "Settings",
     "state": "Status",
     "logs": "Logs"
+  },
+  "users_list": {
+    "title": "User List",
+    "desc": "Currently online users identified by token",
+    "empty": "No online users",
+    "username": "Username",
+    "token": "Token ID",
+    "online_count": "{count} user(s) online",
+    "load_failed": "Failed to load user list: {message}"
   },
   "users": {
     "add_user": "+ Add User",

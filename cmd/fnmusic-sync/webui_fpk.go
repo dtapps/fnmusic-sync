@@ -17,7 +17,8 @@ type webUIStopper interface {
 
 // startWebUI 在 fpk 模式下启动统一网关 Web UI 服务。
 // 监听 ${TRIM_APPDEST}/app.sock，飞牛 fnOS 网关会把 /app/fnmusic-sync 路径的请求转发过来。
-func startWebUI(logger *slog.Logger) (webUIStopper, error) {
+// provider 提供当前通过 token 识别的活跃用户列表（供 Web UI 展示）。
+func startWebUI(logger *slog.Logger, provider webui.ActiveUserProvider) (webUIStopper, error) {
 	appDest := os.Getenv("TRIM_APPDEST")
 	if appDest == "" {
 		appDest = filepath.Join("/var/apps", "fnmusic-sync", "target")
@@ -25,7 +26,7 @@ func startWebUI(logger *slog.Logger) (webUIStopper, error) {
 
 	socketPath := filepath.Join(appDest, "app.sock")
 
-	server := webui.NewServer(rt.ConfigPath, rt.StatePath, rt.LogDir, logger)
+	server := webui.NewServer(rt.ConfigPath, rt.StatePath, rt.LogDir, logger, provider)
 	if err := server.Start(socketPath); err != nil {
 		return nil, err
 	}

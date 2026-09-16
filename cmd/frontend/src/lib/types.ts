@@ -123,6 +123,16 @@ export interface LogData {
   file_enabled?: boolean;
 }
 
+// ===== 在线用户（通过 token 识别）=====
+export interface ActiveUser {
+  token: string; // 脱敏后的 token 前缀
+  username: string;
+}
+
+export interface ActiveUserList {
+  users: ActiveUser[];
+}
+
 // ===== Last.fm 授权响应 =====
 export interface LastFmAuthResponse {
   auth_url: string;
