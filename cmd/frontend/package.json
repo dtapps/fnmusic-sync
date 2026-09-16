@@ -20,7 +20,7 @@
     "@tailwindcss/postcss": "^4.3.3",
     "@trimjs/web-app": "^0.4.2",
     "@tsconfig/svelte": "^5.0.8",
-    "@types/node": "^22.20.2",
+    "@types/node": "^26.5.1",
     "autoprefixer": "^10.5.6",
     "clsx": "^2.1.1",
     "eslint": "^10.10.0",
