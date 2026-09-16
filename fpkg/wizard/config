@@ -1,0 +1,21 @@
+[
+  {
+    "stepTitle": "应用设置",
+    "items": [
+      {
+        "type": "tips",
+        "helpText": "如需排查同步/播放问题，可开启 debug 模式（详细请求/响应日志）。\n修改后需重启。"
+      },
+      {
+        "type": "switch",
+        "field": "wizard_debug",
+        "label": "开启 debug 模式（详细日志）",
+        "initValue": "false"
+      },
+      {
+        "type": "tips",
+        "helpText": "默认关闭：仅记录常规运行日志。\n开启：额外记录飞牛/ Last.fm / ListenBrainz 的请求与响应明细（capture.log / feiniu.log / lastfm.log / listenbrainz.log），便于排查问题，日志量更大。"
+      }
+    ]
+  }
+]

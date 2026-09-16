@@ -15,6 +15,16 @@ else
     echo "$(date '+%Y-%m-%d %H:%M:%S') [install_callback] ⚠️ 二进制文件不存在: ${TRIM_APPDEST}/fnmusic-sync" >> "${LOG_FILE}" 2>/dev/null || true
 fi
 
+# 安装向导开关：debug 模式（field=wizard_debug）。
+# 向导字段会以同名环境变量 wizard_debug 传入；二进制运行时直接读取该环境变量决定是否开启
+# 请求/响应明细日志（capture 日志），默认关闭。这里仅登记其值，无需写任何配置文件。
+WIZARD_DEBUG="${wizard_debug:-}"
+if [ -n "${WIZARD_DEBUG}" ]; then
+    echo "$(date '+%Y-%m-%d %H:%M:%S') [install_callback] 收到向导 debug 变量 wizard_debug=${WIZARD_DEBUG}（程序运行时读取该环境变量生效）" >> "${LOG_FILE}" 2>/dev/null || true
+else
+    echo "$(date '+%Y-%m-%d %H:%M:%S') [install_callback] 未收到向导 debug 变量（默认关闭）" >> "${LOG_FILE}" 2>/dev/null || true
+fi
+
 echo "$(date '+%Y-%m-%d %H:%M:%S') [install_callback] install_callback 执行完成" >> "${LOG_FILE}" 2>/dev/null || true
 
 exit 0

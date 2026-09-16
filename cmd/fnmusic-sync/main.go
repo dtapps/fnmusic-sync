@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -27,6 +28,17 @@ const (
 	// defaultUpstreamWait 等待上游 socket 就绪的超时时间。
 	defaultUpstreamWait = 30 * time.Second
 )
+
+// isDebugEnv 判断 debug 环境变量（fpk 安装向导字段 wizard_debug 会以同名环境变量传入）。
+// 接受 1/true/on/yes（大小写不敏感）；未设置或为空视为关闭。
+func isDebugEnv() bool {
+	switch strings.ToLower(os.Getenv("wizard_debug")) {
+	case "1", "true", "on", "yes":
+		return true
+	default:
+		return false
+	}
+}
 
 // rt 在 main 启动时一次性检测，后续所有函数共用。
 var rt = detectRuntime()
@@ -102,9 +114,10 @@ func run(doCheck, debug bool, wait time.Duration, logger *slog.Logger, levelVar 
 		logDir = ""
 	}
 
-	// 抓包/请求日志开关：仅由 --debug flag 控制，与 slog 级别完全解耦。
+	// 抓包/请求日志开关：由 --debug flag 或环境变量 wizard_debug=1/true 控制。
+	// 二者等效（service debug 命令即加 --debug）；fpk 安装向导的字段 wizard_debug 会作为同名环境变量传入。
 	captureEnabled := atomic.Bool{}
-	captureEnabled.Store(debug)
+	captureEnabled.Store(debug || isDebugEnv())
 
 	if doCheck {
 		cfg := proxy.Config{
@@ -172,7 +185,7 @@ func run(doCheck, debug bool, wait time.Duration, logger *slog.Logger, levelVar 
 		manager.UpdateProviders(buildUserProviders(c, logger, lfReqLog, lbReqLog))
 		manager.SetScrobbleThreshold(c.Playback.ScrobbleThreshold)
 		levelVar.Set(parseLevel(c))
-		captureEnabled.Store(debug)
+		captureEnabled.Store(debug || isDebugEnv())
 		playlistSync.UpdateConfig(c)
 
 		for name, u := range c.Users {
