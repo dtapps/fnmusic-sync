@@ -1,0 +1,25 @@
+{
+  "schema_version": "2",
+  "source_info": {
+    "name": "飞牛音乐 Scrobble (CNB源)",
+    "author": "dtapp",
+    "description": "dtapp 开发的飞牛音乐代理，国内下载加速源。"
+  },
+  "apps": {
+    "fnmusic-sync": {
+      "display_name": "飞牛音乐 Scrobble 代理",
+      "desc": "飞牛 fnOS 音乐 Last.fm / ListenBrainz 自动 scrobble 透明代理。",
+      "platform": ["all"],
+      "categories": ["影音娱乐", "系统工具"],
+      "icon_url": "https://cnb.cool/dtapp/fnmusic-sync/-/git/raw/main/fpkg/ICON.PNG",
+      "maintainer": "liguangchun",
+      "maintainer_url": "https://www.liguangchun.cn",
+      "distributor": "dtapp",
+      "distributor_url": "https://cnb.cool/dtapp/fnmusic-sync",
+      "run_as": "package",
+      "install_type": "",
+      "is_docker": false,
+      "releases": {}
+    }
+  }
+}

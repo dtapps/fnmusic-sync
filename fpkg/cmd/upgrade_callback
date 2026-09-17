@@ -3,16 +3,37 @@
 ### This script is called after the user upgrades the application.
 
 LOG_FILE="${TRIM_PKGVAR}/upgrade.log"
-echo "$(date '+%Y-%m-%d %H:%M:%S') [upgrade_callback] 开始执行 upgrade_callback 脚本" >> ${LOG_FILE}
+echo "$(date '+%Y-%m-%d %H:%M:%S') [upgrade_callback] 开始执行 upgrade_callback 脚本" >>${LOG_FILE}
+
+# 向导值持久化：fnOS 不代写配置文件，跨升级的保留必须由应用脚本自行完成。
+# 升级时若 fnOS 未重新弹出向导，wizard_debug 环境变量为空，此处不更新 config.env，
+# 从而保留用户此前在 config.env 中持久化的 debug 设置（避免被 initValue 默认 false 冲掉）。
+# 即使升级复用了 install 流程并传回默认 false，只要 config.env 已存在 wizard_debug 行就保留旧值。
+CONFIG_ENV="${TRIM_PKGETC}/config.env"
+persist_wizard_debug() {
+  local val="$1" force="$2"
+  [ -z "${val}" ] && return 0
+  if [ -n "${force}" ] || ! grep -qE '^wizard_debug=' "${CONFIG_ENV}" 2>/dev/null; then
+    touch "${CONFIG_ENV}" 2>/dev/null || true
+    awk -v v="${val}" 'BEGIN{f=0} /^wizard_debug=/{print "wizard_debug="v; f=1; next} {print} END{if(!f) print "wizard_debug="v}' "${CONFIG_ENV}" >"${CONFIG_ENV}.tmp" && mv "${CONFIG_ENV}.tmp" "${CONFIG_ENV}"
+    return 0
+  fi
+  return 1
+}
+if persist_wizard_debug "${wizard_debug:-}"; then
+  echo "$(date '+%Y-%m-%d %H:%M:%S') [upgrade_callback] 已将 wizard_debug=${wizard_debug:-} 写入 ${CONFIG_ENV}" >>"${LOG_FILE}"
+else
+  echo "$(date '+%Y-%m-%d %H:%M:%S') [upgrade_callback] config.env 已存在 wizard_debug，保留旧值，不覆盖" >>"${LOG_FILE}"
+fi
 
 # 检查升级后二进制文件信息
 if [ -f "${TRIM_APPDEST}/fnmusic-sync" ]; then
-    BIN_SIZE=$(stat -c%s "${TRIM_APPDEST}/fnmusic-sync" 2>/dev/null || stat -f%z "${TRIM_APPDEST}/fnmusic-sync" 2>/dev/null || echo "unknown")
-    echo "$(date '+%Y-%m-%d %H:%M:%S') [upgrade_callback] 升级后二进制大小=${BIN_SIZE}" >> ${LOG_FILE}
+  BIN_SIZE=$(stat -c%s "${TRIM_APPDEST}/fnmusic-sync" 2>/dev/null || stat -f%z "${TRIM_APPDEST}/fnmusic-sync" 2>/dev/null || echo "unknown")
+  echo "$(date '+%Y-%m-%d %H:%M:%S') [upgrade_callback] 升级后二进制大小=${BIN_SIZE}" >>${LOG_FILE}
 else
-    echo "$(date '+%Y-%m-%d %H:%M:%S') [upgrade_callback] ⚠️ 二进制文件不存在: ${TRIM_APPDEST}/fnmusic-sync" >> ${LOG_FILE}
+  echo "$(date '+%Y-%m-%d %H:%M:%S') [upgrade_callback] ⚠️ 二进制文件不存在: ${TRIM_APPDEST}/fnmusic-sync" >>${LOG_FILE}
 fi
 
-echo "$(date '+%Y-%m-%d %H:%M:%S') [upgrade_callback] upgrade_callback 执行完成" >> ${LOG_FILE}
+echo "$(date '+%Y-%m-%d %H:%M:%S') [upgrade_callback] upgrade_callback 执行完成" >>${LOG_FILE}
 
 exit 0

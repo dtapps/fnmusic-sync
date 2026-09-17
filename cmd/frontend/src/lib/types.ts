@@ -123,10 +123,17 @@ export interface LogData {
   file_enabled?: boolean;
 }
 
-// ===== 在线用户（通过 token 识别）=====
+// ===== 已识别用户（来自 /api/users，由数据库持久化）=====
 export interface ActiveUser {
   token: string; // 脱敏后的 token 前缀
-  username: string;
+  username: string; // 【音乐用户】用户名（来自 /user/me）
+  platform_username?: string; // 【平台用户】绑定的 fnOS 用户名
+  is_admin?: boolean; // 绑定的平台用户是否为管理员
+  ua_system?: string; // 解析出的系统（iOS / Android / Windows / macOS / Linux ...）
+  ua_client?: string; // 解析出的客户端（Flutter / okhttp / 浏览器 ...）
+  ua_raw?: string; // 原始 User-Agent
+  first_seen_at?: string; // 首次识别时间（RFC3339）
+  last_seen_at?: string; // 最后使用时间（RFC3339）
 }
 
 export interface ActiveUserList {

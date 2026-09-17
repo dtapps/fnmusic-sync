@@ -8,6 +8,9 @@
 # https://github.com/actions/upload-artifact
 # https://github.com/actions/download-artifact
 # https://github.com/softprops/action-gh-release
+# https://github.com/crazy-max/ghaction-upx
+# https://github.com/golangci/golangci-lint-action
+# https://github.com/sqlc-dev/setup-sqlc
 name: Release
 
 on:
@@ -71,12 +74,14 @@ jobs:
     # https://github.com/goreleaser/nfpm/releases
     # https://developer.fnnas.com/docs/cli/fnpack/
     # https://github.com/golangci/golangci-lint/releases
+    # https://github.com/sqlc-dev/sqlc/releases
     # ==========================================
     env:
       UPX_VERSION: '5.2.1'
       NFPM_VERSION: '2.47.0'
       FNPACK_VERSION: '1.2.3'
-      GOLANGCI_LINT_VERSION: '2.13.2'
+      GOLANGCI_LINT_VERSION: 'v2.13.2'
+      SQLC_VERSION: '1.31.1'
 
     steps:
       - name: 检出代码
@@ -142,19 +147,15 @@ jobs:
           fnpack --help || true
 
       - name: 安装 golangci-lint 工具
-        shell: bash
-        run: |
-          LINT_DIR="golangci-lint-${GOLANGCI_LINT_VERSION}-linux-amd64"
-          LINT_URL="https://github.com/golangci/golangci-lint/releases/download/v${GOLANGCI_LINT_VERSION}/${LINT_DIR}.tar.gz"
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: ${{ env.GOLANGCI_LINT_VERSION }}
+          install-only: true
 
-          cd /tmp && \
-          wget -q -O lint.tar.gz "${LINT_URL}" && \
-          tar -xf lint.tar.gz && \
-          sudo mv ${LINT_DIR}/golangci-lint /usr/local/bin/golangci-lint && \
-          sudo chmod +x /usr/local/bin/golangci-lint && \
-          rm -rf lint.tar.gz ${LINT_DIR} && \
-          echo "--- golangci-lint installed ---" && \
-          golangci-lint --version
+      - name: 安装 sqlc 工具
+        uses: sqlc-dev/setup-sqlc@v5
+        with:
+          sqlc-version: ${{ env.SQLC_VERSION }}
 
       - name: 安装依赖
         shell: bash
@@ -276,6 +277,80 @@ jobs:
           } > release_body.md
 
           cat release_body.md
+
+      - name: 生成 fnpack releases 信息（自动计算 size/sha256，并合并历史版本）
+        shell: bash
+        env:
+          INTERIOR_VERSION: ${{ needs.prepare.outputs.interior_version }}
+        run: |
+          set -euo pipefail
+          VER="${INTERIOR_VERSION#v}"
+          VVER="${INTERIOR_VERSION}"
+          SRC="fnpack/github-source.json"
+          REPO_URL="https://github.com/${{ github.repository }}"
+          DL_RELEASES_BASE="${REPO_URL}/releases/download"
+
+          # 1. 计算本次 fpk 的 size/sha256
+          amd_fpk="release/fnmusic-sync-amd64.fpk"
+          arm_fpk="release/fnmusic-sync-arm64.fpk"
+          [ -f "$amd_fpk" ] || { echo "缺少 $amd_fpk"; exit 1; }
+          [ -f "$arm_fpk" ] || { echo "缺少 $arm_fpk"; exit 1; }
+
+          amd_size=$(stat -c%s "$amd_fpk")
+          amd_sha=$(sha256sum "$amd_fpk" | cut -d' ' -f1)
+          arm_size=$(stat -c%s "$arm_fpk")
+          arm_sha=$(sha256sum "$arm_fpk" | cut -d' ' -f1)
+
+          # 2. 从历史 release 的 fnpack.json 提取旧 releases（新→旧，取第一个含该附件的版本）
+          #    注意：上一次发布可能没有 fnpack.json（如首次启用本功能），此时保持空对象即可。
+          PREV_RELEASES='{}'
+          TAGS=$(git tag --sort=-v:refname 2>/dev/null | grep -vx "v${VER}" | head -20 || true)
+          if [ -z "$TAGS" ]; then
+            TAGS=$(git ls-remote --tags --refs "$REPO_URL" 2>/dev/null \
+              | awk '{print $2}' | sed 's#refs/tags/##' | grep -vx "v${VER}" | sort -Vr | head -20 || true)
+          fi
+          for tag in $TAGS; do
+            tmp="$(mktemp)"
+            if curl -fsSL -m 30 "${DL_RELEASES_BASE}/${tag}/fnpack.json" -o "$tmp" 2>/dev/null \
+              && jq -e '.apps["fnmusic-sync"].releases' "$tmp" >/dev/null 2>&1; then
+              PREV_RELEASES=$(jq -c '.apps["fnmusic-sync"].releases // {}' "$tmp")
+              echo "已从历史 release 获取旧 releases（tag=${tag}）"
+              rm -f "$tmp"
+              break
+            fi
+            rm -f "$tmp"
+          done
+          if [ "$PREV_RELEASES" = "{}" ]; then
+            echo "未找到历史 fnpack.json，仅写入本次版本"
+          fi
+
+          # 3. 合并旧 releases + 本次版本（本次优先），写回源文件
+          jq --arg ver "$VER" \
+             --argjson prev "$PREV_RELEASES" \
+             --arg amd_url "${DL_RELEASES_BASE}/${VVER}/fnmusic-sync-amd64.fpk" \
+             --argjson amd_size "$amd_size" \
+             --arg amd_sha "$amd_sha" \
+             --arg arm_url "${DL_RELEASES_BASE}/${VVER}/fnmusic-sync-arm64.fpk" \
+             --argjson arm_size "$arm_size" \
+             --arg arm_sha "$arm_sha" \
+             '.apps["fnmusic-sync"].releases = ($prev + {
+                ($ver): {
+                  "packages": {
+                    "amd64": { "download_url": $amd_url, "size": $amd_size, "sha256": $amd_sha },
+                    "arm64": { "download_url": $arm_url, "size": $arm_size, "sha256": $arm_sha }
+                  }
+                }
+              })' "$SRC" > "$SRC.tmp" && mv "$SRC.tmp" "$SRC"
+
+          COUNT=$(jq '.apps["fnmusic-sync"].releases | length' "$SRC")
+          echo "已更新 $SRC 的 releases（共 ${COUNT} 个版本）"
+          jq -c '.apps["fnmusic-sync"].releases' "$SRC"
+
+      - name: 复制 fnpack 源信息为 fnpack.json（统一附件名）
+        shell: bash
+        run: |
+          cp "fnpack/github-source.json" "release/fnpack.json"
+          echo "已生成 release/fnpack.json"
 
       - name: 发布 Release
         uses: softprops/action-gh-release@v3

@@ -5,26 +5,52 @@
 # 所有配置项均通过飞牛桌面应用图标进入 Web 配置页面完成。
 
 LOG_FILE="${TRIM_PKGVAR}/upgrade.log"
-echo "$(date '+%Y-%m-%d %H:%M:%S') [install_callback] 开始执行 install_callback 脚本" >> "${LOG_FILE}" 2>/dev/null || true
+echo "$(date '+%Y-%m-%d %H:%M:%S') [install_callback] 开始执行 install_callback 脚本" >>"${LOG_FILE}" 2>/dev/null || true
+
+# 向导值持久化：fnOS 不代写配置文件，跨升级的保留必须由应用脚本自行完成。
+# 这里把 wizard_debug 落到 config.env，运行时由 cmd/main 启动脚本 source 以注入环境变量。
+# 用法：persist_wizard_debug <值> [force]
+#   - 默认仅在 config.env 尚未记录过 wizard_debug 时写入（首次安装 / 文件为空）；
+#     若已存在该行则视为升级或已配置，不覆盖（升级复用 install 流程时保留用户旧值）。
+#   - 传 force 则无条件写入（用于 config_callback 用户主动改设置）。
+CONFIG_ENV="${TRIM_PKGETC}/config.env"
+persist_wizard_debug() {
+  local val="$1" force="$2"
+  [ -z "${val}" ] && return 0
+  if [ -n "${force}" ] || ! grep -qE '^wizard_debug=' "${CONFIG_ENV}" 2>/dev/null; then
+    touch "${CONFIG_ENV}" 2>/dev/null || true
+    awk -v v="${val}" 'BEGIN{f=0} /^wizard_debug=/{print "wizard_debug="v; f=1; next} {print} END{if(!f) print "wizard_debug="v}' "${CONFIG_ENV}" >"${CONFIG_ENV}.tmp" && mv "${CONFIG_ENV}.tmp" "${CONFIG_ENV}"
+    return 0
+  fi
+  return 1
+}
 
 # 检查二进制文件信息
 if [ -f "${TRIM_APPDEST}/fnmusic-sync" ]; then
-    BIN_SIZE=$(stat -c%s "${TRIM_APPDEST}/fnmusic-sync" 2>/dev/null || stat -f%z "${TRIM_APPDEST}/fnmusic-sync" 2>/dev/null || echo "unknown")
-    echo "$(date '+%Y-%m-%d %H:%M:%S') [install_callback] 安装后二进制大小=${BIN_SIZE}" >> "${LOG_FILE}" 2>/dev/null || true
+  BIN_SIZE=$(stat -c%s "${TRIM_APPDEST}/fnmusic-sync" 2>/dev/null || stat -f%z "${TRIM_APPDEST}/fnmusic-sync" 2>/dev/null || echo "unknown")
+  echo "$(date '+%Y-%m-%d %H:%M:%S') [install_callback] 安装后二进制大小=${BIN_SIZE}" >>"${LOG_FILE}" 2>/dev/null || true
 else
-    echo "$(date '+%Y-%m-%d %H:%M:%S') [install_callback] ⚠️ 二进制文件不存在: ${TRIM_APPDEST}/fnmusic-sync" >> "${LOG_FILE}" 2>/dev/null || true
+  echo "$(date '+%Y-%m-%d %H:%M:%S') [install_callback] ⚠️ 二进制文件不存在: ${TRIM_APPDEST}/fnmusic-sync" >>"${LOG_FILE}" 2>/dev/null || true
 fi
 
 # 安装向导开关：debug 模式（field=wizard_debug）。
 # 向导字段会以同名环境变量 wizard_debug 传入；二进制运行时直接读取该环境变量决定是否开启
-# 请求/响应明细日志（capture 日志），默认关闭。这里仅登记其值，无需写任何配置文件。
+# 请求/响应明细日志（capture 日志），默认关闭。这里将其持久化到 config.env（落盘），
+# 否则升级时向导按 initValue 默认值重新注入环境变量会导致用户开启的 debug 被重置为关闭。
 WIZARD_DEBUG="${wizard_debug:-}"
 if [ -n "${WIZARD_DEBUG}" ]; then
-    echo "$(date '+%Y-%m-%d %H:%M:%S') [install_callback] 收到向导 debug 变量 wizard_debug=${WIZARD_DEBUG}（程序运行时读取该环境变量生效）" >> "${LOG_FILE}" 2>/dev/null || true
+  echo "$(date '+%Y-%m-%d %H:%M:%S') [install_callback] 收到向导 debug 变量 wizard_debug=${WIZARD_DEBUG}" >>"${LOG_FILE}" 2>/dev/null || true
 else
-    echo "$(date '+%Y-%m-%d %H:%M:%S') [install_callback] 未收到向导 debug 变量（默认关闭）" >> "${LOG_FILE}" 2>/dev/null || true
+  echo "$(date '+%Y-%m-%d %H:%M:%S') [install_callback] 未收到向导 debug 变量（默认关闭）" >>"${LOG_FILE}" 2>/dev/null || true
+fi
+# 首次安装写入用户选择；若 config.env 已存在 wizard_debug 行（升级复用 install 流程），
+# 则保留旧值，避免被向导默认值 false 冲掉。
+if persist_wizard_debug "${WIZARD_DEBUG}"; then
+  echo "$(date '+%Y-%m-%d %H:%M:%S') [install_callback] 已将 wizard_debug=${WIZARD_DEBUG} 写入 ${CONFIG_ENV}" >>"${LOG_FILE}" 2>/dev/null || true
+else
+  echo "$(date '+%Y-%m-%d %H:%M:%S') [install_callback] config.env 已存在 wizard_debug，升级场景保留旧值，不覆盖" >>"${LOG_FILE}" 2>/dev/null || true
 fi
 
-echo "$(date '+%Y-%m-%d %H:%M:%S') [install_callback] install_callback 执行完成" >> "${LOG_FILE}" 2>/dev/null || true
+echo "$(date '+%Y-%m-%d %H:%M:%S') [install_callback] install_callback 执行完成" >>"${LOG_FILE}" 2>/dev/null || true
 
 exit 0

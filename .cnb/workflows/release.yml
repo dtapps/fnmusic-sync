@@ -136,6 +136,79 @@
           type: git:release
           optionsFrom: release_options.yml
 
+        # 生成 fnpack releases 信息（自动计算 size/sha256，并合并历史版本），随后复制为 fnpack.json 随 bin/* 上传
+        - name: 生成 fnpack releases 信息（自动计算 size/sha256，并合并历史版本）
+          script: |
+            set -eu
+            VER="${INTERIOR_VERSION#v}"
+            VVER="${INTERIOR_VERSION}"
+            SRC="fnpack/cnb-source.json"
+            CNB_BASE="${CNB_REPO_URL_HTTPS%/}/-"
+            REPO_URL="${CNB_REPO_URL_HTTPS}"
+            DL_RELEASES_BASE="${CNB_BASE}/releases/download"
+
+            # 1. 计算本次 fpk 的 size/sha256
+            amd_fpk="bin/fnmusic-sync-amd64.fpk"
+            arm_fpk="bin/fnmusic-sync-arm64.fpk"
+            [ -f "$amd_fpk" ] || { echo "缺少 $amd_fpk"; exit 1; }
+            [ -f "$arm_fpk" ] || { echo "缺少 $arm_fpk"; exit 1; }
+
+            amd_size=$(stat -c%s "$amd_fpk")
+            amd_sha=$(sha256sum "$amd_fpk" | cut -d' ' -f1)
+            arm_size=$(stat -c%s "$arm_fpk")
+            arm_sha=$(sha256sum "$arm_fpk" | cut -d' ' -f1)
+
+            # 2. 从历史 release 的 fnpack.json 提取旧 releases（新→旧，取第一个含该附件的版本）
+            #    上一次发布可能没有 fnpack.json（如首次启用本功能），此时保持空对象即可。
+            PREV_RELEASES='{}'
+            TAGS=$(git tag --sort=-v:refname 2>/dev/null | grep -vx "v${VER}" | head -20 || true)
+            if [ -z "$TAGS" ]; then
+              TAGS=$(git ls-remote --tags --refs "$REPO_URL" 2>/dev/null \
+                | awk '{print $2}' | sed 's#refs/tags/##' | grep -vx "v${VER}" | sort -Vr | head -20 || true)
+            fi
+            for tag in $TAGS; do
+              tmp="$(mktemp)"
+              if curl -fsSL -m 30 "${DL_RELEASES_BASE}/${tag}/fnpack.json" -o "$tmp" 2>/dev/null \
+                && jq -e '.apps["fnmusic-sync"].releases' "$tmp" >/dev/null 2>&1; then
+                PREV_RELEASES=$(jq -c '.apps["fnmusic-sync"].releases // {}' "$tmp")
+                echo "已从历史 release 获取旧 releases（tag=${tag}）"
+                rm -f "$tmp"
+                break
+              fi
+              rm -f "$tmp"
+            done
+            if [ "$PREV_RELEASES" = "{}" ]; then
+              echo "未找到历史 fnpack.json，仅写入本次版本"
+            fi
+
+            # 3. 合并旧 releases + 本次版本（本次优先），写回源文件
+            jq --arg ver "$VER" \
+               --argjson prev "$PREV_RELEASES" \
+               --arg amd_url "${DL_RELEASES_BASE}/${VVER}/fnmusic-sync-amd64.fpk" \
+               --argjson amd_size "$amd_size" \
+               --arg amd_sha "$amd_sha" \
+               --arg arm_url "${DL_RELEASES_BASE}/${VVER}/fnmusic-sync-arm64.fpk" \
+               --argjson arm_size "$arm_size" \
+               --arg arm_sha "$arm_sha" \
+               '.apps["fnmusic-sync"].releases = ($prev + {
+                  ($ver): {
+                    "packages": {
+                      "amd64": { "download_url": $amd_url, "size": $amd_size, "sha256": $amd_sha },
+                      "arm64": { "download_url": $arm_url, "size": $arm_size, "sha256": $arm_sha }
+                    }
+                  }
+                })' "$SRC" > "$SRC.tmp" && mv "$SRC.tmp" "$SRC"
+
+            COUNT=$(jq '.apps["fnmusic-sync"].releases | length' "$SRC")
+            echo "已更新 $SRC 的 releases（共 ${COUNT} 个版本）"
+            jq -c '.apps["fnmusic-sync"].releases' "$SRC"
+
+        # 复制 fnpack 源信息为 fnpack.json（统一附件名），随后由下方附件步骤随 bin/* 上传
+        - name: 复制 fnpack 源信息为 fnpack.json（统一附件名）
+          script: |
+            cp "fnpack/cnb-source.json" "bin/fnpack.json"
+            echo "已生成 bin/fnpack.json"
+
         # https://docs.cnb.cool/zh/plugin/public/cnbcool/attachments.html
         - name: 上传 Release 附件
           image: cnbcool/attachments:latest

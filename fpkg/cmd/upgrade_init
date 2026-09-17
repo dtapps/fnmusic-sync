@@ -3,19 +3,19 @@
 ### This script is called before the user upgrades the application.
 
 LOG_FILE="${TRIM_PKGVAR}/upgrade.log"
-echo "$(date '+%Y-%m-%d %H:%M:%S') [upgrade_init] 开始执行 upgrade_init 脚本" >> ${LOG_FILE}
-echo "$(date '+%Y-%m-%d %H:%M:%S') [upgrade_init] TRIM_APPDEST=${TRIM_APPDEST}" >> ${LOG_FILE}
-echo "$(date '+%Y-%m-%d %H:%M:%S') [upgrade_init] TRIM_PKGETC=${TRIM_PKGETC}" >> ${LOG_FILE}
-echo "$(date '+%Y-%m-%d %H:%M:%S') [upgrade_init] TRIM_PKGVAR=${TRIM_PKGVAR}" >> ${LOG_FILE}
+echo "$(date '+%Y-%m-%d %H:%M:%S') [upgrade_init] 开始执行 upgrade_init 脚本" >>${LOG_FILE}
+echo "$(date '+%Y-%m-%d %H:%M:%S') [upgrade_init] TRIM_APPDEST=${TRIM_APPDEST}" >>${LOG_FILE}
+echo "$(date '+%Y-%m-%d %H:%M:%S') [upgrade_init] TRIM_PKGETC=${TRIM_PKGETC}" >>${LOG_FILE}
+echo "$(date '+%Y-%m-%d %H:%M:%S') [upgrade_init] TRIM_PKGVAR=${TRIM_PKGVAR}" >>${LOG_FILE}
 
 # 检查当前二进制文件信息
 if [ -f "${TRIM_APPDEST}/fnmusic-sync" ]; then
-    BIN_SIZE=$(stat -c%s "${TRIM_APPDEST}/fnmusic-sync" 2>/dev/null || stat -f%z "${TRIM_APPDEST}/fnmusic-sync" 2>/dev/null || echo "unknown")
-    echo "$(date '+%Y-%m-%d %H:%M:%S') [upgrade_init] 当前二进制大小=${BIN_SIZE}" >> ${LOG_FILE}
+  BIN_SIZE=$(stat -c%s "${TRIM_APPDEST}/fnmusic-sync" 2>/dev/null || stat -f%z "${TRIM_APPDEST}/fnmusic-sync" 2>/dev/null || echo "unknown")
+  echo "$(date '+%Y-%m-%d %H:%M:%S') [upgrade_init] 当前二进制大小=${BIN_SIZE}" >>${LOG_FILE}
 else
-    echo "$(date '+%Y-%m-%d %H:%M:%S') [upgrade_init] ⚠️ 二进制文件不存在: ${TRIM_APPDEST}/fnmusic-sync" >> ${LOG_FILE}
+  echo "$(date '+%Y-%m-%d %H:%M:%S') [upgrade_init] ⚠️ 二进制文件不存在: ${TRIM_APPDEST}/fnmusic-sync" >>${LOG_FILE}
 fi
 
-echo "$(date '+%Y-%m-%d %H:%M:%S') [upgrade_init] upgrade_init 执行完成" >> ${LOG_FILE}
+echo "$(date '+%Y-%m-%d %H:%M:%S') [upgrade_init] upgrade_init 执行完成" >>${LOG_FILE}
 
 exit 0

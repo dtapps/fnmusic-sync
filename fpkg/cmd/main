@@ -7,100 +7,111 @@ PID_FILE="${TRIM_PKGVAR}/app.pid"
 BINARY="${TRIM_APPDEST}/fnmusic-sync"
 
 log_msg() {
-    echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" >> ${LOG_FILE}
+  echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" >>${LOG_FILE}
 }
 
 start_process() {
-    if status; then
-        return 0
-    fi
-
-    log_msg "Starting process ..."
-
-    # 启动应用（前台运行，由 fnOS 进程管理接管）
-    cd "${TRIM_APPDEST}"
-    ${BINARY} >> ${LOG_FILE} 2>&1 &
-    printf "%s" "$!" > ${PID_FILE}
-    log_msg "pid = $!"
+  if status; then
     return 0
+  fi
+
+  log_msg "Starting process ..."
+
+  # 注入向导持久化的环境变量（如 wizard_debug）。
+  # fnOS 不跨升级保留向导值，应用自行落盘到 config.env（由 install/config/upgrade
+  # 回调写入，位于 TRIM_PKGETC，与 config.yaml 同目录、升级后存活）；启动时 source
+  # 该文件，确保升级后用户设置依然生效。
+  CONFIG_ENV="${TRIM_PKGETC}/config.env"
+  if [ -f "${CONFIG_ENV}" ]; then
+    set -a
+    . "${CONFIG_ENV}"
+    set +a
+  fi
+
+  # 启动应用（前台运行，由 fnOS 进程管理接管）
+  cd "${TRIM_APPDEST}"
+  ${BINARY} >>${LOG_FILE} 2>&1 &
+  printf "%s" "$!" >${PID_FILE}
+  log_msg "pid = $!"
+  return 0
 }
 
 stop_process() {
-    log_msg "Stopping process ..."
+  log_msg "Stopping process ..."
 
-    if [ -r "${PID_FILE}" ]; then
-        pid=$(head -n 1 "${PID_FILE}" | tr -d '[:space:]')
-        
-        log_msg "pid=${pid}"
-        if ! check_process "${pid}"; then
-            rm -f "${PID_FILE}"
-            log_msg "remove pid file 1"
-            return
-        fi
+  if [ -r "${PID_FILE}" ]; then
+    pid=$(head -n 1 "${PID_FILE}" | tr -d '[:space:]')
 
-        log_msg "send TERM signal to PID:${pid}..."
-        kill -TERM ${pid} >> ${LOG_FILE} 2>&1
-
-        local count=0
-        while check_process "${pid}" && [ $count -lt 10 ]; do
-            sleep 1
-            count=$((count + 1))
-            log_msg "waiting process terminal... (${count}s/10s)"
-        done
-
-        if check_process "${pid}"; then
-            log_msg "send KILL signal to PID:${pid}..."
-            kill -KILL "${pid}"
-            sleep 1
-            rm -f "${PID_FILE}"
-        else
-            log_msg "process killed... "
-        fi
+    log_msg "pid=${pid}"
+    if ! check_process "${pid}"; then
+      rm -f "${PID_FILE}"
+      log_msg "remove pid file 1"
+      return
     fi
 
-    # 清理残留 app.sock
-    rm -f "${TRIM_APPDEST}/app.sock" 2>/dev/null
+    log_msg "send TERM signal to PID:${pid}..."
+    kill -TERM ${pid} >>${LOG_FILE} 2>&1
 
-    return 0
+    local count=0
+    while check_process "${pid}" && [ $count -lt 10 ]; do
+      sleep 1
+      count=$((count + 1))
+      log_msg "waiting process terminal... (${count}s/10s)"
+    done
+
+    if check_process "${pid}"; then
+      log_msg "send KILL signal to PID:${pid}..."
+      kill -KILL "${pid}"
+      sleep 1
+      rm -f "${PID_FILE}"
+    else
+      log_msg "process killed... "
+    fi
+  fi
+
+  # 清理残留 app.sock
+  rm -f "${TRIM_APPDEST}/app.sock" 2>/dev/null
+
+  return 0
 }
 
 check_process() {
-    local pid=$1
-    if kill -0 "${pid}" 2>/dev/null; then
-        return 0
-    else
-        return 1
-    fi
+  local pid=$1
+  if kill -0 "${pid}" 2>/dev/null; then
+    return 0
+  else
+    return 1
+  fi
 }
 
 status() {
-    if [ -f "${PID_FILE}" ]; then
-        pid=$(head -n 1 "${PID_FILE}" | tr -d '[:space:]')
-        if check_process "${pid}"; then
-            return 0
-        else
-            rm -f "${PID_FILE}"
-        fi    
+  if [ -f "${PID_FILE}" ]; then
+    pid=$(head -n 1 "${PID_FILE}" | tr -d '[:space:]')
+    if check_process "${pid}"; then
+      return 0
+    else
+      rm -f "${PID_FILE}"
     fi
+  fi
 
-    return 1
+  return 1
 }
 
 case $1 in
-start)
+  start)
     start_process
     ;;
-stop)
+  stop)
     stop_process
     ;;
-status)
-    if status; then 
-        exit 0
-    else 
-        exit 3
+  status)
+    if status; then
+      exit 0
+    else
+      exit 3
     fi
     ;;
-*)
+  *)
     exit 1
     ;;
 esac

@@ -5,7 +5,7 @@
 #
 # fpk 环境变量说明（见飞牛官方文档）：
 #   TRIM_PKGETC = 应用配置目录（config.yaml）
-#   TRIM_PKGVAR = 运行时数据目录（state.yaml、logs/、run.lock、app.pid 等）
+#   TRIM_PKGVAR = 运行时数据目录（state.db、logs/、run.lock、app.pid 等）
 # fpk 没有独立的日志目录变量，日志统一放在 TRIM_PKGVAR/logs 下。
 # 删除 TRIM_PKGVAR 即删除状态、日志等所有运行时数据。
 
@@ -14,11 +14,11 @@ DATA_DIR="${TRIM_PKGVAR}"
 
 # 如果用户选择不保留数据（wizard_keep_data 为 false 或 0），则清理所有数据
 if [ "${wizard_keep_data}" = "false" ] || [ "${wizard_keep_data}" = "0" ]; then
-    rm -rf "${CONFIG_DIR}" 2>/dev/null || true
-    rm -rf "${DATA_DIR}" 2>/dev/null || true
-    echo "已彻底删除配置、日志与状态数据" > "${TRIM_TEMP_LOGFILE}"
+  rm -rf "${CONFIG_DIR}" 2>/dev/null || true
+  rm -rf "${DATA_DIR}" 2>/dev/null || true
+  echo "已彻底删除配置、日志与状态数据" >"${TRIM_TEMP_LOGFILE}"
 else
-    echo "配置与数据已保留：${CONFIG_DIR}" > "${TRIM_TEMP_LOGFILE}"
+  echo "配置与数据已保留：${CONFIG_DIR}" >"${TRIM_TEMP_LOGFILE}"
 fi
 
 exit 0

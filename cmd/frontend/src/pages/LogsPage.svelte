@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onMount } from 'svelte';
   import { _ } from 'svelte-i18n';
   import { getLogs } from '$lib/api';
   import { errMessage } from '$lib/utils';
@@ -25,10 +26,8 @@
     }
   }
 
-  // 初始化加载
-  $effect(() => {
-    refresh();
-  });
+  // 每次进入该 tab（组件重新挂载）时自动加载，无需手动点刷新。
+  onMount(refresh);
 
   // 从 slog TextHandler 日志行中提取等级
   // 格式: time=2026-09-11T10:30:00Z level=INFO msg="..." key=value

@@ -35,10 +35,10 @@ import (
 
 	"cnb.cool/dtapp/fnmusic-sync/internal/buildinfo"
 	"cnb.cool/dtapp/fnmusic-sync/internal/config"
+	"cnb.cool/dtapp/fnmusic-sync/internal/db"
 	"cnb.cool/dtapp/fnmusic-sync/internal/lastfm"
 	"cnb.cool/dtapp/fnmusic-sync/internal/strutil"
 	"cnb.cool/dtapp/fnmusic-sync/internal/updater"
-	"github.com/spf13/viper"
 )
 
 //go:embed www
@@ -54,7 +54,6 @@ type ActiveUserProvider interface {
 // Server 提供 Web 配置界面 HTTP 服务。
 type Server struct {
 	configPath   string
-	statePath    string
 	logDir       string
 	logger       *slog.Logger
 	httpServer   *http.Server
@@ -62,17 +61,19 @@ type Server struct {
 	mu           sync.RWMutex
 	latestCfg    *config.Config
 	userProvider ActiveUserProvider
+	db           *db.Store
 }
 
 // NewServer 创建 Web UI 服务。
-// configPath/statePath/logDir 由 runtime 模式决定（fpk 模式下使用 TRIM_* 变量）。
-func NewServer(configPath, statePath, logDir string, logger *slog.Logger, userProvider ActiveUserProvider) *Server {
+// configPath/logDir 由 runtime 模式决定（fpk 模式下使用 TRIM_* 变量）。
+// dbStore 为持久化层（用户列表 / 运行状态），可为 nil（仅影响 /api/state、/api/users）。
+func NewServer(configPath, logDir string, logger *slog.Logger, userProvider ActiveUserProvider, dbStore *db.Store) *Server {
 	return &Server{
 		configPath:   configPath,
-		statePath:    statePath,
 		logDir:       logDir,
 		logger:       logger,
 		userProvider: userProvider,
+		db:           dbStore,
 	}
 }
 
@@ -337,6 +338,17 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 	}
 
 	user := readGatewayUser(r)
+
+	// 打开 Web UI 这一刻，请求同时带 music-token cookie（音乐身份）与 X-Trim-* Header（平台身份）。
+	// 若能从活跃用户缓存解析出音乐用户名，则把平台身份（uid / 是否管理员）绑定到该音乐用户。
+	if s.db != nil && s.userProvider != nil {
+		if mt, err := r.Cookie("music-token"); err == nil {
+			if name, ok := s.userProvider.ActiveUsers()[mt.Value]; ok && name != "" {
+				_ = s.db.BindUserPlatform(name, user.UID, user.Username, user.IsAdmin)
+			}
+		}
+	}
+
 	writeJSON(w, http.StatusOK, map[string]any{
 		"uid":      user.UID,
 		"username": user.Username,
@@ -411,44 +423,32 @@ func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 状态文件是 YAML 格式（由 viper 写入），不能用 json.Unmarshal 解析。
-	v := viper.New()
-	v.SetConfigType("yaml")
-	v.SetConfigFile(s.statePath)
-	if err := v.ReadInConfig(); err != nil {
-		if _, ok := err.(viper.ConfigFileNotFoundError); ok || os.IsNotExist(err) {
-			writeJSON(w, http.StatusOK, map[string]any{"users": map[string]any{}})
-			return
+	users := map[string]any{}
+
+	if s.db != nil {
+		rows, err := s.db.ListRunStatus(r.Context())
+		if err == nil {
+			gwUser := readGatewayUser(r)
+			for _, rs := range rows {
+				// 非管理员仅能看到自己的状态
+				if !gwUser.IsAdmin && rs.Username != gwUser.Username {
+					continue
+				}
+				lastScrobbled := ""
+				if rs.LastScrobbledAt.Valid {
+					lastScrobbled = rs.LastScrobbledAt.String
+				}
+				users[rs.Username] = map[string]any{
+					"scrobbles":            int(rs.TotalScrobbles),
+					"last_scrobbled_at":    lastScrobbled,
+					"lastfm_enabled":       rs.LastfmEnabled != 0,
+					"listenbrainz_enabled": rs.ListenbrainzEnabled != 0,
+				}
+			}
 		}
-		writeJSONError(w, http.StatusInternalServerError, "读取状态失败: "+err.Error())
-		return
 	}
 
-	raw := v.AllSettings()
-
-	user := readGatewayUser(r)
-	if user.IsAdmin {
-		// 管理员返回全部
-		writeJSON(w, http.StatusOK, raw)
-		return
-	}
-
-	// 普通用户只返回自己的状态
-	users, ok := raw["users"].(map[string]any)
-	if !ok {
-		writeJSON(w, http.StatusOK, map[string]any{"users": map[string]any{}})
-		return
-	}
-
-	userState, exists := users[user.Username]
-	if !exists {
-		writeJSON(w, http.StatusOK, map[string]any{"users": map[string]any{}})
-		return
-	}
-
-	writeJSON(w, http.StatusOK, map[string]any{
-		"users": map[string]any{user.Username: userState},
-	})
+	writeJSON(w, http.StatusOK, map[string]any{"users": users})
 }
 
 // handleLogs GET 返回日志文件尾部内容。
@@ -530,7 +530,6 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":     true,
 		"config": s.configPath,
-		"state":  s.statePath,
 		"logDir": s.logDir,
 	})
 }
@@ -827,10 +826,33 @@ func (s *Server) handleActiveUsers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	users := make([]map[string]string, 0)
-	if s.userProvider != nil {
+	users := make([]map[string]any, 0)
+	if s.db != nil {
+		// 从持久化的 users 表读取全部被识别过的音乐用户（含 UA / 平台绑定 / 时间）。
+		// 一行一个 token（客户端会话），同一账号多端登录会各占一行。
+		if rows, err := s.db.ListUsers(r.Context()); err == nil {
+			for _, u := range rows {
+				token := u.TokenPrefix
+				if token == "" {
+					token = strutil.FirstN8(u.Username)
+				}
+				users = append(users, map[string]any{
+					"token":             token,
+					"username":          u.Username,
+					"platform_username": u.PlatformUsername.String,
+					"is_admin":          u.IsAdmin != 0,
+					"ua_system":         u.UaSystem.String,
+					"ua_client":         u.UaClient.String,
+					"ua_raw":            u.UaRaw.String,
+					"first_seen_at":     u.FirstSeenAt,
+					"last_seen_at":      u.LastSeenAt,
+				})
+			}
+		}
+	} else if s.userProvider != nil {
+		// 兜底：无数据库时退回内存活跃用户列表。
 		for k, v := range s.userProvider.ActiveUsers() {
-			users = append(users, map[string]string{
+			users = append(users, map[string]any{
 				"token":    strutil.FirstN8(k),
 				"username": v,
 			})
