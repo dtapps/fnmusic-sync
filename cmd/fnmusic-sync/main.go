@@ -17,6 +17,7 @@ import (
 
 	"cnb.cool/dtapp/fnmusic-sync/internal/buildinfo"
 	"cnb.cool/dtapp/fnmusic-sync/internal/config"
+	"cnb.cool/dtapp/fnmusic-sync/internal/db"
 	"cnb.cool/dtapp/fnmusic-sync/internal/playback"
 	"cnb.cool/dtapp/fnmusic-sync/internal/playlist"
 	"cnb.cool/dtapp/fnmusic-sync/internal/proxy"
@@ -137,7 +138,16 @@ func run(doCheck, debug bool, wait time.Duration, logger *slog.Logger, levelVar 
 		return check(context.Background(), listen, upstream, p, logger)
 	}
 
-	store := playback.NewUserStore(rt.StatePath, logger)
+	// 打开持久化数据库（sqlite，modernc 纯 Go 驱动）。
+	// 复用 state 路径，仅把扩展名换成 .db。
+	dbPath := strings.TrimSuffix(rt.StatePath, filepath.Ext(rt.StatePath)) + ".db"
+	dbStore, err := db.Open(dbPath)
+	if err != nil {
+		return fmt.Errorf("打开数据库失败 (%s): %w", dbPath, err)
+	}
+	defer dbStore.Close()
+
+	store := playback.NewUserStore(dbStore, logger)
 
 	manager := playback.NewManager(nil, logger)
 	manager.SetScrobbledHook(func(username, provider string) {
@@ -259,7 +269,7 @@ func run(doCheck, debug bool, wait time.Duration, logger *slog.Logger, levelVar 
 		"上游", cfg.UpstreamSocket,
 		"调试", debug,
 		"配置", rt.ConfigPath,
-		"状态文件", rt.StatePath,
+		"数据库", rt.StatePath,
 		"日志目录", rt.LogDir,
 		"进程号", os.Getpid(),
 	)
@@ -295,7 +305,7 @@ func run(doCheck, debug bool, wait time.Duration, logger *slog.Logger, levelVar 
 	defer playlistSync.Stop()
 
 	// fpk 模式：启动 Web UI（统一网关监听 app.sock）
-	webUI, webUIErr := startWebUI(logger, p.UserCache())
+	webUI, webUIErr := startWebUI(logger, p.UserCache(), dbStore)
 	if webUIErr != nil {
 		logger.Warn("Web UI 启动失败（不影响代理功能）", "错误", webUIErr)
 	} else if webUI != nil {

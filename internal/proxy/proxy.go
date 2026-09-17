@@ -15,6 +15,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"cnb.cool/dtapp/fnmusic-sync/internal/db"
 	"cnb.cool/dtapp/fnmusic-sync/internal/playback"
 	"cnb.cool/dtapp/fnmusic-sync/internal/strutil"
 )
@@ -444,6 +445,7 @@ func (p *Proxy) modifyResponse(resp *http.Response) error {
 						"用户标识", strutil.FirstN8(key),
 						"用户名", name,
 					)
+					p.recordUserIdentity(key, name, resp.Request)
 				}
 			}
 		}
@@ -461,6 +463,7 @@ func (p *Proxy) modifyResponse(resp *http.Response) error {
 
 			if tok, name := playback.ParseLoginToken(b); tok != "" && name != "" {
 				p.userCache.Register(tok, name)
+				p.recordUserIdentity(tok, name, resp.Request)
 
 				// 这次登录用的是旧（已过期）token，现在已轮换，把它从缓存剔除，
 				// 避免旧 token 残留在活跃列表里反复打上游。
@@ -503,6 +506,26 @@ func (p *Proxy) modifyResponse(resp *http.Response) error {
 	}
 
 	return nil
+}
+
+// recordUserIdentity 把识别到的音乐用户持久化到 users 表（UA + token 前缀 + 时间）。
+// 平台绑定（is_admin 等）由 Web UI 打开时经 BindUserPlatform 补全，此处只落音乐侧身份。
+func (p *Proxy) recordUserIdentity(token, username string, r *http.Request) {
+	if p.cfg.Store == nil || username == "" {
+		return
+	}
+	ua := ""
+	if r != nil {
+		ua = r.UserAgent()
+	}
+	sys, client := db.ParseUserAgent(ua)
+	_ = p.cfg.Store.UpsertUser(db.UserUpsert{
+		Username:    username,
+		TokenPrefix: strutil.FirstN8(token),
+		UARaw:       ua,
+		UASystem:    sys,
+		UAClient:    client,
+	})
 }
 
 func (p *Proxy) errorHandler(

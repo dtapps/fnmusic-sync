@@ -66,7 +66,7 @@ func printVersion() {
 		kv{"监听Socket", buildinfo.DefaultListenSocket},
 		kv{"上游Socket", buildinfo.DefaultUpstreamSocket},
 		kv{"配置", rt.ConfigPath},
-		kv{"状态", rt.StatePath},
+		kv{"数据库", rt.StatePath},
 		kv{"日志", filepath.Join(rt.LogDir, defaultLogFile)},
 	)
 
