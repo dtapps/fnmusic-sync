@@ -13,11 +13,18 @@
   },
   "users_list": {
     "title": "用户列表",
-    "desc": "通过 token 识别的当前在线用户",
-    "empty": "暂无在线用户",
-    "username": "用户名",
+    "desc": "已识别的音乐用户（含平台绑定与设备信息，由数据库持久化）",
+    "empty": "暂无已识别用户",
+    "username": "音乐用户名",
+    "platform": "平台用户",
+    "role": "角色",
+    "admin": "管理员",
+    "normal": "普通用户",
+    "client": "客户端",
     "token": "Token 标识",
-    "online_count": "当前在线 {count} 人",
+    "first_seen": "首次识别",
+    "last_seen": "最后使用",
+    "online_count": "累计识别 {count} 个用户",
     "load_failed": "加载用户列表失败: {message}"
   },
   "users": {

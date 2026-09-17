@@ -13,11 +13,18 @@
   },
   "users_list": {
     "title": "User List",
-    "desc": "Currently online users identified by token",
-    "empty": "No online users",
-    "username": "Username",
+    "desc": "Identified music users (with platform binding and device info, persisted in database)",
+    "empty": "No identified users yet",
+    "username": "Music User",
+    "platform": "Platform User",
+    "role": "Role",
+    "admin": "Admin",
+    "normal": "User",
+    "client": "Client",
     "token": "Token ID",
-    "online_count": "{count} user(s) online",
+    "first_seen": "First Seen",
+    "last_seen": "Last Seen",
+    "online_count": "{count} user(s) identified",
     "load_failed": "Failed to load user list: {message}"
   },
   "users": {

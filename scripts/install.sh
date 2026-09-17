@@ -211,7 +211,7 @@ do_install() {
 
   log ""
   log "配置  ${CONFIG_DIR}/config.yaml"
-  log "状态  ${STATE_DIR}/state.yaml"
+  log "数据库  ${STATE_DIR}/state.db"
   log "日志  ${LOG_DIR}/${BINARY}.log"
 
   if command -v systemctl >/dev/null 2>&1; then

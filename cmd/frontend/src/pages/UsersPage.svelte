@@ -1,7 +1,7 @@
 <script lang="ts">
   import { _ } from 'svelte-i18n';
   import { currentUser, config, showToast, reloadConfig } from '$lib/stores';
-  import { errMessage } from '$lib/utils';
+  import { errMessage, lastfmProfileUrl, listenbrainzProfileUrl } from '$lib/utils';
   import { saveUser, deleteUser as apiDeleteUser } from '$lib/api';
   import { createEmptyUser, type UserAccount } from '$lib/types';
   import { Button, Card, Badge, Dialog, Input } from '$lib/components';
@@ -116,6 +116,8 @@
       <!-- 移动端：卡片列表 -->
       <div class="sm:hidden flex flex-col gap-3">
         {#each userEntries as [name, user] (name)}
+          {@const lfUrl = lastfmProfileUrl(user.lastfm?.username)}
+          {@const lbUrl = listenbrainzProfileUrl(user.listenbrainz?.username)}
           <Card class="p-4">
             <div class="flex items-center justify-between gap-2 mb-2">
               <span class="text-sm font-medium truncate">{name}</span>
@@ -132,13 +134,21 @@
             <div class="flex gap-3 text-xs">
               <span class="flex items-center gap-1">
                 <Badge variant={user.lastfm?.enabled ? 'on' : 'off'}>{user.lastfm?.enabled ? '✓' : '✗'}</Badge>
-                Last.fm
+                {#if lfUrl}
+                  <a class="hover:underline" href={lfUrl} target="_blank" rel="noopener noreferrer">Last.fm</a>
+                {:else}
+                  Last.fm
+                {/if}
               </span>
               <span class="flex items-center gap-1">
                 <Badge variant={user.listenbrainz?.enabled ? 'on' : 'off'}
                   >{user.listenbrainz?.enabled ? '✓' : '✗'}</Badge
                 >
-                ListenBrainz
+                {#if lbUrl}
+                  <a class="hover:underline" href={lbUrl} target="_blank" rel="noopener noreferrer">ListenBrainz</a>
+                {:else}
+                  ListenBrainz
+                {/if}
               </span>
             </div>
             {#if expandedRows[name]}
@@ -169,13 +179,20 @@
         </thead>
         <tbody>
           {#each userEntries as [name, user] (name)}
+            {@const lfUrl = lastfmProfileUrl(user.lastfm?.username)}
+            {@const lbUrl = listenbrainzProfileUrl(user.listenbrainz?.username)}
             <tr class="border-t border-border hover:bg-muted/50">
               <td class="px-4 py-2.5 text-sm">{name}</td>
               <td class="px-4 py-2.5 text-sm">
                 {#if user.lastfm?.enabled}
                   <Badge variant="on">✓</Badge>
-                  {#if user.lastfm?.username}
-                    <span class="text-xs text-muted-foreground ml-1">{user.lastfm.username}</span>
+                  {#if lfUrl}
+                    <a
+                      class="text-xs text-muted-foreground ml-1 hover:underline"
+                      href={lfUrl}
+                      target="_blank"
+                      rel="noopener noreferrer">{user.lastfm.username}</a
+                    >
                   {/if}
                 {:else}
                   <Badge variant="off">✗</Badge>
@@ -184,8 +201,13 @@
               <td class="px-4 py-2.5 text-sm">
                 {#if user.listenbrainz?.enabled}
                   <Badge variant="on">✓</Badge>
-                  {#if user.listenbrainz?.username}
-                    <span class="text-xs text-muted-foreground ml-1">{user.listenbrainz.username}</span>
+                  {#if lbUrl}
+                    <a
+                      class="text-xs text-muted-foreground ml-1 hover:underline"
+                      href={lbUrl}
+                      target="_blank"
+                      rel="noopener noreferrer">{user.listenbrainz.username}</a
+                    >
                   {/if}
                 {:else}
                   <Badge variant="off">✗</Badge>

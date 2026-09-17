@@ -26,6 +26,7 @@
     "oxlint": "^1.83.0",
     "postcss": "^8.5.28",
     "prettier": "^3.9.7",
+    "prettier-plugin-sql": "^0.20.0",
     "prettier-plugin-svelte": "^4.1.1",
     "svelte": "^5.57.0",
     "svelte-i18n": "^4.0.1",

@@ -1,12 +1,29 @@
 #!/bin/bash
 
 # 配置变更回调
-# 配置变更完全由 Web UI 处理，此脚本仅做日志记录
+# 配置变更完全由 Web UI 处理，此脚本负责把向导 debug 开关持久化到 config.env。
 
 CONFIG_FILE="${TRIM_PKGETC}/config.yaml"
 
+# 向导值持久化：fnOS 不代写配置文件，跨升级的保留必须由应用脚本自行完成。
+CONFIG_ENV="${TRIM_PKGETC}/config.env"
+persist_wizard_debug() {
+  local val="$1" force="$2"
+  [ -z "${val}" ] && return 0
+  if [ -n "${force}" ] || ! grep -qE '^wizard_debug=' "${CONFIG_ENV}" 2>/dev/null; then
+    touch "${CONFIG_ENV}" 2>/dev/null || true
+    awk -v v="${val}" 'BEGIN{f=0} /^wizard_debug=/{print "wizard_debug="v; f=1; next} {print} END{if(!f) print "wizard_debug="v}' "${CONFIG_ENV}" >"${CONFIG_ENV}.tmp" && mv "${CONFIG_ENV}.tmp" "${CONFIG_ENV}"
+    return 0
+  fi
+  return 1
+}
+
 if [ -f "${CONFIG_FILE}" ]; then
-    echo "配置文件: ${CONFIG_FILE}" > "${TRIM_TEMP_LOGFILE}"
+  echo "配置文件: ${CONFIG_FILE}" >"${TRIM_TEMP_LOGFILE}"
 fi
+
+# 应用设置向导（wizard/config）提交时，fnOS 以同名环境变量 wizard_debug 传入最新值；
+# 用户主动改设置，强制落盘（force），确保运行时与升级后都保持用户当前选择。
+persist_wizard_debug "${wizard_debug:-}" "force"
 
 exit 0
