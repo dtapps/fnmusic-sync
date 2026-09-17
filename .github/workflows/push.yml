@@ -4,6 +4,9 @@
 # https://github.com/actions/setup-go
 # https://github.com/actions/setup-node
 # https://github.com/pnpm/action-setup
+# https://github.com/crazy-max/ghaction-upx
+# https://github.com/golangci/golangci-lint-action
+# https://github.com/sqlc-dev/setup-sqlc
 name: PushRequest
 
 on:
@@ -26,10 +29,18 @@ jobs:
 
     # ==========================================
     # 定义版本变量
+    # https://github.com/upx/upx/releases
+    # https://github.com/goreleaser/nfpm/releases
+    # https://developer.fnnas.com/docs/cli/fnpack/
     # https://github.com/golangci/golangci-lint/releases
+    # https://github.com/sqlc-dev/sqlc/releases
     # ==========================================
     env:
-      GOLANGCI_LINT_VERSION: '2.13.2'
+      UPX_VERSION: '5.2.1'
+      NFPM_VERSION: '2.47.0'
+      FNPACK_VERSION: '1.2.3'
+      GOLANGCI_LINT_VERSION: 'v2.13.2'
+      SQLC_VERSION: '1.31.1'
 
     steps:
       - name: 检出代码
@@ -55,20 +66,55 @@ jobs:
           cache-dependency-path: 'cmd/frontend/pnpm-lock.yaml'
           node-version-file: 'cmd/frontend/.nvmrc'
 
-      - name: 安装 golangci-lint 工具
+      - name: 安装 upx 工具
         shell: bash
         run: |
-          LINT_DIR="golangci-lint-${GOLANGCI_LINT_VERSION}-linux-amd64"
-          LINT_URL="https://github.com/golangci/golangci-lint/releases/download/v${GOLANGCI_LINT_VERSION}/${LINT_DIR}.tar.gz"
+          UPX_DIR="upx-${UPX_VERSION}-amd64_linux"
+          UPX_URL="https://github.com/upx/upx/releases/download/v${UPX_VERSION}/${UPX_DIR}.tar.xz"
 
           cd /tmp && \
-          wget -q -O lint.tar.gz "${LINT_URL}" && \
-          tar -xf lint.tar.gz && \
-          sudo mv ${LINT_DIR}/golangci-lint /usr/local/bin/golangci-lint && \
-          sudo chmod +x /usr/local/bin/golangci-lint && \
-          rm -rf lint.tar.gz ${LINT_DIR} && \
-          echo "--- golangci-lint installed ---" && \
-          golangci-lint --version
+          wget -q -O upx.tar.xz "${UPX_URL}" && \
+          tar -xf upx.tar.xz && \
+          sudo mv ${UPX_DIR}/upx /usr/local/bin/upx && \
+          sudo chmod +x /usr/local/bin/upx && \
+          rm -rf upx.tar.xz ${UPX_DIR} && \
+          echo "--- UPX installed ---" && \
+          upx --version
+
+      - name: 安装 nfpm 工具
+        shell: bash
+        run: |
+          NFPM_URL="https://github.com/goreleaser/nfpm/releases/download/v${NFPM_VERSION}/nfpm_${NFPM_VERSION}_Linux_x86_64.tar.gz"
+
+          cd /tmp && \
+          wget -q -O nfpm.tar.gz "${NFPM_URL}" && \
+          tar -xf nfpm.tar.gz && \
+          sudo mv nfpm /usr/local/bin/nfpm && \
+          sudo chmod +x /usr/local/bin/nfpm && \
+          rm -rf nfpm.tar.gz && \
+          echo "--- nfpm installed ---" && \
+          nfpm --version
+
+      - name: 安装 fnpack 工具
+        shell: bash
+        run: |
+          FNPACK_URL="https://static2.fnnas.com/fnpack/fnpack-${FNPACK_VERSION}-linux-amd64"
+
+          sudo wget -q -O /usr/local/bin/fnpack "${FNPACK_URL}" && \
+          sudo chmod +x /usr/local/bin/fnpack && \
+          echo "--- fnpack installed ---" && \
+          fnpack --help || true
+
+      - name: 安装 golangci-lint 工具
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: ${{ env.GOLANGCI_LINT_VERSION }}
+          install-only: true
+
+      - name: 安装 sqlc 工具
+        uses: sqlc-dev/setup-sqlc@v5
+        with:
+          sqlc-version: ${{ env.SQLC_VERSION }}
 
       - name: 安装依赖
         run: make deps

@@ -19,7 +19,7 @@ const (
 // 传统模式下的固定路径（不可自定义）。
 const (
 	traditionalConfigPath  = "/etc/fnmusic-sync/config.yaml"
-	traditionalStatePath   = "/var/lib/fnmusic-sync/state.yaml"
+	traditionalStatePath   = "/var/lib/fnmusic-sync/state.db"
 	traditionalLogDir      = "/var/log/fnmusic-sync"
 	traditionalRunLockPath = "/run/fnmusic-sync/run.lock"
 )
@@ -53,7 +53,7 @@ func detectRuntime() runtimeInfo {
 		return runtimeInfo{
 			Mode:        ModeFPK,
 			ConfigPath:  filepath.Join(pkgEtc, "config.yaml"),
-			StatePath:   filepath.Join(pkgVar, "state.yaml"),
+			StatePath:   filepath.Join(pkgVar, "state.db"),
 			LogDir:      filepath.Join(pkgVar, "logs"),
 			RunLockPath: filepath.Join(pkgVar, "run.lock"),
 		}

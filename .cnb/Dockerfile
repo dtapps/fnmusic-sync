@@ -1,6 +1,7 @@
 # 使用 golang 镜像作为基础
 FROM golang:1.27.0-trixie
 
+ARG GITHUB_MIRROR="https://files.m.daocloud.io"
 # ==========================================
 # 定义版本变量
 # https://github.com/upx/upx/releases
@@ -8,12 +9,14 @@ FROM golang:1.27.0-trixie
 # https://developer.fnnas.com/docs/cli/fnpack/
 # https://github.com/nodejs/node/releases
 # https://github.com/golangci/golangci-lint/releases
+# https://github.com/sqlc-dev/sqlc/releases
 # ==========================================
 ARG UPX_VERSION=5.2.1
 ARG NFPM_VERSION=2.47.0
 ARG FNPACK_VERSION=1.2.3
 ARG NODE_VERSION=26.8.2
 ARG GOLANGCI_LINT_VERSION=2.13.2
+ARG SQLC_VERSION=1.31.1
 
 # 1. 设置 Go 环境变量
 ENV GO111MODULE=on
@@ -22,8 +25,8 @@ ENV GOPATH=/go
 ENV PATH="$GOPATH/bin:$PATH"
 
 # 2. 替换 Debian APT 加速源
-RUN sed -i 's|deb.debian.org|mirrors.cloud.tencent.com|g' /etc/apt/sources.list.d/debian.sources 2>/dev/null || \
-    sed -i 's|deb.debian.org|mirrors.cloud.tencent.com|g' /etc/apt/sources.list
+RUN sed -i 's|deb.debian.org|mirrors.cloud.tencent.com|g' /etc/apt/sources.list.d/debian.sources 2>/dev/null \
+    || sed -i 's|deb.debian.org|mirrors.cloud.tencent.com|g' /etc/apt/sources.list
 
 # 3. 安装基础构建工具
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -31,7 +34,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     xz-utils \
     ca-certificates \
     curl \
-    gnupg
+    gnupg \
+    jq
 
 # 4. 安装 UPX 压缩工具
 RUN ARCH=$(uname -m) && \
@@ -41,7 +45,7 @@ RUN ARCH=$(uname -m) && \
     \
     # 构建下载地址
     UPX_DIR="upx-${UPX_VERSION}-${UPX_ARCH}_linux" && \
-    UPX_URL="https://files.m.daocloud.io/github.com/upx/upx/releases/download/v${UPX_VERSION}/${UPX_DIR}.tar.xz" && \
+    UPX_URL="${GITHUB_MIRROR}/github.com/upx/upx/releases/download/v${UPX_VERSION}/${UPX_DIR}.tar.xz" && \
     \
     cd /tmp && \
     wget -q -O upx.tar.xz "${UPX_URL}" && \
@@ -59,7 +63,7 @@ RUN ARCH=$(uname -m) && \
     elif [ "$ARCH" = "aarch64" ]; then NFPM_ARCH="arm64"; \
     else echo "Unsupported architecture: $ARCH" && exit 1; fi && \
     \
-    NFPM_URL="https://files.m.daocloud.io/github.com/goreleaser/nfpm/releases/download/v${NFPM_VERSION}/nfpm_${NFPM_VERSION}_Linux_${NFPM_ARCH}.tar.gz" && \
+    NFPM_URL="${GITHUB_MIRROR}/github.com/goreleaser/nfpm/releases/download/v${NFPM_VERSION}/nfpm_${NFPM_VERSION}_Linux_${NFPM_ARCH}.tar.gz" && \
     \
     cd /tmp && \
     wget -q -O nfpm.tar.gz "${NFPM_URL}" && \
@@ -116,7 +120,7 @@ RUN ARCH=$(uname -m) && \
     \
     # 构建下载地址
     LINT_DIR="golangci-lint-${GOLANGCI_LINT_VERSION}-linux-${LINT_ARCH}" && \
-    LINT_URL="https://files.m.daocloud.io/github.com/golangci/golangci-lint/releases/download/v${GOLANGCI_LINT_VERSION}/${LINT_DIR}.tar.gz" && \
+    LINT_URL="${GITHUB_MIRROR}/github.com/golangci/golangci-lint/releases/download/v${GOLANGCI_LINT_VERSION}/${LINT_DIR}.tar.gz" && \
     \
     cd /tmp && \
     wget -q -O lint.tar.gz "${LINT_URL}" && \
@@ -128,10 +132,29 @@ RUN ARCH=$(uname -m) && \
     echo "--- golangci-lint installed ---" && \
     golangci-lint --version
 
-# 9. 卸载不需要的工具，并清空所有 apt 缓存
-RUN apt-get purge -y wget xz-utils && \
-    apt-get autoremove -y && \
-    apt-get clean && \
-    rm -rf /var/lib/apt/lists/* /tmp/* /root/.npm
+# 9. 安装 sqlc (用于从 SQL 生成类型安全的 Go 代码)
+RUN ARCH=$(uname -m) && \
+    if [ "$ARCH" = "x86_64" ]; then SQLC_ARCH="amd64"; \
+    elif [ "$ARCH" = "aarch64" ]; then SQLC_ARCH="arm64"; \
+    else echo "Unsupported architecture: $ARCH" && exit 1; fi && \
+    \
+    # 构建下载地址 (使用 DaoCloud 镜像加速)
+    SQLC_URL="${GITHUB_MIRROR}/github.com/sqlc-dev/sqlc/releases/download/v${SQLC_VERSION}/sqlc_${SQLC_VERSION}_linux_${SQLC_ARCH}.tar.gz" && \
+    \
+    cd /tmp && \
+    wget -q -O sqlc.tar.gz "${SQLC_URL}" && \
+    tar -xzf sqlc.tar.gz && \
+    # 兼容压缩包内是否有顶层目录的情况，确保能准确移动二进制文件
+    if [ -f sqlc ]; then mv sqlc /usr/local/bin/sqlc; else mv */sqlc /usr/local/bin/sqlc; fi && \
+    chmod +x /usr/local/bin/sqlc && \
+    rm -rf sqlc.tar.gz && \
+    echo "--- sqlc installed ---" && \
+    sqlc version
+
+# 10. 卸载不需要的工具，并清空所有 apt 缓存
+RUN apt-get purge -y wget xz-utils \
+    && apt-get autoremove -y \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/* /tmp/* /root/.npm
 
 CMD ["bash"]

@@ -20,7 +20,9 @@ FPKG_DIR = fpkg
 BUILD_DIR=bin
 
 # 版本信息（支持外部传入）
-VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
+# 注意：若本地存在形如 refs/tags/vX.Y.Z 的异常标签，git describe 会返回带路径前缀的
+# 版本号（如 refs/tags/v0.0.32-...），此处统一剥离该前缀，避免污染包版本号与 sed 替换。
+VERSION ?= $(shell v=$$(git describe --tags --always --dirty 2>/dev/null | sed 's|^refs/tags/||'); [ -n "$$v" ] && echo "$$v" || echo "dev")
 # 包版本号：去掉 git tag 的 v 前缀。
 # Debian / fnOS 包元数据（manifest version、deb version、npm package.json version）
 # 不使用 v 前缀；而二进制内部版本与下载链接仍使用带 v 的 VERSION（与 git tag 保持一致）。
@@ -105,6 +107,15 @@ update-deps:
 	pnpm --dir $(FRONTEND_DIR) update --latest
 	@echo "[Deps] 完成。"
 
+# 生成 sqlc 持久化代码（需要 sqlc：go install github.com/sqlc-dev/sqlc/cmd/sqlc@latest）
+# 在 internal/db 目录执行，读取 sqlc.yaml 生成 db.go / models.go / querier.go / queries.sql.go。
+# 注意：queries.sql 不能有注释（sqlc v1.31 多查询文件有解析 bug），表结构注释放在 schema.sql。
+.PHONY: sqlc
+sqlc:
+	@echo "[SQLC] 生成 internal/db 持久化代码..."
+	cd $(CURDIR)/internal/db && sqlc generate
+	@echo "[SQLC] 完成。"
+
 # 启动本地开发后端（模拟飞牛网关 + API，监听 :8080）
 .PHONY: dev-server
 dev-server:
@@ -135,10 +146,12 @@ dev:
 
 # ==================== 工具 ====================
 
-# 格式化（Go + 前端 + 配置 + 文档 + 脚本）
-format: format-go format-frontend format-yaml format-json format-markdown format-shell
+# 格式化（Go + 前端 + 配置 + 文档 + 脚本 + SQL + Docker）
+.PHONY: format
+format: format-go format-frontend format-yaml format-json format-markdown format-shell format-sql format-docker
 
 # 格式化 Go 代码
+.PHONY: format-go
 format-go:
 	@echo "[Format] 格式化后端文件 (GO)..."
 	gofmt -w -s .
@@ -146,6 +159,7 @@ format-go:
 	go fix ./...
 
 # 格式化前端文件（HTML/CSS/JS/TS/Svelte）
+.PHONY: format-frontend
 format-frontend:
 	@echo "[Format] 格式化前端文件 (HTML/CSS/JS/TS/Svelte)..."
 	@cd $(FRONTEND_DIR) && pnpm run format \
@@ -153,6 +167,7 @@ format-frontend:
 	@echo "[Format] 前端格式化完成。"
 
 # 格式化 JSON 文件
+.PHONY: format-json
 format-json:
 	@echo "[Format] 格式化 JSON 文件..."
 	@npx --yes prettier@latest \
@@ -162,10 +177,16 @@ format-json:
 		--print-width 120 \
 		"cmd/frontend/src/lib/i18n/*.json" \
 		"cmd/frontend/tsconfig.json" \
+		"fnpack/*.json" \
 		|| echo "⚠️  prettier 格式化失败，请确认 npx 可用"
+	@command -v jq >/dev/null 2>&1 && { \
+		for f in $(FPKG_DIR)/wizard/* $(FPKG_DIR)/app/ui/config $(FPKG_DIR)/config/privilege $(FPKG_DIR)/config/resource; do [ -f "$$f" ] && jq . "$$f" > "$$f.tmp" && mv "$$f.tmp" "$$f"; done; \
+		echo "[Format] fpk JSON（wizard / ui / config）格式化完成（jq）。" ; \
+	} || echo "⚠️  jq 未安装，跳过 fpk wizard JSON 格式化。"
 	@echo "[Format] JSON 格式化完成。"
 
 # 格式化 YAML 文件（.yaml/.yml）
+.PHONY: format-yaml
 format-yaml:
 	@echo "[Format] 格式化配置文件 (YAML)…"
 	@npx --yes prettier@latest \
@@ -180,10 +201,12 @@ format-yaml:
 		".github/**/*.{yaml,yml}" \
 		".nfpm.yaml" \
 		".golangci.yml" \
+		"internal/db/**/*.{yaml,yml}" \
 		|| echo "⚠️  prettier 格式化失败，请确认 npx 可用"
 	@echo "[Format] YAML 格式化完成。"
 
 # 格式化 Markdown 文件（.md）
+.PHONY: format-markdown
 format-markdown:
 	@echo "[Format] 格式化文档 (Markdown)…"
 	@npx --yes prettier@latest \
@@ -198,34 +221,60 @@ format-markdown:
 # 格式化 Shell 脚本（.sh）
 # 使用 shfmt，需安装：go install mvdan.cc/sh/v3/cmd/shfmt@latest
 # 退化为 shellcheck 检查（仅警告，不自动修复）
+.PHONY: format-shell
 format-shell:
 	@echo "[Format] 格式化脚本 (Shell)…"
 	@command -v shfmt >/dev/null 2>&1 && { \
 		find . -name "*.sh" -not -path "./.git/*" -not -path "./vendor/*" -not -path "./node_modules/*" -exec shfmt -w -i 2 -ci -bn -s {} + ; \
+		shfmt -w -i 2 -ci -bn -s -ln bash $(FPKG_DIR)/cmd/* 2>/dev/null || true ; \
 		echo "[Format] Shell 格式化完成（shfmt）。" ; \
 	} || { \
-		echo "⚠️  shfmt 未安装，尝试 shellcheck 检查…" ; \
-		command -v shellcheck >/dev/null 2>&1 && { \
-			find . -name "*.sh" -not -path "./.git/*" -not -path "./vendor/*" -not -path "./node_modules/*" -exec shellcheck -S warning {} + || true ; \
-			echo "[Format] Shell 检查完成（shellcheck，仅检查未修复）。" ; \
-		} || echo "⚠️  shfmt 和 shellcheck 均未安装，跳过 Shell 格式化。" ; \
+		echo "⚠️  shfmt 未安装，跳过 Shell 格式化。"; \
+		echo "   提示: 可通过运行 'go install mvdan.cc/sh/v3/cmd/shfmt@latest' 安装"; \
 	}
 
-# 检查（Go + HTML/CSS/JS/TS/Svelte）
-check: lint-go lint-go-fix lint-frontend
+# 格式化 SQL 文件（internal/db/*.sql via prettier + prettier-plugin-sql）
+.PHONY: format-sql
+format-sql:
+	@echo "[Format] 格式化 SQL 文件 (prettier + prettier-plugin-sql)..."
+	@test -d $(FRONTEND_DIR)/node_modules/prettier-plugin-sql || { echo "⚠️  prettier-plugin-sql 未安装，请先运行: make deps"; exit 1; }
+	@cd $(FRONTEND_DIR) && npx prettier --plugin=prettier-plugin-sql --write \
+		--tab-width 2 --print-width 120 "$(CURDIR)/internal/db/*.sql" \
+		|| echo "⚠️  SQL 格式化失败，请确认 npx 可用"
+	@echo "[Format] SQL 格式化完成。"
+
+# 格式化 Dockerfile
+# 使用 dockerfmt，需安装：go install github.com/reteps/dockerfmt@latest
+.PHONY: format-docker
+format-docker:
+	@echo "[Format] 格式化 Dockerfile..."
+	@command -v dockerfmt >/dev/null 2>&1 && { \
+		find .cnb -type f -name "Dockerfile*" -exec dockerfmt -w {} + 2>/dev/null || true; \
+		echo "[Format] Dockerfile 格式化完成（dockerfmt）。"; \
+	} || { \
+		echo "⚠️  dockerfmt 未安装，跳过 Dockerfile 格式化。"; \
+		echo "   提示: 可通过运行 'go install github.com/reteps/dockerfmt@latest' 安装"; \
+	}
+
+# 检查（Go + HTML/CSS/JS/TS/Svelte + Linux 打包：含 fpk 与无 fpk 两种）
+.PHONY: check
+check: lint-go lint-go-fix lint-frontend package-linux
 
 # Go 代码检查（有 issue 即停止）
+.PHONY: lint-go
 lint-go:
 	@echo "[Lint] Go 代码检查 (go vet + golangci-lint)..."
 	go vet ./...
 	golangci-lint run ./...
 
 # Go 代码检查（自动修复）
+.PHONY: lint-go-fix
 lint-go-fix:
 	@echo "[Lint] Go 代码检查（自动修复）..."
 	golangci-lint run --fix ./...
 
 # 前端代码检查（类型 + ESLint + 格式只读校验，错误即停止）
+.PHONY: lint-frontend
 lint-frontend:
 	@echo "[Lint] 前端代码检查 (svelte-check + eslint + prettier)..."
 	@test -d $(FRONTEND_DIR)/node_modules || { echo "⚠️  前端依赖未安装，请先运行: make deps"; exit 1; }
@@ -243,7 +292,7 @@ build-frontend:
 	@echo "┌────────────────────────────────────────────────────────────"
 	@echo "│ [构建] Svelte 前端"
 	@echo "└────────────────────────────────────────────────────────────"
-	@cd $(FRONTEND_DIR) && sed -i.bak -E 's/("version"[[:space:]]*:[[:space:]]*")[^"]*(")/\1$(PKG_VERSION)\2/' package.json && rm -f package.json.bak
+	@cd $(FRONTEND_DIR) && sed -i.bak -E 's#("version"[[:space:]]*:[[:space:]]*")[^"]*(")#\1$(PKG_VERSION)\2#' package.json && rm -f package.json.bak
 	@cd $(FRONTEND_DIR) && pnpm build
 	@echo "✓ 构建完成。"
 
@@ -356,6 +405,8 @@ define clean_archive
 	fi
 endef
 
+# 清理构建目录
+.PHONY: clean
 clean:
 	@echo "[Clean] 清理构建目录..."
 	@rm -rf $(BUILD_DIR)
@@ -387,16 +438,19 @@ define build_tag_binary
 endef
 
 # 构建 Linux Amd64 平台（不带标签 + 带标签）
+.PHONY: build-linux-amd64
 build-linux-amd64:
 	$(call build_binary,linux,amd64,Linux x86_64,,,)
 	$(call build_tag_binary,linux,amd64,Linux x86_64 带标签,$(BUILD_TAG))
 
 # 构建 Linux Arm64 平台（不带标签 + 带标签）
+.PHONY: build-linux-arm64
 build-linux-arm64:
 	$(call build_binary,linux,arm64,Linux ARM64,,,)
 	$(call build_tag_binary,linux,arm64,Linux ARM64 带标签,$(BUILD_TAG))
 
 # 构建 Linux 平台（不带标签 + 带标签）
+.PHONY: build-linux-all
 build-linux-all: build-frontend build-linux-amd64 build-linux-arm64
 
 # 清理裸二进制（保留 .tar.gz 压缩包供自升级下载，上传前执行）
@@ -530,24 +584,32 @@ package-linux: package-linux-all
 
 # ==================== 更新 / 拉取 ====================
 
-sync: ## 拉取 CNB 最新并以 fast-forward 合并（保留本地未提交改动）
+# 拉取 CNB 最新并以 fast-forward 合并（保留本地未提交改动）
+.PHONY: sync
+sync:
 	git fetch origin
 	git merge --ff-only origin/main
 	@echo "已同步 origin/main 最新代码，本地未提交改动已保留"
 
-sync-github: ## 拉取 GitHub 最新并以 fast-forward 合并（保留本地未提交改动）
+# 拉取 GitHub 最新并以 fast-forward 合并（保留本地未提交改动）
+.PHONY: sync-github
+sync-github:
 	git fetch github
 	git merge --ff-only github/main
 	@echo "已同步 github/main 最新代码，本地未提交改动已保留"
 
 # ==================== 推送 ====================
 
-push: ## 推送到所有远程仓库
+# 推送到所有远程仓库
+.PHONY: push
+push:
 	git push origin HEAD
 	git push github HEAD
 	@echo "推送完成！"
 
-push-force: ## 强制推送到所有远程仓库（忽略冲突）
+# 强制推送到所有远程仓库（忽略冲突）
+.PHONY: push-force
+push-force:
 	git push --force origin HEAD
 	git push --force github HEAD
 	@echo "强制推送完成！"
