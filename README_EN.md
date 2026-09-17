@@ -32,7 +32,7 @@ A socket is bound to an inode. After renaming with `os.Rename` (mv), the officia
 | ------------------------ | ---------------------------------------- | -------------------------------------------- |
 | Binary                   | `/usr/bin/fnmusic-sync`                  | `/var/apps/fnmusic-sync/target/fnmusic-sync` |
 | Config file              | `/etc/fnmusic-sync/config.yaml`          | `$TRIM_PKGETC/config.yaml`                   |
-| State file               | `/var/lib/fnmusic-sync/state.yaml`       | `$TRIM_PKGVAR/state.yaml`                    |
+| Database (state/users)   | `/var/lib/fnmusic-sync/state.db`         | `$TRIM_PKGVAR/state.db`                      |
 | Log file                 | `/var/log/fnmusic-sync/fnmusic-sync.log` | `$TRIM_PKGVAR/logs/fnmusic-sync.log`         |
 | Proxy listen socket      | `/var/run/trim_music.socket`             | same as left                                 |
 | Official upstream socket | `/var/run/trim_music_upstream.socket`    | same as left                                 |
