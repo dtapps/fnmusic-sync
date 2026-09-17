@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { _ } from 'svelte-i18n';
-  import { Button, Card } from '$lib/components';
+  import { Button, Card, Badge } from '$lib/components';
   import { getActiveUsers } from '$lib/api';
   import { errMessage } from '$lib/utils';
   import type { ActiveUser } from '$lib/types';
@@ -50,14 +50,34 @@
           <thead>
             <tr class="border-b border-border text-left text-muted-foreground">
               <th class="px-3 py-2 font-medium">{$_('users_list.username')}</th>
+              <th class="px-3 py-2 font-medium">{$_('users_list.platform')}</th>
+              <th class="px-3 py-2 font-medium">{$_('users_list.role')}</th>
+              <th class="px-3 py-2 font-medium">{$_('users_list.client')}</th>
               <th class="px-3 py-2 font-medium">{$_('users_list.token')}</th>
+              <th class="px-3 py-2 font-medium">{$_('users_list.first_seen')}</th>
+              <th class="px-3 py-2 font-medium">{$_('users_list.last_seen')}</th>
             </tr>
           </thead>
           <tbody>
             {#each users as u (u.token)}
-              <tr class="border-b border-border/50">
-                <td class="px-3 py-2 font-medium truncate">{u.username}</td>
+              <tr class="border-b border-border/50 align-top">
+                <td class="px-3 py-2 font-medium whitespace-nowrap">{u.username}</td>
+                <td class="px-3 py-2 whitespace-nowrap text-muted-foreground">{u.platform_username || '-'}</td>
+                <td class="px-3 py-2 whitespace-nowrap">
+                  {#if u.is_admin}
+                    <Badge variant="on">{$_('users_list.admin')}</Badge>
+                  {:else}
+                    <span class="text-xs text-muted-foreground">{$_('users_list.normal')}</span>
+                  {/if}
+                </td>
+                <td class="px-3 py-2 whitespace-nowrap text-muted-foreground">
+                  {#if u.ua_system || u.ua_client}
+                    {[u.ua_system, u.ua_client].filter(Boolean).join(' · ')}
+                  {:else}-{/if}
+                </td>
                 <td class="px-3 py-2 font-mono text-xs text-muted-foreground truncate">{u.token}</td>
+                <td class="px-3 py-2 whitespace-nowrap text-xs text-muted-foreground">{u.first_seen_at || '-'}</td>
+                <td class="px-3 py-2 whitespace-nowrap text-xs text-muted-foreground">{u.last_seen_at || '-'}</td>
               </tr>
             {/each}
           </tbody>

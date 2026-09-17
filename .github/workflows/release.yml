@@ -8,6 +8,9 @@
 # https://github.com/actions/upload-artifact
 # https://github.com/actions/download-artifact
 # https://github.com/softprops/action-gh-release
+# https://github.com/crazy-max/ghaction-upx
+# https://github.com/golangci/golangci-lint-action
+# https://github.com/sqlc-dev/setup-sqlc
 name: Release
 
 on:
@@ -71,12 +74,14 @@ jobs:
     # https://github.com/goreleaser/nfpm/releases
     # https://developer.fnnas.com/docs/cli/fnpack/
     # https://github.com/golangci/golangci-lint/releases
+    # https://github.com/sqlc-dev/sqlc/releases
     # ==========================================
     env:
       UPX_VERSION: '5.2.1'
       NFPM_VERSION: '2.47.0'
       FNPACK_VERSION: '1.2.3'
-      GOLANGCI_LINT_VERSION: '2.13.2'
+      GOLANGCI_LINT_VERSION: 'v2.13.2'
+      SQLC_VERSION: '1.31.1'
 
     steps:
       - name: 检出代码
@@ -142,19 +147,15 @@ jobs:
           fnpack --help || true
 
       - name: 安装 golangci-lint 工具
-        shell: bash
-        run: |
-          LINT_DIR="golangci-lint-${GOLANGCI_LINT_VERSION}-linux-amd64"
-          LINT_URL="https://github.com/golangci/golangci-lint/releases/download/v${GOLANGCI_LINT_VERSION}/${LINT_DIR}.tar.gz"
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: ${{ env.GOLANGCI_LINT_VERSION }}
+          install-only: true
 
-          cd /tmp && \
-          wget -q -O lint.tar.gz "${LINT_URL}" && \
-          tar -xf lint.tar.gz && \
-          sudo mv ${LINT_DIR}/golangci-lint /usr/local/bin/golangci-lint && \
-          sudo chmod +x /usr/local/bin/golangci-lint && \
-          rm -rf lint.tar.gz ${LINT_DIR} && \
-          echo "--- golangci-lint installed ---" && \
-          golangci-lint --version
+      - name: 安装 sqlc 工具
+        uses: sqlc-dev/setup-sqlc@v5
+        with:
+          sqlc-version: ${{ env.SQLC_VERSION }}
 
       - name: 安装依赖
         shell: bash

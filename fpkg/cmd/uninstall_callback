@@ -5,7 +5,7 @@
 #
 # fpk 环境变量说明（见飞牛官方文档）：
 #   TRIM_PKGETC = 应用配置目录（config.yaml）
-#   TRIM_PKGVAR = 运行时数据目录（state.yaml、logs/、run.lock、app.pid 等）
+#   TRIM_PKGVAR = 运行时数据目录（state.db、logs/、run.lock、app.pid 等）
 # fpk 没有独立的日志目录变量，日志统一放在 TRIM_PKGVAR/logs 下。
 # 删除 TRIM_PKGVAR 即删除状态、日志等所有运行时数据。
 
