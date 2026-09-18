@@ -258,40 +258,83 @@ func (q *Queries) ListUsers(ctx context.Context) ([]User, error) {
 	return items, nil
 }
 
-const touchUserSeen = `-- name: TouchUserSeen :one
+const listUsersWithUARaw = `-- name: ListUsersWithUARaw :many
+SELECT
+  id,
+  ua_raw
+FROM
+  users
+WHERE
+  ua_raw IS NOT NULL
+  AND ua_raw != ''
+`
+
+type ListUsersWithUARawRow struct {
+	ID    int64          `json:"id"`
+	UaRaw sql.NullString `json:"ua_raw"`
+}
+
+func (q *Queries) ListUsersWithUARaw(ctx context.Context) ([]ListUsersWithUARawRow, error) {
+	rows, err := q.db.QueryContext(ctx, listUsersWithUARaw)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListUsersWithUARawRow{}
+	for rows.Next() {
+		var i ListUsersWithUARawRow
+		if err := rows.Scan(&i.ID, &i.UaRaw); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const setUserAgent = `-- name: SetUserAgent :exec
+UPDATE users
+SET
+  ua_system = ?1,
+  ua_client = ?2
+WHERE
+  id = ?3
+`
+
+type SetUserAgentParams struct {
+	UaSystem sql.NullString `json:"ua_system"`
+	UaClient sql.NullString `json:"ua_client"`
+	ID       int64          `json:"id"`
+}
+
+func (q *Queries) SetUserAgent(ctx context.Context, arg SetUserAgentParams) error {
+	_, err := q.db.ExecContext(ctx, setUserAgent, arg.UaSystem, arg.UaClient, arg.ID)
+	return err
+}
+
+const touchUserSeenByToken = `-- name: TouchUserSeenByToken :exec
 UPDATE users
 SET
   last_seen_at = ?1,
   updated_at = ?2
 WHERE
-  username = ?3 RETURNING id, username, platform_uid, platform_username, is_admin, token_prefix, ua_raw, ua_system, ua_client, first_seen_at, last_seen_at, created_at, updated_at
+  token_prefix = ?3
 `
 
-type TouchUserSeenParams struct {
-	LastSeenAt string `json:"last_seen_at"`
-	UpdatedAt  string `json:"updated_at"`
-	Username   string `json:"username"`
+type TouchUserSeenByTokenParams struct {
+	LastSeenAt  string `json:"last_seen_at"`
+	UpdatedAt   string `json:"updated_at"`
+	TokenPrefix string `json:"token_prefix"`
 }
 
-func (q *Queries) TouchUserSeen(ctx context.Context, arg TouchUserSeenParams) (User, error) {
-	row := q.db.QueryRowContext(ctx, touchUserSeen, arg.LastSeenAt, arg.UpdatedAt, arg.Username)
-	var i User
-	err := row.Scan(
-		&i.ID,
-		&i.Username,
-		&i.PlatformUid,
-		&i.PlatformUsername,
-		&i.IsAdmin,
-		&i.TokenPrefix,
-		&i.UaRaw,
-		&i.UaSystem,
-		&i.UaClient,
-		&i.FirstSeenAt,
-		&i.LastSeenAt,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-	)
-	return i, err
+func (q *Queries) TouchUserSeenByToken(ctx context.Context, arg TouchUserSeenByTokenParams) error {
+	_, err := q.db.ExecContext(ctx, touchUserSeenByToken, arg.LastSeenAt, arg.UpdatedAt, arg.TokenPrefix)
+	return err
 }
 
 const upsertRunStatus = `-- name: UpsertRunStatus :one

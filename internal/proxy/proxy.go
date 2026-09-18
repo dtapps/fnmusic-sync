@@ -2,6 +2,8 @@ package proxy
 
 import (
 	"bytes"
+	"compress/gzip"
+	"compress/zlib"
 	"context"
 	"errors"
 	"fmt"
@@ -12,6 +14,7 @@ import (
 	"net/http/httputil"
 	"os"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -37,6 +40,55 @@ var sensitiveHeaders = []string{
 	"X-Auth-Token",
 	"X-Session",
 }
+
+// ── 飞牛音乐 API 路径（集中定义，便于排查与维护）────────────────────
+// 路径匹配统一用 strings.Contains（上游 URL.Path 无论是否带前缀都能命中）。
+const (
+	// pathUserMe：被动识别用户（客户端启动/刷新时调用，响应含用户名）。
+	// 用不含版本前缀的 /user/me 做子串匹配，无论上游路径是否带 /music/api/v1 前缀都能命中
+	//（与此前一致：strings.Contains(path, "/user/me")），避免严格前缀在路径变化时静默失效。
+	pathUserMe = "/user/me"
+	// pathUserAuthLogin / pathUserPasswordLogin：登录与换 token 接口。
+	// 二者响应体结构一致（见 playback.ParseLoginToken）：含新签发的 userToken + 用户名。
+	// 此前只处理了 password-login，漏掉了客户端实际调用的 auth-login，导致新登录客户端无法登记。
+	// 同样用不含前缀的子串匹配，兼容路径前缀变化。
+	pathUserAuthLogin     = "/user/auth-login"
+	pathUserPasswordLogin = "/user/password-login"
+
+	// pathTrackStream / pathTrackPlayURL：音频取流（播放）请求。
+	pathTrackStream  = "/track/stream"
+	pathTrackPlayURL = "/track/play-url"
+	// pathTrackMetadata：曲目元数据（标题/艺人/专辑/时长），供 scrobble 使用。
+	pathTrackMetadata = "/track/metadata"
+	// pathTrackHLS：HLS 播放（/track/hls/<guid>/...），含 .m3u8 播单与 .m4s 分片。
+	pathTrackHLS = "/track/hls/"
+	// pathEventReport：播放事件上报（track_play），请求侧据此开启播放会话。
+	pathEventReport = "/event/report"
+)
+
+// isUserMePath 是否为被动识别路径（/user/me）。
+func isUserMePath(path string) bool { return strings.Contains(path, pathUserMe) }
+
+// isUserLoginPath 是否为登录/换 token 路径（auth-login 或 password-login 任一）。
+func isUserLoginPath(path string) bool {
+	return strings.Contains(path, pathUserAuthLogin) ||
+		strings.Contains(path, pathUserPasswordLogin)
+}
+
+// isPlaybackPath 判断是否为音频取流（播放）请求。
+func isPlaybackPath(path string) bool {
+	return strings.Contains(path, pathTrackStream) ||
+		strings.Contains(path, pathTrackPlayURL)
+}
+
+// isTrackMetadataPath 是否为曲目元数据请求（/track/metadata）。
+func isTrackMetadataPath(path string) bool { return strings.Contains(path, pathTrackMetadata) }
+
+// isHLSPath 是否为 HLS 播放请求（/track/hls/<guid>/...）。
+func isHLSPath(path string) bool { return strings.Contains(path, pathTrackHLS) }
+
+// isEventReportPath 是否为播放事件上报请求（/event/report，track_play）。
+func isEventReportPath(path string) bool { return strings.Contains(path, pathEventReport) }
 
 type Config struct {
 	ListenSocket   string
@@ -80,6 +132,9 @@ type Proxy struct {
 	detector  *playback.Detector
 	capture   *CaptureLogger
 
+	// seen 按 token 节流地异步刷新 users.last_seen_at（活跃心跳），不阻塞请求。
+	seen *seenToucher
+
 	server *http.Server
 }
 
@@ -92,6 +147,7 @@ func New(
 		cfg:     cfg,
 		manager: manager,
 		logger:  logger,
+		seen:    newSeenToucher(cfg.Store),
 	}
 
 	p.transport = &http.Transport{
@@ -104,10 +160,22 @@ func New(
 
 			return dialer.DialContext(ctx, "unix", cfg.UpstreamSocket)
 		},
-		MaxIdleConns:          64,
-		MaxIdleConnsPerHost:   16,
-		IdleConnTimeout:       90 * time.Second,
+		// 关键：禁用 keep-alive，每个请求独立 dial、响应后立即关闭。
+		//
+		// 上游是本地 unix socket，dial 开销极小；而"复用连接池"会引入两类致命问题：
+		//   1. 上游重启后池里残留指向旧进程的死连接；
+		//   2. 空闲连接的关闭由 Transport 在【持有 idleMu】的情况下执行
+		//      （closeConnIfStillIdle / CloseIdleConnections → pc.close）。
+		//      一旦 conn.Close() 阻塞（上游假死 / 连接处于不可中断状态），
+		//      idleMu 就被长期占住，所有请求都会卡在 queueForIdleConn → idleMu.Lock，
+		//      整个代理彻底无响应（官方 Music 打不开）。
+		// 禁用连接池后，上述路径全部消失，代理不会再被上游拖死。
+		DisableKeepAlives:     true,
 		ExpectContinueTimeout: time.Second,
+		// 兜底：若上游建连成功但迟迟不回响应头（卡死/假死），
+		// 限制等待响应头的时长，避免请求无期限挂起。仅作用于响应头阶段，
+		// 不影响音频流等持续 body 的正常传输。
+		ResponseHeaderTimeout: 30 * time.Second,
 		// 不禁用压缩：客户端自带 Accept-Encoding 时原样透传，
 		// 由 nginx / 客户端自己解压，保证对 trim-music 完全透明。
 	}
@@ -207,6 +275,11 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				userCtx{Key: userKey, Name: name, Source: userSource},
 			),
 		)
+		// 已知用户（已解析出用户名）的任意请求都算一次活跃心跳；
+		// 异步、按 token 节流，绝不阻塞请求，也不影响同账号其它 token 行。
+		if name != "" {
+			p.seen.touch(strutil.FirstN8(userKey))
+		}
 	}
 
 	// 抓包日志已启用时，原始请求（含 Cookie 头）已在 capture.log 完整记录，主日志不再重复打用户识别诊断。
@@ -248,9 +321,17 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	p.inspect(r, body)
 
 	// 播放事件（track_play）→ 开启播放会话。
-	if strings.Contains(r.URL.Path, "/event/report") {
+	if isEventReportPath(r.URL.Path) {
+		uc := userFromCtx(r.Context())
+		// 调试用：直接确认 event/report 被解析成了哪个用户（空串=不推送）。
+		p.logger.Info("播放事件(event/report)用户识别",
+			"用户名", uc.Name,
+			"来源", uc.Source,
+			"userKey前8位", strutil.FirstN8(uc.Key),
+			"是否推送", uc.Name != "",
+		)
 		p.detector.HandleEventReport(
-			userFromCtx(r.Context()).Name,
+			uc.Name,
 			body,
 		)
 	}
@@ -383,32 +464,25 @@ func (p *Proxy) inspect(r *http.Request, body []byte) {
 func (p *Proxy) modifyResponse(resp *http.Response) error {
 	// 始终拦截 /user/me 以识别用户名，不依赖 debug 开关。
 	// 仅使用 music-token 识别用户，忽略 fnos-token。
-	if strings.Contains(resp.Request.URL.Path, "/user/me") {
+	if isUserMePath(resp.Request.URL.Path) {
 		if uc := userFromCtx(resp.Request.Context()); uc.Key != "" && uc.Source == "music-token" {
-			body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<16))
-			if err == nil {
-				resp.Body = io.NopCloser(bytes.NewReader(body))
+			if body, err := drainJSONBody(resp, 1<<16); err == nil {
 				p.userCache.Update(uc.Key, body)
 			}
 		}
 	}
 
 	// 缓存曲目元数据（标题/艺人/专辑/时长），供后续 scrobble 使用。
-	if strings.Contains(resp.Request.URL.Path, "/track/metadata") {
+	if isTrackMetadataPath(resp.Request.URL.Path) {
 		guid := resp.Request.URL.Query().Get("guid")
 		if guid != "" {
-			body, err := io.ReadAll(io.LimitReader(resp.Body, maxInspectBody))
+			body, err := drainJSONBody(resp, maxInspectBody)
 			if err != nil {
 				p.logger.Warn("读取曲目元数据失败",
 					"歌曲", guid,
 					"错误", err,
 				)
 			} else {
-				// 读完必须塞回去，否则客户端拿不到响应内容。
-				resp.Body = io.NopCloser(
-					io.MultiReader(bytes.NewReader(body), resp.Body),
-				)
-
 				p.detector.HandleMetadata(guid, body)
 			}
 		}
@@ -423,12 +497,29 @@ func (p *Proxy) modifyResponse(resp *http.Response) error {
 		)
 	}
 
+	// HLS 播放（/track/hls/<guid>/...）：此前完全没纳入进度识别，客户端切到 HLS 后
+	// 就没有任何进度信号，表现为“还在播放却不推送”。这里解析播单拿分片时长、
+	// 按分片序号推算播放位置（详见 playback.Detector 的 HLS 说明）。
+	if isHLSPath(resp.Request.URL.Path) {
+		switch {
+		case strings.HasSuffix(resp.Request.URL.Path, ".m3u8"):
+			if b, rerr := drainJSONBody(resp, 1<<20); rerr == nil {
+				p.detector.HandleHLSPlaylist(resp.Request.URL.Path, b)
+			}
+		case strings.HasSuffix(resp.Request.URL.Path, ".m4s"):
+			p.detector.HandleHLSSegment(
+				userFromCtx(resp.Request.Context()).Name,
+				resp.Request.URL.Path,
+			)
+		}
+	}
+
 	// 被动识别用户：客户端（网页/移动）自己会调 /user/me，
 	// 复用它"自身带着正确凭证"的那次响应解析用户名，比主动探测稳得多
 	// （主动探测拿的是任意触发请求的头，很可能不含 music-token 而 401）。
 	// 与 debug 无关，始终执行——这是功能本身，不是日志开销。
 	if resp.StatusCode == http.StatusOK && resp.Request != nil &&
-		resp.Request.URL.Path == p.userCache.MEPath() {
+		isUserMePath(resp.Request.URL.Path) {
 		uc := userFromCtx(resp.Request.Context())
 		key := uc.Key
 		if key == "" {
@@ -436,9 +527,7 @@ func (p *Proxy) modifyResponse(resp *http.Response) error {
 		}
 		// 仅使用 music-token 识别用户。
 		if key != "" && uc.Source == "music-token" {
-			if b, rerr := io.ReadAll(io.LimitReader(resp.Body, 1<<16)); rerr == nil {
-				// 读完必须塞回，否则客户端拿不到原响应。
-				resp.Body = io.NopCloser(io.MultiReader(bytes.NewReader(b), resp.Body))
+			if b, rerr := drainJSONBody(resp, 1<<16); rerr == nil {
 				if name := p.userCache.Update(key, b); name != "" {
 					p.logger.Debug(
 						"被动识别用户(复用客户端 /user/me )",
@@ -451,16 +540,14 @@ func (p *Proxy) modifyResponse(resp *http.Response) error {
 		}
 	}
 
-	// 客户端 token 过期后会重新调用 /user/password-login 获取新的 userToken。
-	// 主动从响应里解析新 token + 用户名并登记：客户端一切换到新 token，
-	// scrobble / 同步立即生效，不再依赖异步探测（探测头常被签名机制挡成 401），
+	// 客户端 token 过期后会重新登录/换 token：实际调用的是 /user/auth-login
+	//（也可能走 /user/password-login，二者响应结构一致），从响应里解析出新 userToken + 用户名。
+	// 主动登记：客户端一旦切换到新 token，scrobble / 同步立即生效，
+	// 不再依赖异步探测（探测头常被签名机制挡成 401），
 	// 也不会因旧 token 失效而丢掉这一期间的播放记录。
 	// 这正是"检查新获取的 token"这一环——此前只处理了"过期 token"（InvalidateToken）。
-	if strings.Contains(resp.Request.URL.Path, "/user/password-login") {
-		if b, rerr := io.ReadAll(io.LimitReader(resp.Body, 1<<16)); rerr == nil {
-			// 读完必须塞回，否则客户端拿不到登录响应、拿不到新 token。
-			resp.Body = io.NopCloser(io.MultiReader(bytes.NewReader(b), resp.Body))
-
+	if isUserLoginPath(resp.Request.URL.Path) {
+		if b, rerr := drainJSONBody(resp, 1<<16); rerr == nil {
 			if tok, name := playback.ParseLoginToken(b); tok != "" && name != "" {
 				p.userCache.Register(tok, name)
 				p.recordUserIdentity(tok, name, resp.Request)
@@ -528,6 +615,88 @@ func (p *Proxy) recordUserIdentity(token, username string, r *http.Request) {
 	})
 }
 
+// drainJSONBody 读取（必要时先解压）响应体并解析为明文 JSON 字节，同时把解压后的
+// 内容重新塞回 resp.Body，并移除 Content-Encoding / Content-Length，确保下游客户端
+// 拿到的是已解码内容（否则客户端会再解一次压缩而失败）。
+//
+// 背景：代理 transport 透传客户端 Accept-Encoding，上游对 /user/me、
+// /user/password-login 等 JSON 响应做 gzip 压缩；此前直接当 JSON 解析导致静默失败、
+// 用户名与新 token 永远解析不出、用户无法被记录。
+func drainJSONBody(resp *http.Response, max int64) ([]byte, error) {
+	r := io.LimitReader(resp.Body, max)
+	if enc := strings.TrimSpace(strings.ToLower(resp.Header.Get("Content-Encoding"))); enc != "" {
+		switch enc {
+		case "gzip":
+			gz, err := gzip.NewReader(r)
+			if err != nil {
+				return nil, err
+			}
+			defer gz.Close()
+			r = gz
+		case "deflate":
+			// 标准里 Content-Encoding: deflate 实为 zlib 包装。
+			zr, err := zlib.NewReader(r)
+			if err != nil {
+				return nil, err
+			}
+			defer zr.Close()
+			r = zr
+			// br(brotli) 标准库无解码器，交给后续 JSON 解析（失败即降级）。
+		}
+	}
+	b, err := io.ReadAll(r)
+	if err != nil {
+		return nil, err
+	}
+	if resp.Header.Get("Content-Encoding") != "" {
+		resp.Header.Del("Content-Encoding")
+		resp.Header.Del("Content-Length")
+	}
+	resp.Body = io.NopCloser(bytes.NewReader(b))
+	return b, nil
+}
+
+// seenToucher 按 token 前缀节流地异步刷新 users.last_seen_at（活跃心跳）。
+// 每个 token 在 interval 内最多写一次库，且写入在独立 goroutine 完成，
+// 因此绝不阻塞请求处理；sqlite 单连接下也能扛住高并发取流请求。
+type seenToucher struct {
+	mu       sync.Mutex
+	last     map[string]time.Time
+	interval time.Duration
+	store    *playback.UserStore
+}
+
+func newSeenToucher(store *playback.UserStore) *seenToucher {
+	return &seenToucher{
+		last:     make(map[string]time.Time),
+		interval: 2 * time.Minute,
+		store:    store,
+	}
+}
+
+// touch 刷新指定 token 前缀的活跃时间。throttle 失败/缺失均静默返回。
+func (t *seenToucher) touch(tokenPrefix string) {
+	if t == nil || t.store == nil || tokenPrefix == "" {
+		return
+	}
+	now := time.Now()
+	t.mu.Lock()
+	if lt, ok := t.last[tokenPrefix]; ok && now.Sub(lt) < t.interval {
+		t.mu.Unlock()
+		return
+	}
+	t.last[tokenPrefix] = now
+	if len(t.last) > 2000 { // 长运行内存保护：超阈值整体重建。
+		t.last = make(map[string]time.Time)
+		t.last[tokenPrefix] = now
+	}
+	t.mu.Unlock()
+
+	go func() {
+		_ = t.store.TouchUserSeenByToken(tokenPrefix)
+	}()
+}
+
 func (p *Proxy) errorHandler(
 	w http.ResponseWriter,
 	r *http.Request,
@@ -554,12 +723,6 @@ func (p *Proxy) errorHandler(
 	)
 
 	http.Error(w, "upstream unavailable", http.StatusBadGateway)
-}
-
-// isPlaybackPath 判断是否为音频取流请求。
-func isPlaybackPath(path string) bool {
-	return strings.Contains(path, "/track/stream") ||
-		strings.Contains(path, "/track/play-url")
 }
 
 // countWriter 统计响应状态码与实际写入字节数，用于取流时长推算。
@@ -623,8 +786,21 @@ type userCtx struct {
 // 优先 music-token（音乐服务会话），回退 fnos-token（全系统统一会话）。
 // 返回标识值与来源名，便于诊断。
 func extractUserKey(r *http.Request) (key, source string) {
+	// 优先 music-token cookie（官方 App 走这个）。
 	if c, err := r.Cookie("music-token"); err == nil && c.Value != "" {
 		return c.Value, "music-token"
+	}
+
+	// 网页端 / 部分客户端把 music-token 放在 Authorization: Bearer <token>
+	// 或 X-Auth-Token 头里。这些同样承载【音乐服务】会话，应视同 music-token 参与识别，
+	// 否则这类客户端永远取不到 token、用户表不记录（之前只读了 music-token cookie）。
+	if v := r.Header.Get("Authorization"); strings.HasPrefix(v, "Bearer ") {
+		if tk := strings.TrimSpace(strings.TrimPrefix(v, "Bearer ")); tk != "" {
+			return tk, "music-token"
+		}
+	}
+	if v := r.Header.Get("X-Auth-Token"); v != "" {
+		return v, "music-token"
 	}
 
 	if c, err := r.Cookie("fnos-token"); err == nil && c.Value != "" {

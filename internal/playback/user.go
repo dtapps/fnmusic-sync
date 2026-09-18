@@ -1,6 +1,7 @@
 package playback
 
 import (
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"io"
@@ -125,7 +126,7 @@ func parseUsername(body []byte) string {
 	return ""
 }
 
-// ParseLoginToken 从 /user/password-login 等登录响应里解析新签发的 userToken 与用户名。
+// ParseLoginToken 从 /user/auth-login、/user/password-login 等登录响应里解析新签发的 userToken 与用户名。
 // 响应形如 {"code":0,"data":{"userToken":"...","user":{"name":"admin",...}}}。
 func ParseLoginToken(body []byte) (token, name string) {
 	var top map[string]json.RawMessage
@@ -165,7 +166,7 @@ func (c *UserCache) Update(key string, body []byte) string {
 
 // Register 直接登记一个已知 token → 用户名 的映射。
 //
-// 典型场景：客户端 token 过期后重新调用 /user/password-login 拿到新的 userToken，
+// 典型场景：客户端 token 过期后重新调用 /user/auth-login（或 /user/password-login）拿到新的 userToken，
 // 代理从登录响应里同时解析出 userToken 与用户名，主动登记。
 // 这样客户端一旦切换到新 token，scrobble / 歌单同步立即生效，
 // 既不依赖异步探测（探测复用触发请求的认证头，而音乐服务常要求随请求变化的签名，
@@ -364,6 +365,22 @@ func authHeadersPresent(h http.Header) string {
 	return strings.Join(present, ",")
 }
 
+// readAndDecompress 读取响应体，必要时先解 gzip（上游按客户端 Accept-Encoding 压缩）。
+// 代理 transport 透传客户端 Accept-Encoding，JSON 接口可能被压缩，
+// 不解压直接 JSON 解析会静默失败、用户名永远解析不出。
+func readAndDecompress(resp *http.Response, max int64) ([]byte, error) {
+	r := io.LimitReader(resp.Body, max)
+	if strings.TrimSpace(strings.ToLower(resp.Header.Get("Content-Encoding"))) == "gzip" {
+		gz, err := gzip.NewReader(r)
+		if err != nil {
+			return nil, err
+		}
+		defer gz.Close()
+		r = gz
+	}
+	return io.ReadAll(r)
+}
+
 // probe 代客户端请求 /user/me，复用原始认证头。
 // 超时内聚在这里（不依赖调用方），避免后台探测无限期挂住。
 func (c *UserCache) probe(key string, auth http.Header) {
@@ -408,7 +425,7 @@ func (c *UserCache) probe(key string, auth http.Header) {
 	}
 	defer resp.Body.Close()
 
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<16))
+	body, _ := readAndDecompress(resp, 1<<16)
 
 	if resp.StatusCode != http.StatusOK {
 		c.logger.Warn(

@@ -16,7 +16,9 @@ type Querier interface {
 	IncrementScrobble(ctx context.Context, arg IncrementScrobbleParams) (RunStatus, error)
 	ListRunStatus(ctx context.Context) ([]RunStatus, error)
 	ListUsers(ctx context.Context) ([]User, error)
-	TouchUserSeen(ctx context.Context, arg TouchUserSeenParams) (User, error)
+	ListUsersWithUARaw(ctx context.Context) ([]ListUsersWithUARawRow, error)
+	SetUserAgent(ctx context.Context, arg SetUserAgentParams) error
+	TouchUserSeenByToken(ctx context.Context, arg TouchUserSeenByTokenParams) error
 	UpsertRunStatus(ctx context.Context, arg UpsertRunStatusParams) (RunStatus, error)
 	UpsertUser(ctx context.Context, arg UpsertUserParams) (User, error)
 }

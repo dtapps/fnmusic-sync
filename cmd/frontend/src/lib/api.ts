@@ -1,5 +1,5 @@
 // 飞牛音乐 Scrobble 代理 - API 封装
-import type { VersionInfo, AppConfig, StateData, UserAccount, LogData, ActiveUserList } from './types';
+import type { VersionInfo, AppConfig, StateData, UserAccount, LogData, ActiveUserList, SocketOverview } from './types';
 
 // 从 Go 模板注入的 window.BaseURL 获取前缀路径
 const BASE_URL = window.BaseURL || '/app/fnmusic-sync';
@@ -42,6 +42,11 @@ export function getState() {
 
 export function getLogs() {
   return apiCall<LogData>('/logs');
+}
+
+// 返回两个固定 socket（监听 / 上游）的状态与是否正常判断
+export function getSockets() {
+  return apiCall<SocketOverview>('/sockets');
 }
 
 // 返回当前通过 token 识别的活跃用户列表（仅管理员可访问）

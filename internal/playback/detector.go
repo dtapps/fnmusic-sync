@@ -41,6 +41,13 @@ type Detector struct {
 	// streamSeen：最近一次“真实取流”（end>0）的时间，用于“取流先于 track_play”的佐证。
 	streamSeen map[string]time.Time
 
+	// HLS 播放支持：此前只用 /track/stream 的 Content-Range 推算进度，客户端改用
+	// HLS（/track/hls/<guid>/NNNNN.m4s）后就完全没有进度信号，导致“还在播放却不
+	// 推送”。这里用播单（preset.m3u8）的分片时长 + 已见到的最大分片序号推算播放位置，
+	// 把 HLS 也纳入识别（并作为“真实播放”的佐证）。
+	hlsSegDur map[string]time.Duration
+	hlsMaxSeg map[string]int
+
 	// stop/done 控制后台超时回退 goroutine 的生命周期（Proxy.Close 时退出）。
 	stop chan struct{}
 	done chan struct{}
@@ -78,6 +85,8 @@ func NewDetector(manager *Manager, logger *slog.Logger) *Detector {
 		stream:     make(map[string]*streamState),
 		candidates: make(map[string]*candidate),
 		streamSeen: make(map[string]time.Time),
+		hlsSegDur:  make(map[string]time.Duration),
+		hlsMaxSeg:  make(map[string]int),
 		stop:       make(chan struct{}),
 		done:       make(chan struct{}),
 		manager:    manager,
@@ -141,6 +150,8 @@ func (d *Detector) expireCandidates() {
 
 	// 已被真实取流锁定的当前播放：预加载 / 下一首预热的候选直接丢弃，不覆盖真听。
 	if d.manager.CurrentConfirmed() {
+		d.logger.Debug("当前存在取流佐证的进行中播放，丢弃 track_play 候选", "候选数", len(list))
+
 		d.mu.Lock()
 		for _, e := range list {
 			delete(d.candidates, e.guid)
@@ -380,6 +391,95 @@ func (d *Detector) HandleStreamProgress(
 	d.manager.CheckScrobble(context.Background(), position)
 }
 
+// HandleHLSPlaylist 解析 HLS 播单（preset.m3u8）得到分片时长，供 HLS 进度推算使用。
+// 取第一条 #EXTINF 的时长即可（HLS 分片通常等长）。
+func (d *Detector) HandleHLSPlaylist(path string, body []byte) {
+	guid := hlsGUIDFromPath(path)
+	if guid == "" {
+		return
+	}
+
+	dur := parseHLSSegmentDuration(body)
+	if dur <= 0 {
+		return
+	}
+
+	d.mu.Lock()
+	d.hlsSegDur[guid] = dur
+	d.mu.Unlock()
+
+	d.logger.Debug("HLS 播单分片时长", "歌曲", guid, "分片时长", dur.String())
+}
+
+// HandleHLSSegment 处理一个 HLS 分片请求（/track/hls/<guid>/NNNNN.m4s）：
+//   - 作为“真实播放”的佐证（streamSeen），佐证 track_play 候选、开会话；
+//   - 按“最大分片序号 × 分片时长”推算播放位置，驱动 scrobble。
+//
+// 说明：客户端会预缓冲，分片序号可能领先真实播放进度；但 Manager.CheckScrobble
+// 会用“真实流逝时间”作为进度下界做钳制，因此这里偏高不会导致误推。
+func (d *Detector) HandleHLSSegment(username, path string) {
+	guid, seg, ok := parseHLSSegmentPath(path)
+	if !ok {
+		return
+	}
+
+	d.mu.Lock()
+
+	if seg > d.hlsMaxSeg[guid] {
+		d.hlsMaxSeg[guid] = seg
+	}
+
+	// HLS 分片 = 真实播放佐证（与 /track/stream 的 end>0 等价）。
+	d.streamSeen[guid] = time.Now()
+
+	track, hasTrack := d.tracks[guid]
+	segDur := d.hlsSegDur[guid]
+	maxSeg := d.hlsMaxSeg[guid]
+
+	// 有 track_play 候选且元数据就绪 → HLS 佐证，开会话。
+	if c, cand := d.candidates[guid]; cand && c.metaReady {
+		candUser := c.user
+		delete(d.candidates, guid)
+		d.mu.Unlock()
+
+		d.logger.Debug("HLS 分片佐证播放", "用户", username, "歌曲", guid)
+		d.manager.Play(context.Background(), candUser, track, true)
+		d.hlsCheckScrobble(guid, maxSeg, segDur, track)
+
+		return
+	}
+
+	d.mu.Unlock()
+
+	if hasTrack {
+		d.hlsCheckScrobble(guid, maxSeg, segDur, track)
+	}
+}
+
+// hlsCheckScrobble 由 HLS 分片序号推算播放位置并驱动 scrobble。
+// 分片时长未知（未抓到播单）时不做进度推算，交给 Manager 的时长兜底定时器。
+func (d *Detector) hlsCheckScrobble(guid string, maxSeg int, segDur time.Duration, track model.Track) {
+	if segDur <= 0 || !track.Valid() {
+		return
+	}
+
+	position := time.Duration(maxSeg+1) * segDur
+	if track.Duration > 0 && position > track.Duration {
+		position = track.Duration
+	}
+
+	d.logger.Debug(
+		"HLS 进度推算",
+		"歌曲", guid,
+		"分片序号", maxSeg,
+		"分片时长", segDur.String(),
+		"播放位置", position.String(),
+		"时长", track.Duration.String(),
+	)
+
+	d.manager.CheckScrobble(context.Background(), position)
+}
+
 // trimTrackCache 在缓存超限时清理无候选、且无近期真实取流的条目，避免无限增长。
 func (d *Detector) trimTrackCache() {
 	if len(d.tracks) <= maxTrackCache {
@@ -396,6 +496,8 @@ func (d *Detector) trimTrackCache() {
 		}
 
 		delete(d.tracks, g)
+		delete(d.hlsSegDur, g)
+		delete(d.hlsMaxSeg, g)
 	}
 }
 
@@ -510,4 +612,64 @@ func parseContentRange(v string) (end, total int64, ok bool) {
 	}
 
 	return end, total, true
+}
+
+// hlsGUIDFromPath 从 HLS 路径中取出曲目 guid：/track/hls/<guid>/... → <guid>。
+func hlsGUIDFromPath(p string) string {
+	const marker = "/track/hls/"
+
+	_, after, ok := strings.Cut(p, marker)
+	if !ok {
+		return ""
+	}
+
+	rest := after
+	guid, _, _ := strings.Cut(rest, "/")
+
+	return guid
+}
+
+// parseHLSSegmentPath 解析 HLS 分片路径 /track/hls/<guid>/<NNNNN>.m4s，
+// 返回 guid 与分片序号。
+func parseHLSSegmentPath(p string) (guid string, seg int, ok bool) {
+	guid = hlsGUIDFromPath(p)
+	if guid == "" {
+		return "", 0, false
+	}
+
+	name := p[strings.LastIndex(p, "/")+1:]
+	if !strings.HasSuffix(name, ".m4s") {
+		return "", 0, false
+	}
+
+	v, err := strconv.Atoi(strings.TrimSuffix(name, ".m4s"))
+	if err != nil || v < 0 {
+		return "", 0, false
+	}
+
+	return guid, v, true
+}
+
+// parseHLSSegmentDuration 从 HLS 播单文本里取第一条 #EXTINF 的时长（秒）。
+func parseHLSSegmentDuration(body []byte) time.Duration {
+	for line := range strings.SplitSeq(string(body), "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "#EXTINF:") {
+			continue
+		}
+
+		v := strings.TrimPrefix(line, "#EXTINF:")
+		if c := strings.IndexByte(v, ','); c >= 0 {
+			v = v[:c]
+		}
+
+		f, err := strconv.ParseFloat(strings.TrimSpace(v), 64)
+		if err != nil || f <= 0 {
+			continue
+		}
+
+		return time.Duration(f * float64(time.Second))
+	}
+
+	return 0
 }
