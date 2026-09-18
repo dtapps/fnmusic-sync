@@ -123,6 +123,28 @@ export interface LogData {
   file_enabled?: boolean;
 }
 
+// ===== Socket 状态（/api/sockets）=====
+export interface SocketStatus {
+  path: string;
+  exists: boolean;
+  is_socket: boolean;
+  perm: string; // 权限八进制，如 "0666"
+  uid: number;
+  gid: number;
+  kind: string; // none | trim | proxy | stale
+  connectable: boolean;
+  healthy: boolean;
+  peer_pid: number; // 持有该 socket 的进程 PID
+  detail: string;
+}
+
+export interface SocketOverview {
+  listen: SocketStatus;
+  upstream: SocketStatus;
+  all_healthy: boolean;
+  message: string;
+}
+
 // ===== 已识别用户（来自 /api/users，由数据库持久化）=====
 export interface ActiveUser {
   token: string; // 脱敏后的 token 前缀

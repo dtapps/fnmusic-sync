@@ -12,8 +12,10 @@ import (
 	"bytes"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -151,14 +153,15 @@ func (e *Entry) Finish(status int, header http.Header, respBody []byte, contentL
 	ts := time.Now().Format("2006-01-02 15:04:05.000")
 	fmt.Fprintf(&buf, "\n========== %s 请求 %s %s ==========\n", ts, e.method, e.path)
 	if e.query != "" {
-		fmt.Fprintf(&buf, "查询: %s\n", e.query)
+		fmt.Fprintf(&buf, "查询: %s\n", RedactQuery(e.query))
 	}
 	writeHeaders(&buf, "请求头", e.reqHeader)
 
 	if len(e.reqBody) > 0 {
 		limit := min(len(e.reqBody), 65536)
+		redacted := RedactBody(e.reqHeader.Get("Content-Type"), e.reqBody[:limit])
 		fmt.Fprintf(&buf, "请求体 (%d bytes):\n", len(e.reqBody))
-		buf.Write(e.reqBody[:limit])
+		buf.Write(redacted)
 		if len(e.reqBody) > limit {
 			fmt.Fprintf(&buf, "\n... (截断，共 %d bytes)\n", len(e.reqBody))
 		} else {
@@ -183,8 +186,9 @@ func (e *Entry) Finish(status int, header http.Header, respBody []byte, contentL
 
 	if len(respBody) > 0 {
 		limit := min(len(respBody), 65536)
+		redacted := RedactBody(header.Get("Content-Type"), respBody[:limit])
 		fmt.Fprintf(&buf, "响应体 (%d bytes):\n", len(respBody))
-		buf.Write(respBody[:limit])
+		buf.Write(redacted)
 		if len(respBody) > limit {
 			fmt.Fprintf(&buf, "\n... (截断，共 %d bytes)\n", len(respBody))
 		} else {
@@ -236,4 +240,72 @@ func writeHeaders(buf *bytes.Buffer, title string, headers http.Header) {
 		}
 		fmt.Fprintf(buf, "  %s: %s\n", k, val)
 	}
+}
+
+// sensitiveParams 需要打码的请求/响应参数名（大小写不敏感）。
+// 涵盖 Last.fm（api_key / sk / api_sig）、ListenBrainz（token）及通用凭据字段，
+// 避免 key / 会话密钥等敏感信息以明文落盘到 lastfm.log / listenbrainz.log / feiniu.log。
+var sensitiveParams = map[string]bool{
+	"api_key": true, "apikey": true,
+	"api_secret": true, "apisecret": true,
+	"secret":     true,
+	"sk":         true,
+	"sessionkey": true, "session_key": true, "session": true,
+	"password": true, "passwd": true, "pass": true, "pwd": true,
+	"token": true, "auth_token": true, "access_token": true, "refresh_token": true,
+	"api_sig": true, "signature": true, "sig": true,
+	"key": true,
+}
+
+// redactQuery 将查询串中敏感参数值打码；解析失败则原样返回，不影响正常日志。
+func RedactQuery(raw string) string {
+	if raw == "" {
+		return raw
+	}
+	vals, err := url.ParseQuery(raw)
+	if err != nil {
+		return raw
+	}
+	for k := range vals {
+		if sensitiveParams[strings.ToLower(k)] {
+			vals[k] = []string{"***"}
+		}
+	}
+	return vals.Encode()
+}
+
+// redactBody 按内容类型对 body 打码：
+//   - application/x-www-form-urlencoded：解析后掩敏感字段
+//     （Last.fm 的请求体即此格式，含 api_key / sk / api_sig）；
+//   - 其它（JSON / XML 等）：用正则尽力掩敏感键的值
+//     （如 ListenBrainz 响应、Last.fm 的 <key> 会话密钥）。
+func RedactBody(contentType string, body []byte) []byte {
+	if len(body) == 0 {
+		return body
+	}
+	if strings.Contains(strings.ToLower(contentType), "x-www-form-urlencoded") {
+		if vals, err := url.ParseQuery(string(body)); err == nil {
+			for k := range vals {
+				if sensitiveParams[strings.ToLower(k)] {
+					vals[k] = []string{"***"}
+				}
+			}
+			return []byte(vals.Encode())
+		}
+	}
+	return []byte(redactSensitiveText(string(body)))
+}
+
+// reJSONSecret / reXMLSecret 用于非表单 body 的尽力打码。
+// 注意：Go 的 regexp 基于 RE2，不支持反向引用（如 \1），故 XML 匹配对开/闭标签
+// 使用独立的选择分支（实际数据中两者一致）；仅用于打码值，类型不匹配也不会误伤。
+var (
+	reJSONSecret = regexp.MustCompile(`(?i)("(?:api_key|apikey|api_secret|apisecret|secret|sk|sessionkey|session_key|session|password|passwd|pass|pwd|token|auth_token|access_token|refresh_token|api_sig|signature|sig|key)"\s*:\s*")([^"]*)(")`)
+	reXMLSecret  = regexp.MustCompile(`(?i)<(key|session|token|secret|api_key|apikey|password)[^>]*>([^<]*)</(?:key|session|token|secret|api_key|apikey|password)>`)
+)
+
+func redactSensitiveText(s string) string {
+	s = reJSONSecret.ReplaceAllString(s, `$1***$3`)
+	s = reXMLSecret.ReplaceAllString(s, `$1***$3`)
+	return s
 }

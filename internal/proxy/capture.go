@@ -18,6 +18,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"cnb.cool/dtapp/fnmusic-sync/internal/reqlog"
 	"gopkg.in/natefinch/lumberjack.v2"
 )
 
@@ -149,14 +150,14 @@ func (e *captureEntry) Finish(status int, header http.Header, respBody []byte, c
 	ts := time.Now().Format("2006-01-02 15:04:05.000")
 	fmt.Fprintf(&buf, "\n========== %s 请求 %s %s ==========\n", ts, e.method, e.path)
 	if e.query != "" {
-		fmt.Fprintf(&buf, "查询: %s\n", e.query)
+		fmt.Fprintf(&buf, "查询: %s\n", reqlog.RedactQuery(e.query))
 	}
 	writeHeaders(&buf, "请求头", e.reqHeader)
 
 	if len(e.reqBody) > 0 {
 		limit := min(len(e.reqBody), 65536)
 		fmt.Fprintf(&buf, "请求体 (%d bytes):\n", len(e.reqBody))
-		buf.Write(e.reqBody[:limit])
+		buf.Write(reqlog.RedactBody(e.reqHeader.Get("Content-Type"), e.reqBody[:limit]))
 		if len(e.reqBody) > limit {
 			fmt.Fprintf(&buf, "\n... (截断，共 %d bytes)\n", len(e.reqBody))
 		} else {
@@ -182,7 +183,7 @@ func (e *captureEntry) Finish(status int, header http.Header, respBody []byte, c
 	if len(respBody) > 0 {
 		limit := min(len(respBody), 65536)
 		fmt.Fprintf(&buf, "响应体 (%d bytes):\n", len(respBody))
-		buf.Write(respBody[:limit])
+		buf.Write(reqlog.RedactBody(header.Get("Content-Type"), respBody[:limit]))
 		if len(respBody) > limit {
 			fmt.Fprintf(&buf, "\n... (截断，共 %d bytes)\n", len(respBody))
 		} else {

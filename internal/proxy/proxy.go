@@ -104,10 +104,22 @@ func New(
 
 			return dialer.DialContext(ctx, "unix", cfg.UpstreamSocket)
 		},
-		MaxIdleConns:          64,
-		MaxIdleConnsPerHost:   16,
-		IdleConnTimeout:       90 * time.Second,
+		// 关键：禁用 keep-alive，每个请求独立 dial、响应后立即关闭。
+		//
+		// 上游是本地 unix socket，dial 开销极小；而"复用连接池"会引入两类致命问题：
+		//   1. 上游重启后池里残留指向旧进程的死连接；
+		//   2. 空闲连接的关闭由 Transport 在【持有 idleMu】的情况下执行
+		//      （closeConnIfStillIdle / CloseIdleConnections → pc.close）。
+		//      一旦 conn.Close() 阻塞（上游假死 / 连接处于不可中断状态），
+		//      idleMu 就被长期占住，所有请求都会卡在 queueForIdleConn → idleMu.Lock，
+		//      整个代理彻底无响应（官方 Music 打不开）。
+		// 禁用连接池后，上述路径全部消失，代理不会再被上游拖死。
+		DisableKeepAlives:     true,
 		ExpectContinueTimeout: time.Second,
+		// 兜底：若上游建连成功但迟迟不回响应头（卡死/假死），
+		// 限制等待响应头的时长，避免请求无期限挂起。仅作用于响应头阶段，
+		// 不影响音频流等持续 body 的正常传输。
+		ResponseHeaderTimeout: 30 * time.Second,
 		// 不禁用压缩：客户端自带 Accept-Encoding 时原样透传，
 		// 由 nginx / 客户端自己解压，保证对 trim-music 完全透明。
 	}
@@ -249,8 +261,16 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// 播放事件（track_play）→ 开启播放会话。
 	if strings.Contains(r.URL.Path, "/event/report") {
+		uc := userFromCtx(r.Context())
+		// 调试用：直接确认 event/report 被解析成了哪个用户（空串=不推送）。
+		p.logger.Info("播放事件(event/report)用户识别",
+			"用户名", uc.Name,
+			"来源", uc.Source,
+			"userKey前8位", strutil.FirstN8(uc.Key),
+			"是否推送", uc.Name != "",
+		)
 		p.detector.HandleEventReport(
-			userFromCtx(r.Context()).Name,
+			uc.Name,
 			body,
 		)
 	}
