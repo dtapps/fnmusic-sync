@@ -80,6 +80,18 @@ type Proxy struct {
 	detector  *playback.Detector
 	capture   *CaptureLogger
 
+	// lastUpstreamPID 记录上次直连到的上游（飞牛音乐）进程 PID。
+	// 每次新建上游连接（DialContext）会比对，一旦 PID 变化（上游重启 / 重新拉起）
+	// 就置位 upstreamChanged，由 ServeHTTP 负责清空空闲连接池，
+	// 避免复用指向"已死旧进程"的陈旧连接。
+	lastUpstreamPID atomic.Int64
+
+	// upstreamChanged 为 true 表示上游进程 PID 发生变化（已重启）。
+	// 由 DialContext 置位、ServeHTTP 消费（CompareAndSwap 清位并 CloseIdleConnections）。
+	// 这样 CloseIdleConnections 始终在请求处理 goroutine（Transport 外部）调用，
+	// 绝不在 DialContext 内部重入 Transport.connsMu 而引发死锁。
+	upstreamChanged atomic.Bool
+
 	server *http.Server
 }
 
@@ -102,12 +114,25 @@ func New(
 		) (net.Conn, error) {
 			dialer := &net.Dialer{Timeout: 5 * time.Second}
 
-			return dialer.DialContext(ctx, "unix", cfg.UpstreamSocket)
+			conn, err := dialer.DialContext(ctx, "unix", cfg.UpstreamSocket)
+			if err != nil {
+				return nil, err
+			}
+
+			// 每个请求本就要 dial 上游，顺带比对上游进程 PID：
+			// 发现上游重启就清空空闲连接池，避免复用死连接。
+			p.detectUpstreamChange(conn)
+
+			return conn, nil
 		},
 		MaxIdleConns:          64,
 		MaxIdleConnsPerHost:   16,
 		IdleConnTimeout:       90 * time.Second,
 		ExpectContinueTimeout: time.Second,
+		// 兜底：若上游（飞牛音乐）建连成功但迟迟不回响应头（卡死/假死），
+		// 限制等待响应头的时长，避免代理请求无期限挂起。仅作用于响应头阶段，
+		// 不影响音频流等持续 body 的正常传输。
+		ResponseHeaderTimeout: 30 * time.Second,
 		// 不禁用压缩：客户端自带 Accept-Encoding 时原样透传，
 		// 由 nginx / 客户端自己解压，保证对 trim-music 完全透明。
 	}
@@ -141,6 +166,41 @@ func New(
 // UserCache 返回代理内部的用户缓存，供其他服务（如歌单同步）使用。
 func (p *Proxy) UserCache() *playback.UserCache {
 	return p.userCache
+}
+
+// detectUpstreamChange 比对本次上游连接的进程 PID 与上次记录：
+// 一旦不一致（上游 trim-music 重启 / 重新拉起），置位 upstreamChanged 标志，
+// 由 ServeHTTP 统一清空空闲连接池，避免复用指向"已死旧进程"的陈旧连接。
+//
+// 注意：这里【绝不能】直接调用 transport.CloseIdleConnections()——
+// 本函数运行在 Transport 的 DialContext（拨号 goroutine）内部，而
+// CloseIdleConnections 需要获取 Transport 内部的 connsMu 锁，重入会
+// 造成死锁：所有新请求都会卡在 queueForIdleConn 上、代理彻底无响应。
+//
+// 该检测随每次新建上游连接触发——每个请求本就要 dial，零额外开销，无需后台轮询。
+func (p *Proxy) detectUpstreamChange(conn net.Conn) {
+	uc, ok := conn.(*net.UnixConn)
+	if !ok {
+		return
+	}
+
+	pid, ok := peerPIDOf(uc)
+	if !ok {
+		return
+	}
+
+	last := p.lastUpstreamPID.Load()
+	p.lastUpstreamPID.Store(pid)
+
+	if last == 0 || pid == last {
+		return
+	}
+
+	p.logger.Warn("检测到上游进程重启，将在下次请求时清理空闲连接池",
+		"旧PID", last,
+		"新PID", pid,
+	)
+	p.upstreamChanged.Store(true)
 }
 
 // Close 释放代理资源（抓包日志文件等）。
@@ -188,6 +248,14 @@ func (p *Proxy) Start(ctx context.Context, listener net.Listener) error {
 }
 
 func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// 上游（飞牛音乐）进程若已重启，DialContext 已置位 upstreamChanged 标志。
+	// 此处（请求处理 goroutine，不持有 Transport 内部锁）安全地清空空闲连接池，
+	// 避免复用指向旧进程、已失效的 keep-alive 连接。
+	// 不能在 DialContext 内部直接 CloseIdleConnections，否则会重入 connsMu 死锁。
+	if p.upstreamChanged.CompareAndSwap(true, false) {
+		p.transport.CloseIdleConnections()
+	}
+
 	if r.URL.Path == HealthzPath {
 		p.serveHealth(w, r)
 
@@ -249,8 +317,16 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// 播放事件（track_play）→ 开启播放会话。
 	if strings.Contains(r.URL.Path, "/event/report") {
+		uc := userFromCtx(r.Context())
+		// 调试用：直接确认 event/report 被解析成了哪个用户（空串=不推送）。
+		p.logger.Info("播放事件(event/report)用户识别",
+			"用户名", uc.Name,
+			"来源", uc.Source,
+			"userKey前8位", strutil.FirstN8(uc.Key),
+			"是否推送", uc.Name != "",
+		)
 		p.detector.HandleEventReport(
-			userFromCtx(r.Context()).Name,
+			uc.Name,
 			body,
 		)
 	}
