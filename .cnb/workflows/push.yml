@@ -1,0 +1,21 @@
+'**':
+  push:
+    - runner:
+        tags: cnb:arch:amd64 # 指定 Runner 必须有这个标签
+      services:
+        - docker # 启用 Docker 服务（用于 docker build/push）
+      docker:
+        build: .cnb/Dockerfile # 使用自定义 Dockerfile
+        volumes:
+          - /root/.cache/go-build:copy-on-write # 挂载 Go
+          - /go:copy-on-write # 挂载项目依赖目录（可选，根据需要）
+          - /root/.local/share/pnpm/store:copy-on-write # pnpm 全局存储
+      stages:
+        - name: 安装依赖
+          script: make deps
+
+        - name: 格式化（Go + 前端 + 配置 + 文档 + 脚本）
+          script: make format
+
+        - name: 检查（Go + HTML/CSS/JS/TS/Svelte）
+          script: make check

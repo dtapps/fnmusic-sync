@@ -44,3 +44,13 @@ node_modules/
 dist/
 .vite/
 .svelte-check/
+
+# 前端构建产物（build.sh + vite 生成）
+# /internal/webui/www/app.js
+# /internal/webui/www/app.js.map
+# /internal/webui/www/app.css
+# /internal/webui/www/chunks/
+# /internal/webui/www/assets/
+# /internal/webui/www/images/
+/internal/webui/www/*
+!/internal/webui/www/index.html

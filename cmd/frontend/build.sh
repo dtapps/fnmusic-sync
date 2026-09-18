@@ -42,8 +42,8 @@ EOF
 fi
 
 # 复制静态资源（图片）
-mkdir -p "$WWW_DIR/images/"
-cp static/images/* "$WWW_DIR/images/" 2>/dev/null || true
+# mkdir -p "$WWW_DIR/images/"
+# cp static/images/* "$WWW_DIR/images/" 2>/dev/null || true
 
 echo "[Frontend] Build complete! Output in $WWW_DIR/"
 echo "[Frontend] Files:"

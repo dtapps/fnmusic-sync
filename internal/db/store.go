@@ -299,6 +299,25 @@ func (s *Store) BindUserPlatform(username, uid, pusername string, isAdmin bool) 
 	})
 }
 
+// TouchUserSeenByToken 按 token 前缀刷新 last_seen_at / updated_at（活跃心跳）。
+//
+// 用 token_prefix（而非 username）是因为同一音乐账号可能有多个 token 行，
+// 按 token 刷新才能精确反映"是哪个客户端"最后一次活动，不会把同账号其它设备一起带动。
+// 仅更新已存在的行（UPDATE ... WHERE token_prefix），不负责创建行——
+// 创建在 recordUserIdentity → UpsertUser 完成，这里只做"活跃心跳"。
+// 查询定义在 queries.sql（TouchUserSeenByToken），由 sqlc 生成。
+func (s *Store) TouchUserSeenByToken(tokenPrefix string) error {
+	if s == nil || s.q == nil || tokenPrefix == "" {
+		return nil
+	}
+	now := time.Now().Format(time.RFC3339)
+	return s.q.TouchUserSeenByToken(context.Background(), TouchUserSeenByTokenParams{
+		LastSeenAt:  now,
+		UpdatedAt:   now,
+		TokenPrefix: tokenPrefix,
+	})
+}
+
 // UpsertRunStatus 写入/刷新某用户的运行状态（启用标志 + 最近推送时间）。
 func (s *Store) UpsertRunStatus(username string, lastfm, listenbrainz bool, lastScrobbledAt sql.NullString) error {
 	if s == nil {
@@ -375,43 +394,23 @@ func boolToInt(b bool) int64 {
 // ua_system / ua_client（ua_raw 仍保留原始 UA）。用于升级解析规则后回填
 // 历史数据——UpsertUser 仅在首次写入时落 UA，旧行不会随规则改进自动更正。
 // 返回被更新的行数。失败不阻断启动（best-effort）。
+// 查询定义在 queries.sql（ListUsersWithUARaw / SetUserAgent），由 sqlc 生成。
 func (s *Store) ReparseUserAgents(ctx context.Context) (int, error) {
-	if s == nil {
+	if s == nil || s.q == nil {
 		return 0, nil
 	}
-	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, ua_raw FROM users WHERE ua_raw IS NOT NULL AND ua_raw != ''`)
+	recs, err := s.q.ListUsersWithUARaw(ctx)
 	if err != nil {
 		return 0, err
 	}
-	// 先把结果取回内存并立即释放连接：sqlite 限制单连接（MaxOpenConns=1），
-	// 不能在持有 *sql.Rows（占着唯一连接）的同时再发起 Exec，否则会死锁。
-	type uaRec struct {
-		id  int64
-		raw string
-	}
-	recs := make([]uaRec, 0)
-	for rows.Next() {
-		var r uaRec
-		if err := rows.Scan(&r.id, &r.raw); err != nil {
-			rows.Close()
-			return 0, err
-		}
-		recs = append(recs, r)
-	}
-	if err := rows.Err(); err != nil {
-		rows.Close()
-		return 0, err
-	}
-	rows.Close()
-
 	updated := 0
 	for _, r := range recs {
-		sys, cli := ParseUserAgent(r.raw)
-		if _, err := s.db.ExecContext(ctx,
-			`UPDATE users SET ua_system = ?, ua_client = ? WHERE id = ?`,
-			sys, cli, r.id,
-		); err != nil {
+		sys, cli := ParseUserAgent(r.UaRaw.String)
+		if err := s.q.SetUserAgent(ctx, SetUserAgentParams{
+			UaSystem: nullStr(sys),
+			UaClient: nullStr(cli),
+			ID:       r.ID,
+		}); err != nil {
 			return updated, err
 		}
 		updated++

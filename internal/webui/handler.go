@@ -37,6 +37,8 @@ import (
 	"cnb.cool/dtapp/fnmusic-sync/internal/config"
 	"cnb.cool/dtapp/fnmusic-sync/internal/db"
 	"cnb.cool/dtapp/fnmusic-sync/internal/lastfm"
+	"cnb.cool/dtapp/fnmusic-sync/internal/proxy"
+	"cnb.cool/dtapp/fnmusic-sync/internal/safego"
 	"cnb.cool/dtapp/fnmusic-sync/internal/strutil"
 	"cnb.cool/dtapp/fnmusic-sync/internal/updater"
 )
@@ -121,11 +123,11 @@ func (s *Server) Start(socketPath string) error {
 
 	s.logger.Info("Web UI 已启动", "监听", socketPath)
 
-	go func() {
+	safego.Go(s.logger, "webui.Serve", func() {
 		if err := s.httpServer.Serve(listener); err != nil && err != http.ErrServerClosed {
 			s.logger.Error("Web UI 服务异常", "错误", err)
 		}
-	}()
+	})
 
 	return nil
 }
@@ -158,6 +160,7 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	// 公开 API（无需鉴权）
 	mux.HandleFunc(gatewayPrefix+"/api/version", s.handleVersion)
 	mux.HandleFunc(gatewayPrefix+"/api/health", s.handleHealth)
+	mux.HandleFunc(gatewayPrefix+"/api/sockets", s.handleSockets)
 	mux.HandleFunc(gatewayPrefix+"/api/me", s.handleMe)
 
 	// 用户级 API（普通用户可访问自己的，管理员可访问全部）
@@ -532,6 +535,21 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		"config": s.configPath,
 		"logDir": s.logDir,
 	})
+}
+
+// handleSockets GET 返回两个固定 socket（监听 / 上游）的状态与"是否正常"判断，
+// 供 Web UI 的 Socket 状态页展示。属于只读诊断信息，无需管理员权限。
+func (s *Server) handleSockets(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", "GET")
+		writeJSONError(w, http.StatusMethodNotAllowed, "不支持的请求方法")
+
+		return
+	}
+
+	writeJSON(w, http.StatusOK, proxy.ProbeSockets())
 }
 
 // handleSettings 处理全局设置（playback、playlist、logging）的更新 API。
@@ -1004,8 +1022,39 @@ func (s *Server) handleUpgrade(w http.ResponseWriter, r *http.Request) {
 	//    并刷新 App Center 的版本元数据（这正是此前「自行覆盖文件」方案缺失、导致版本号不更新的部分）。
 	//    该命令执行时会先停止当前正在运行的本进程，因此必须在返回 HTTP 响应之后、
 	//    以脱离会话（setsid）的方式在后台执行，确保进程被停止后升级仍能继续完成。
+
+	// 9.1 透传向导配置，避免重装（install-local 走卸载→重装）时
+	//     向导字段回落到默认值，把用户已开启的开关（如 debug）冲掉。
+	//     install-local 的 -e/--env 接收一个环境变量文件，其 wizard_* 键对应
+	//     安装向导输入项；应用已把向导值持久化到 ${TRIM_PKGETC}/config.env
+	//     （由 install/config/upgrade 回调写入，与 config.yaml 同目录、升级后存活），
+	//     直接把它作为 --env 传入即可，无需自己再造一份，且能保留全部向导项。
+	//     若 config.env 暂不可用（极少见的首次安装场景），再回退为从进程环境
+	//     读取 wizard_debug 写临时文件传入。
+	upgradeEnvFile := ""
+	if pkgetc := strings.TrimSpace(os.Getenv("TRIM_PKGETC")); pkgetc != "" {
+		candidate := filepath.Join(pkgetc, "config.env")
+		if fi, err := os.Stat(candidate); err == nil && !fi.IsDir() {
+			upgradeEnvFile = candidate
+		}
+	}
+	if upgradeEnvFile == "" {
+		if dbg := strings.TrimSpace(os.Getenv("wizard_debug")); dbg != "" && reEnvVal.MatchString(dbg) {
+			ef := filepath.Join(staging, "upgrade.env")
+			if werr := os.WriteFile(ef, []byte("wizard_debug="+dbg+"\n"), 0o600); werr == nil {
+				upgradeEnvFile = ef
+			} else {
+				s.logger.Warn("写入升级 env 文件失败，将不传 --env", "错误", werr)
+			}
+		}
+	}
+
 	upgradeCmdStr := "sleep 1; " + appcenterCLI + " install-local -d " + outerDir +
-		" -v " + strconv.Itoa(volume) + "; rm -rf " + staging
+		" -v " + strconv.Itoa(volume)
+	if upgradeEnvFile != "" {
+		upgradeCmdStr += " --env " + upgradeEnvFile
+	}
+	upgradeCmdStr += "; rm -rf " + staging
 	s.logger.Info("执行官方升级命令", "命令", upgradeCmdStr)
 
 	upgradeCmd := exec.Command("bash", "-c", upgradeCmdStr)
@@ -1028,6 +1077,10 @@ func (s *Server) handleUpgrade(w http.ResponseWriter, r *http.Request) {
 		"message":        "已通过飞牛应用中心执行升级，应用正在重启以完成升级",
 	})
 }
+
+// reEnvVal 校验 wizard_debug 等向导环境变量的值是否合法（仅允许字母数字），
+// 避免把异常值写进升级用的 --env 文件。
+var reEnvVal = regexp.MustCompile(`^[0-9A-Za-z]+$`)
 
 // detectVolumeFromPath 从 TRIM_APPDEST 路径（如 /vol1/@appcenter/fnmusic-sync）
 // 推导应用所在卷序号，供 appcenter-cli install-local -v 使用。

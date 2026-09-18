@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"cnb.cool/dtapp/fnmusic-sync/internal/model"
+	"cnb.cool/dtapp/fnmusic-sync/internal/safego"
 	"cnb.cool/dtapp/fnmusic-sync/internal/scrobbler"
 )
 
@@ -176,7 +177,7 @@ func (m *Manager) Play(
 	} else {
 		// 兜底：只靠取流进度不够（客户端可能预加载整首、或音频直连 CDN 不经代理），
 		// 因此按"真实播放时长"定时检查一次，到点即判定达标。
-		go m.scheduleScrobble(ctx, session)
+		safego.Go(m.logger, "playback.scheduleScrobble", func() { m.scheduleScrobble(ctx, session) })
 	}
 
 	m.logger.Info(
@@ -188,7 +189,7 @@ func (m *Manager) Play(
 	for _, provider := range m.providersFor(username) {
 		p := provider
 
-		go func() {
+		safego.Go(m.logger, "playback.UpdateNowPlaying", func() {
 			if err := p.UpdateNowPlaying(
 				ctx,
 				track,
@@ -199,17 +200,22 @@ func (m *Manager) Play(
 					"错误", err,
 				)
 			}
-		}()
+		})
 	}
 }
 
-// CurrentConfirmed 返回当前会话是否由“真实取流”佐证确立。
-// Detector 据此决定是否允许“未佐证”的候选覆盖当前播放。
+// CurrentConfirmed 返回"当前是否存在一个仍在进行、且由真实取流佐证的播放"。
+// Detector 据此决定是否允许"未佐证"的候选覆盖当前播放。
+//
+// 关键：已经推送完成（Scrobbled）的会话不再算"进行中的播放"。
+// 否则第一首"取流佐证 + 推送成功"的歌之后，currentConfirmed 会一直为 true，
+// 导致后续所有只发 track_play（无取流佐证，如 HLS 播放）的候选都被 Detector
+// 丢弃，表现为"还在播放音乐却再也不推送"。
 func (m *Manager) CurrentConfirmed() bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	return m.currentConfirmed
+	return m.current != nil && !m.current.Scrobbled && m.currentConfirmed
 }
 
 func (m *Manager) CheckScrobble(
@@ -275,7 +281,7 @@ func (m *Manager) CheckScrobble(
 	for _, provider := range m.providersFor(session.Username) {
 		p := provider
 
-		go func() {
+		safego.Go(m.logger, "playback.Scrobble", func() {
 			if err := p.Scrobble(
 				ctx,
 				session.Track,
@@ -300,7 +306,7 @@ func (m *Manager) CheckScrobble(
 			if m.onScrobbled != nil {
 				m.onScrobbled(session.Username, p.Name())
 			}
-		}()
+		})
 	}
 }
 

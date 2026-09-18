@@ -18,6 +18,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"cnb.cool/dtapp/fnmusic-sync/internal/reqlog"
+	"cnb.cool/dtapp/fnmusic-sync/internal/safego"
 	"gopkg.in/natefinch/lumberjack.v2"
 )
 
@@ -74,7 +76,7 @@ func NewCaptureLogger(dir string, maxSize, maxBackups, maxAge int, compress bool
 	c.ch <- []byte("抓包日志已启用（异步排队写入，完整记录每个请求/响应）\n")
 
 	c.wg.Add(1)
-	go c.worker()
+	safego.Go(nil, "proxy.CaptureLogger.worker", c.worker)
 
 	return c
 }
@@ -147,16 +149,16 @@ func (e *captureEntry) Finish(status int, header http.Header, respBody []byte, c
 
 	var buf bytes.Buffer
 	ts := time.Now().Format("2006-01-02 15:04:05.000")
-	fmt.Fprintf(&buf, "\n========== %s 请求 %s %s ==========\n", ts, e.method, e.path)
+	fmt.Fprintf(&buf, "\n========== %s 请求 %s %s ==========\n", ts, e.method, reqlog.RedactPath(e.path))
 	if e.query != "" {
-		fmt.Fprintf(&buf, "查询: %s\n", e.query)
+		fmt.Fprintf(&buf, "查询: %s\n", reqlog.RedactQuery(e.query))
 	}
 	writeHeaders(&buf, "请求头", e.reqHeader)
 
 	if len(e.reqBody) > 0 {
 		limit := min(len(e.reqBody), 65536)
 		fmt.Fprintf(&buf, "请求体 (%d bytes):\n", len(e.reqBody))
-		buf.Write(e.reqBody[:limit])
+		buf.Write(reqlog.RedactBody(e.reqHeader.Get("Content-Type"), e.reqBody[:limit]))
 		if len(e.reqBody) > limit {
 			fmt.Fprintf(&buf, "\n... (截断，共 %d bytes)\n", len(e.reqBody))
 		} else {
@@ -167,9 +169,9 @@ func (e *captureEntry) Finish(status int, header http.Header, respBody []byte, c
 	// 响应部分与请求同一块，天然配对，不再有独立响应条目。
 	fmt.Fprintf(&buf, "---------- 响应 ----------\n")
 	if status > 0 {
-		fmt.Fprintf(&buf, "%s 响应 %s 状态码: %d\n", ts, e.path, status)
+		fmt.Fprintf(&buf, "%s 响应 %s 状态码: %d\n", ts, reqlog.RedactPath(e.path), status)
 	} else {
-		fmt.Fprintf(&buf, "%s 响应 %s 状态码: (无响应/连接断开)\n", ts, e.path)
+		fmt.Fprintf(&buf, "%s 响应 %s 状态码: (无响应/连接断开)\n", ts, reqlog.RedactPath(e.path))
 	}
 	if contentLength > 0 {
 		fmt.Fprintf(&buf, "响应长度: %d\n", contentLength)
@@ -182,7 +184,7 @@ func (e *captureEntry) Finish(status int, header http.Header, respBody []byte, c
 	if len(respBody) > 0 {
 		limit := min(len(respBody), 65536)
 		fmt.Fprintf(&buf, "响应体 (%d bytes):\n", len(respBody))
-		buf.Write(respBody[:limit])
+		buf.Write(reqlog.RedactBody(header.Get("Content-Type"), respBody[:limit]))
 		if len(respBody) > limit {
 			fmt.Fprintf(&buf, "\n... (截断，共 %d bytes)\n", len(respBody))
 		} else {

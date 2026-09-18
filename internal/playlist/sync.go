@@ -25,6 +25,7 @@ import (
 	"cnb.cool/dtapp/fnmusic-sync/internal/feiniu"
 	"cnb.cool/dtapp/fnmusic-sync/internal/playback"
 	"cnb.cool/dtapp/fnmusic-sync/internal/reqlog"
+	"cnb.cool/dtapp/fnmusic-sync/internal/safego"
 	"cnb.cool/dtapp/fnmusic-sync/internal/scrobbler"
 	"cnb.cool/dtapp/fnmusic-sync/internal/strutil"
 )
@@ -282,7 +283,7 @@ func (s *SyncService) startLocked() {
 		"间隔", interval.String(),
 	)
 
-	go s.run(ctx, interval)
+	safego.Go(s.logger, "playlist.SyncService.run", func() { s.run(ctx, interval) })
 }
 
 func (s *SyncService) stopLocked() {

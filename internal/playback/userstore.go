@@ -73,5 +73,13 @@ func (s *UserStore) UpsertUser(u db.UserUpsert) error {
 	return s.db.UpsertUser(u)
 }
 
+// TouchUserSeenByToken 按 token 前缀刷新活跃时间（活跃心跳）。
+func (s *UserStore) TouchUserSeenByToken(tokenPrefix string) error {
+	if s.db == nil {
+		return nil
+	}
+	return s.db.TouchUserSeenByToken(tokenPrefix)
+}
+
 // Save 历史兼容：数据库为实时写入，无需退出时集中落盘。
 func (s *UserStore) Save() {}

@@ -9,7 +9,8 @@
     "users_list": "User List",
     "settings": "Settings",
     "state": "Status",
-    "logs": "Logs"
+    "logs": "Logs",
+    "sockets": "Socket Status"
   },
   "users_list": {
     "title": "User List",
@@ -168,6 +169,32 @@
     "filter_error": "ERROR",
     "no_data": "No logs",
     "file_disabled": "Log file writing is disabled. Enable it in Settings."
+  },
+  "sockets": {
+    "title": "Socket Status",
+    "listen": "Listen Socket",
+    "listen_desc": "nginx → proxy (FnMusic client entry)",
+    "upstream": "Upstream Socket",
+    "upstream_desc": "proxy → FnMusic (music service entry)",
+    "normal": "Normal",
+    "abnormal": "Abnormal",
+    "type": "Type",
+    "perm": "Permission",
+    "owner": "Owner",
+    "kind": "Owner Process",
+    "connectable": "Connectable",
+    "pid": "Process PID",
+    "detail": "Detail",
+    "conclusion": "Conclusion",
+    "all_ok": "Normal: listen reachable, FnMusic online",
+    "type_socket": "unix socket",
+    "type_missing": "Not exists",
+    "type_nonsocket": "Not a socket file",
+    "kind_trim": "FnMusic (official)",
+    "kind_proxy": "This proxy",
+    "kind_stale": "Unknown process (connectable but unrecognized)",
+    "kind_none": "No listener",
+    "load_failed": "Failed to load: {message}"
   },
   "common": {
     "load_failed": "Failed to load config: {message}",

@@ -22,7 +22,9 @@ import (
 	"cnb.cool/dtapp/fnmusic-sync/internal/playlist"
 	"cnb.cool/dtapp/fnmusic-sync/internal/proxy"
 	"cnb.cool/dtapp/fnmusic-sync/internal/reqlog"
+	"cnb.cool/dtapp/fnmusic-sync/internal/safego"
 	"cnb.cool/dtapp/fnmusic-sync/internal/scrobbler"
+	"gopkg.in/natefinch/lumberjack.v2"
 )
 
 const (
@@ -228,7 +230,9 @@ func run(doCheck, debug bool, wait time.Duration, logger *slog.Logger, levelVar 
 	for name, u := range appCfg.Users {
 		lfm := u.LastFM
 		if lfm.Enabled && lfm.APIKey != "" && lfm.APISecret != "" && lfm.SessionKey == "" {
-			go startLastFMAuth(name, lfm.APIKey, lfm.APISecret, rt.ConfigPath, logger, lfReqLog)
+			safego.Go(logger, "startLastFMAuth", func() {
+				startLastFMAuth(name, lfm.APIKey, lfm.APISecret, rt.ConfigPath, logger, lfReqLog)
+			})
 		}
 	}
 
@@ -237,7 +241,9 @@ func run(doCheck, debug bool, wait time.Duration, logger *slog.Logger, levelVar 
 	for name, u := range appCfg.Users {
 		lb := u.ListenBrainz
 		if lb.Enabled && lb.Token != "" && lb.Username == "" {
-			go startListenBrainzUsernameLookup(name, lb.Token, rt.ConfigPath, logger, lbReqLog)
+			safego.Go(logger, "startListenBrainzUsernameLookup", func() {
+				startListenBrainzUsernameLookup(name, lb.Token, rt.ConfigPath, logger, lbReqLog)
+			})
 		}
 	}
 
@@ -314,6 +320,15 @@ func run(doCheck, debug bool, wait time.Duration, logger *slog.Logger, levelVar 
 
 	defer p.Close()
 
+	// debug 模式（--debug 或 wizard_debug=1）下，启动 goroutine 监视器：
+	// 常态静默，仅在 goroutine 数超阈值时输出白名单过滤后的可疑栈；
+	// 收到 SIGUSR1 时另把全量快照写入日志目录的 goroutine-dump.txt，供人工排查。
+	if debug || isDebugEnv() {
+		safego.Go(logger, "startGoroutineDumper", func() {
+			startGoroutineDumper(logger, logDir, appCfg.Logging)
+		})
+	}
+
 	// 启动代理
 	return p.Start(ctx, listener)
 }
@@ -367,6 +382,104 @@ func waitForTakeover(ctx context.Context, t *proxy.Takeover, logger *slog.Logger
 		case <-ctx.Done():
 			return fmt.Errorf("等待飞牛音乐 socket 时被信号中断: %w", ctx.Err())
 		case <-time.After(interval):
+		}
+	}
+}
+
+// startGoroutineDumper 在 debug 模式下常驻，平时只做 runtime.NumGoroutine 原子读（零输出）：
+//   - 每 30s 检查一次，数量 ≥ 阈值（60，常态基线约 30 的 2 倍）才抓全量栈，
+//     经白名单过滤后以 WARN 打印可疑 goroutine；两次实际 dump 间隔至少 5 分钟，防日志风暴；
+//   - SIGUSR1 为手动全量通道：把全部 goroutine 栈快照追加写入日志目录下的 goroutine-dump.txt
+//     （lumberjack 轮转，配置与主日志一致），供人工排查，不受阈值与冷却限制；
+//   - 日志目录为 off/none/- 时跳过；为空时回退默认目录；
+//   - SIGUSR1 由本函数独家接管（主流程只监听 SIGINT/SIGTERM，互不冲突）；
+//   - 即便业务 goroutine 死锁，本 goroutine 仍可独立运行并写盘。
+func startGoroutineDumper(logger *slog.Logger, logDir string, lc config.LoggingConfig) {
+	if logDisabled(logDir) {
+		logger.Info("goroutine 快照器未启动（日志目录已关闭）")
+
+		return
+	}
+
+	if logDir == "" {
+		logDir = "/var/log/fnmusic-sync"
+	}
+
+	if err := os.MkdirAll(logDir, 0o755); err != nil {
+		logger.Warn("goroutine 快照器目录创建失败，未启动", "目录", logDir, "错误", err)
+
+		return
+	}
+
+	// 复用主日志的轮转配置：按大小切割、历史 gzip 压缩、按份数与天数过期。
+	rotator := &lumberjack.Logger{
+		Filename:   filepath.Join(logDir, goroutineDumpFile),
+		MaxSize:    lc.MaxSize,
+		MaxBackups: lc.MaxBackups,
+		MaxAge:     lc.MaxAge,
+		Compress:   lc.Compress,
+		LocalTime:  true,
+	}
+	defer rotator.Close()
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGUSR1)
+
+	checkTicker := time.NewTicker(goroutineCheckInterval)
+	defer checkTicker.Stop()
+
+	// captureStack 抓取全部 goroutine 栈：先给 1MB，若被截断则翻倍重试。
+	captureStack := func() string {
+		buf := make([]byte, 1<<20)
+		for {
+			n := runtime.Stack(buf, true)
+			if n < len(buf) {
+				return string(buf[:n])
+			}
+
+			buf = make([]byte, len(buf)*2)
+		}
+	}
+
+	// fullDump 手动全量落盘（SIGUSR1 触发），常态下不会被调用。
+	fullDump := func(trigger string) {
+		raw := captureStack()
+		header := fmt.Sprintf("\n===== goroutine 快照 %s 触发=%s =====\n",
+			time.Now().Format("2006-01-02 15:04:05.000"), trigger)
+		if _, err := rotator.Write(append([]byte(header), raw...)); err != nil {
+			logger.Warn("写入 goroutine 快照失败", "错误", err, "触发", trigger)
+
+			return
+		}
+
+		logger.Debug("已写入 goroutine 快照", "路径", rotator.Filename, "触发", trigger)
+	}
+
+	logger.Info("goroutine 快照器已启动（常态静默，超阈值过滤输出；SIGUSR1 手动全量落盘）",
+		"路径", rotator.Filename,
+		"阈值", goroutineDumpThreshold,
+		"冷却", goroutineDumpCooldown.String(),
+	)
+
+	var lastDump time.Time
+
+	for {
+		select {
+		case <-sigCh:
+			fullDump("SIGUSR1")
+		case <-checkTicker.C:
+			total := runtime.NumGoroutine()
+			if total < goroutineDumpThreshold {
+				continue
+			}
+
+			// 冷却期内跳过：本轮不抓栈、不更新 lastDump，下个周期再试。
+			if !lastDump.IsZero() && time.Since(lastDump) < goroutineDumpCooldown {
+				continue
+			}
+
+			lastDump = time.Now()
+			reportSuspiciousGoroutines(logger, captureStack(), total)
 		}
 	}
 }

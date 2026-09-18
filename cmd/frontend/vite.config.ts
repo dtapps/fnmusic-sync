@@ -5,12 +5,13 @@ import path from 'path';
 export default defineConfig({
   // 静态资源引用前缀，与飞牛网关路径一致
   base: '/app/fnmusic-sync/',
+  publicDir: path.resolve(__dirname, 'static'),
   plugins: [svelte()],
   build: {
     // 输出到 Go embed 目录
     outDir: '../../internal/webui/www',
     // 不自动清空目录（build.sh 控制清理，保护 index.html 和 images/）
-    emptyOutDir: false,
+    // emptyOutDir: false,
     sourcemap: false,
     rollupOptions: {
       // 直接用 app.ts 作为入口，不使用 index.html

@@ -25,6 +25,7 @@
   import StatePage from './pages/StatePage.svelte';
   import LogsPage from './pages/LogsPage.svelte';
   import UserListPage from './pages/UserListPage.svelte';
+  import SocketPage from './pages/SocketPage.svelte';
   import { BASE_URL } from '$lib/api';
   import { getPlatformConfig, onThemeChange, onLanguageChange, isHostEnvironment } from '$lib/trim';
 
@@ -127,6 +128,11 @@
     <nav class="flex gap-1 overflow-x-auto -mx-1 px-1 pb-0.5" style="scrollbar-width: none;">
       <button
         class="px-3 sm:px-4 py-1.5 sm:py-2 rounded-md text-xs sm:text-sm whitespace-nowrap transition-colors cursor-pointer shrink-0
+          {$activeTab === 'sockets' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'}"
+        onclick={() => setActiveTab('sockets')}>{$_('tabs.sockets')}</button
+      >
+      <button
+        class="px-3 sm:px-4 py-1.5 sm:py-2 rounded-md text-xs sm:text-sm whitespace-nowrap transition-colors cursor-pointer shrink-0
           {$activeTab === 'users' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'}"
         onclick={() => setActiveTab('users')}>{$_('tabs.users')}</button
       >
@@ -162,7 +168,9 @@
   </header>
 
   <main class="p-3 sm:p-6">
-    {#if $activeTab === 'users'}
+    {#if $activeTab === 'sockets'}
+      <SocketPage />
+    {:else if $activeTab === 'users'}
       <UsersPage />
     {:else if $activeTab === 'users_list'}
       <UserListPage />

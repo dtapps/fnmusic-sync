@@ -177,7 +177,6 @@ format-json:
 		--print-width 120 \
 		"cmd/frontend/src/lib/i18n/*.json" \
 		"cmd/frontend/tsconfig.json" \
-		"fnpack/*.json" \
 		|| echo "⚠️  prettier 格式化失败，请确认 npx 可用"
 	@command -v jq >/dev/null 2>&1 && { \
 		for f in $(FPKG_DIR)/wizard/* $(FPKG_DIR)/app/ui/config $(FPKG_DIR)/config/privilege $(FPKG_DIR)/config/resource; do [ -f "$$f" ] && jq . "$$f" > "$$f.tmp" && mv "$$f.tmp" "$$f"; done; \

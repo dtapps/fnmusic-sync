@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"cnb.cool/dtapp/fnmusic-sync/internal/safego"
 	"github.com/fsnotify/fsnotify"
 	"github.com/spf13/viper"
 )
@@ -234,7 +235,7 @@ func Watch(
 		return err
 	}
 
-	go func() {
+	safego.Go(nil, "config.Watch", func() {
 		defer w.Close()
 
 		for {
@@ -271,7 +272,7 @@ func Watch(
 				}
 			}
 		}
-	}()
+	})
 
 	return nil
 }

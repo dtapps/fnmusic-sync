@@ -138,13 +138,13 @@ FROM
 ORDER BY
   last_seen_at DESC;
 
--- name: TouchUserSeen :one
+-- name: TouchUserSeenByToken :exec
 UPDATE users
 SET
   last_seen_at = sqlc.arg (last_seen_at),
   updated_at = sqlc.arg (updated_at)
 WHERE
-  username = sqlc.arg (username) RETURNING *;
+  token_prefix = sqlc.arg (token_prefix);
 
 -- name: BindUserPlatform :exec
 UPDATE users
@@ -155,3 +155,21 @@ SET
   updated_at = sqlc.arg (updated_at)
 WHERE
   username = sqlc.arg (username);
+
+-- name: ListUsersWithUARaw :many
+SELECT
+  id,
+  ua_raw
+FROM
+  users
+WHERE
+  ua_raw IS NOT NULL
+  AND ua_raw != '';
+
+-- name: SetUserAgent :exec
+UPDATE users
+SET
+  ua_system = sqlc.arg (ua_system),
+  ua_client = sqlc.arg (ua_client)
+WHERE
+  id = sqlc.arg (id);

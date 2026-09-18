@@ -41,6 +41,11 @@ func NewClient(upstreamSocket, userToken string, logger *slog.Logger, reqLog *re
 			dialer := &net.Dialer{Timeout: 5 * time.Second}
 			return dialer.DialContext(ctx, "unix", upstreamSocket)
 		},
+		// 空闲出站长连接 45s 即回收：不设 IdleConnTimeout 时 keep-alive 连接
+		// 会永久驻留连接池，每对 readLoop/writeLoop 各挂一个 goroutine 空闲数十分钟，
+		// 触发 goroutine 监视器的"出站长连接空闲"告警。
+		IdleConnTimeout:     45 * time.Second,
+		MaxIdleConnsPerHost: 2,
 	}
 
 	return &Client{

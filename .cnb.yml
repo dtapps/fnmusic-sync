@@ -1,2 +1,4 @@
 include:
   - .cnb/workflows/release.yml
+  - .cnb/workflows/pull.yml
+  - .cnb/workflows/push.yml

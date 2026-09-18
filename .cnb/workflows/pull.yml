@@ -1,0 +1,97 @@
+'**':
+  pull_request:
+    - stages:
+        # https://docs.cnb.cool/zh/plugin/public/cnbcool/code-review.html
+        # https://cnb.cool/cnb/plugins/cnbcool/code-review
+        - name: AI 代码评审
+          image: cnbcool/code-review:latest
+          settings:
+            # 评审结果输出文件路径。指定后评审结果会保存为 JSON 文件，不指定则直接输出到终端。
+            output:
+            # 生成 diff 时包含的上下文行数，即变更代码前后各显示多少行。值越大，AI 能看到更多上下文，评审更准确，但也会增加 token 消耗。默认 5
+            context: 5
+            # 是否显示详细日志。开启后会输出更多调试信息，包括 Git 命令执行、文件过滤详情等。默认 false
+            verbose: false
+            # 是否将评审结果发送到 PR 评论。开启后会在 PR 页面添加评审总结评论和针对具体代码行的问题评论。默认 true
+            comment: true
+            # 发送 PR 评论时的最大评论数量。为避免评论过多影响阅读，会按问题严重程度排序后截取。默认 10
+            max_comments: 10
+            # 触发评论的最低严重程度阈值。取值 critical / warning / info，仅在存在严重程度不低于该阈值的问题时才会发送 PR 评论；低于阈值的问题会被过滤，避免小问题刷屏。例如设为 warning 时，仅有 info 级问题的 PR 不会发评论。默认 info（有任何问题都会评论）
+            min_severity: info
+            # 单条问题的最低置信度阈值。取值 high / medium / low，置信度低于该值的 issue 会被直接过滤，用于压制模型"猜测式"建议造成的噪音。默认 medium（过滤掉低置信建议，同时保留中等及以上确信的问题；high 更严格但可能漏报）。模型未输出 confidence 字段时视为 high，兼容旧输出
+            min_confidence: medium
+            # 需要过滤掉的问题类别，逗号分隔。取值可组合 security / bug / perf / maintainability / style / nit / other。默认 style,nit（屏蔽风格/吹毛求疵类建议，最大化降噪）。传空串（exclude_categories: ""）表示不屏蔽任何类别
+            exclude_categories: style,nit
+            # 评审事件模式。取值 auto / comment，默认 auto（依据评审结果自动表态）
+            review_event: auto
+            # 是否拉取 PR 上已有的评论与评审意见，作为评审参考。默认 true
+            include_existing_comments: true
+            # 允许的最大 diff 大小（字符数）。超过此大小的 diff 会被截断，部分文件可能不会被评审。默认 100000（约 10 万字符）
+            max_diff_size: 100000
+            # 允许的最大评审文件数。超过此数量时只评审前 N 个文件，避免文件过多导致评审超时或 token 消耗过大。默认 30
+            max_files: 30
+            # 当评审发现严重问题（critical）时是否返回非零退出码。开启后可用于流水线门禁，阻止有严重问题的代码合并。默认 false
+            fail_on_critical: false
+            # 将将发送给 AI 的完整 prompt 输出到指定文件路径。用于调试和查看实际发送的评审内容，包括系统提示词和代码 diff。不指定则不输出
+            prompt_output:
+            # 指定 AI 模型。不指定则使用默认模型 deepseek-v4.1-flash
+            model: deepseek-v4.1-flash
+            # 模型推理强度。取值 low / medium / high / xhigh，不指定则默认 low（仅在思考模式开启时生效）
+            effort: low
+            # 思考模式（是否开启扩展思考/长程推理）。取值 adaptive / enabled / disabled，不指定则默认 disabled
+            thinking: disabled
+            # AI 最大轮数限制。限制 AI agent 执行的最大轮数，避免评审时间过长。不指定则无限制
+            max_turns:
+            # SDK 调用超时时间（单位：分钟）。超过该时长仍未完成的评审会中断，避免流水线卡死。默认 30
+            timeout_minutes: 30
+
+        # https://docs.cnb.cool/zh/security/sca-vulnerability.html
+        - name: 开源组件漏洞扫描
+          image: cnbcool/sca-vulnerability:latest
+          settings:
+            # 触发门禁的最低漏洞等级，可选 low、medium、high、critical；未配置时仅输出扫描结果，不启用门禁
+            failOnSeverity: high
+
+        # https://docs.cnb.cool/zh/security/sca-license.html
+        - name: License 扫描
+          image: cnbcool/sca-license:latest
+          settings:
+            # 触发门禁的最低 License 风险等级，可选 low、medium、high；未配置时仅输出扫描结果，不启用门禁
+            failOnSeverity: high
+
+        # https://docs.cnb.cool/zh/security/sca-sbom.html
+        - name: 生成 SBOM Delta
+          image: cnbcool/sca-sbom:latest
+          settings:
+            # 输出文件路径
+            output: ${CNB_BUILD_WORKSPACE}/.cnb-sca/sbom-delta.json
+
+    # https://docs.cnb.cool/zh/plugin/public/cnbcool/cnb-sechook.html
+    # https://cnb.cool/cnb/plugins/cnbcool/cnb-sechook
+    - stages:
+        - name: 获取扫描结果
+          image: cnbcool/cnb-sechook
+          settings:
+            # 最多显示的作者数量（可选，默认为 5，必须为正整数）
+            max_display_authors: 5
+            # 禁用敏感信息统计（可选，设置为 true/TRUE/1 时禁用）
+            sensitive_disabled: false
+            # 禁用代码扫描统计（可选，设置为 true/TRUE/1 时禁用）
+            scanning_disabled: false
+
+    # https://docs.cnb.cool/zh/plugin/public/cnbcool/codewiki.html
+    # https://cnb.cool/cnb/plugins/cnbcool/codewiki
+    - stages:
+        - name: 生成 Code Wiki
+          image: cnbcool/codewiki:latest
+          settings:
+            # 必填。指定 codewiki 生成文档的保存位置。支持绝对路径，也支持相对路径（会与当前工作目录 PWD 相加得到绝对路径）
+            git_doc_dir: ./codewiki
+            # 是否启用知识库入库，默认 true
+            knowledge_enabled: true
+            # 嵌入模型名称，默认 hunyuan
+            knowledge_embedding_model: hunyuan
+            # 文本分块大小（token 数），默认 1500
+            knowledge_chunk_size: 1500
+            # 相邻分块重叠 token 数量，默认 0
+            knowledge_chunk_overlap: 0
