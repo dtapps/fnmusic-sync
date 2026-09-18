@@ -23,6 +23,7 @@ import (
 	"cnb.cool/dtapp/fnmusic-sync/internal/proxy"
 	"cnb.cool/dtapp/fnmusic-sync/internal/reqlog"
 	"cnb.cool/dtapp/fnmusic-sync/internal/scrobbler"
+	"gopkg.in/natefinch/lumberjack.v2"
 )
 
 const (
@@ -314,6 +315,13 @@ func run(doCheck, debug bool, wait time.Duration, logger *slog.Logger, levelVar 
 
 	defer p.Close()
 
+	// debug 模式（--debug 或 wizard_debug=1）下，启动 goroutine 快照器：
+	// 周期（60s）及收到 SIGUSR1 时，把全部 goroutine 调用栈写入日志目录的 goroutine-dump.txt，
+	// 进程挂死时直接取该文件分析，无需网络访问或外部工具。
+	if debug || isDebugEnv() {
+		go startGoroutineDumper(logger, logDir, appCfg.Logging)
+	}
+
 	// 启动代理
 	return p.Start(ctx, listener)
 }
@@ -367,6 +375,87 @@ func waitForTakeover(ctx context.Context, t *proxy.Takeover, logger *slog.Logger
 		case <-ctx.Done():
 			return fmt.Errorf("等待飞牛音乐 socket 时被信号中断: %w", ctx.Err())
 		case <-time.After(interval):
+		}
+	}
+}
+
+// startGoroutineDumper 在 debug 模式下，周期性（默认每 60s）以及收到 SIGUSR1 时，
+// 把全部 goroutine 调用栈快照追加写入日志目录下的 goroutine-dump.txt。
+// 文件写入复用与主日志一致的 lumberjack 轮转配置（大小切割 / gzip 压缩 / 按份数与天数过期），
+// 行为和 fnmusic-sync.log 等完全相同。
+//   - 日志目录为 off/none/- 时跳过；为空时回退默认目录；
+//   - SIGUSR1 由本函数独家接管（主流程只监听 SIGINT/SIGTERM，互不冲突）；
+//   - 即便业务 goroutine 死锁，本 goroutine 仍可独立运行并写盘。
+func startGoroutineDumper(logger *slog.Logger, logDir string, lc config.LoggingConfig) {
+	if logDisabled(logDir) {
+		logger.Info("goroutine 快照器未启动（日志目录已关闭）")
+
+		return
+	}
+
+	if logDir == "" {
+		logDir = "/var/log/fnmusic-sync"
+	}
+
+	if err := os.MkdirAll(logDir, 0o755); err != nil {
+		logger.Warn("goroutine 快照器目录创建失败，未启动", "目录", logDir, "错误", err)
+
+		return
+	}
+
+	// 复用主日志的轮转配置：按大小切割、历史 gzip 压缩、按份数与天数过期。
+	rotator := &lumberjack.Logger{
+		Filename:   filepath.Join(logDir, goroutineDumpFile),
+		MaxSize:    lc.MaxSize,
+		MaxBackups: lc.MaxBackups,
+		MaxAge:     lc.MaxAge,
+		Compress:   lc.Compress,
+		LocalTime:  true,
+	}
+	defer rotator.Close()
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGUSR1)
+
+	ticker := time.NewTicker(60 * time.Second)
+	defer ticker.Stop()
+
+	dump := func(trigger string) {
+		// 先给 1MB，若被截断则翻倍重试，确保完整捕获所有 goroutine 栈。
+		buf := make([]byte, 1<<20)
+		for {
+			n := runtime.Stack(buf, true)
+			if n < len(buf) {
+				header := fmt.Sprintf("\n===== goroutine 快照 %s 触发=%s =====\n",
+					time.Now().Format("2006-01-02 15:04:05.000"), trigger)
+				if _, err := rotator.Write([]byte(header)); err != nil {
+					logger.Warn("写入 goroutine 快照失败", "错误", err, "触发", trigger)
+
+					return
+				}
+				if _, err := rotator.Write(buf[:n]); err != nil {
+					logger.Warn("写入 goroutine 快照失败", "错误", err, "触发", trigger)
+
+					return
+				}
+
+				logger.Info("已写入 goroutine 快照", "路径", rotator.Filename, "触发", trigger, "字节", n)
+
+				return
+			}
+
+			buf = make([]byte, len(buf)*2)
+		}
+	}
+
+	logger.Info("goroutine 快照器已启动（SIGUSR1 或每 60s 写入文件）", "路径", rotator.Filename)
+
+	for {
+		select {
+		case <-ticker.C:
+			dump("周期")
+		case <-sigCh:
+			dump("SIGUSR1")
 		}
 	}
 }

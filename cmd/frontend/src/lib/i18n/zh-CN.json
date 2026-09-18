@@ -9,7 +9,8 @@
     "users_list": "用户列表",
     "settings": "全局设置",
     "state": "运行状态",
-    "logs": "日志"
+    "logs": "日志",
+    "sockets": "Socket 状态"
   },
   "users_list": {
     "title": "用户列表",
@@ -168,6 +169,32 @@
     "filter_error": "ERROR",
     "no_data": "暂无日志",
     "file_disabled": "日志文件写入已关闭，请在「全局设置」中开启"
+  },
+  "sockets": {
+    "title": "Socket 状态",
+    "listen": "监听 Socket",
+    "listen_desc": "nginx → 代理（飞牛音乐客户端入口）",
+    "upstream": "上游 Socket",
+    "upstream_desc": "代理 → 飞牛音乐（音乐服务入口）",
+    "normal": "正常",
+    "abnormal": "异常",
+    "type": "类型",
+    "perm": "权限",
+    "owner": "属主",
+    "kind": "归属",
+    "connectable": "可连接",
+    "pid": "进程 PID",
+    "detail": "说明",
+    "conclusion": "结论",
+    "all_ok": "正常：监听可达、飞牛音乐在线",
+    "type_socket": "unix socket",
+    "type_missing": "不存在",
+    "type_nonsocket": "非 socket 文件",
+    "kind_trim": "飞牛音乐（官方）",
+    "kind_proxy": "本代理",
+    "kind_stale": "未知进程（可连接但无法识别）",
+    "kind_none": "无监听",
+    "load_failed": "加载失败: {message}"
   },
   "common": {
     "load_failed": "加载配置失败: {message}",

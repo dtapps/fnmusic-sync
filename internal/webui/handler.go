@@ -37,6 +37,7 @@ import (
 	"cnb.cool/dtapp/fnmusic-sync/internal/config"
 	"cnb.cool/dtapp/fnmusic-sync/internal/db"
 	"cnb.cool/dtapp/fnmusic-sync/internal/lastfm"
+	"cnb.cool/dtapp/fnmusic-sync/internal/proxy"
 	"cnb.cool/dtapp/fnmusic-sync/internal/strutil"
 	"cnb.cool/dtapp/fnmusic-sync/internal/updater"
 )
@@ -158,6 +159,7 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	// 公开 API（无需鉴权）
 	mux.HandleFunc(gatewayPrefix+"/api/version", s.handleVersion)
 	mux.HandleFunc(gatewayPrefix+"/api/health", s.handleHealth)
+	mux.HandleFunc(gatewayPrefix+"/api/sockets", s.handleSockets)
 	mux.HandleFunc(gatewayPrefix+"/api/me", s.handleMe)
 
 	// 用户级 API（普通用户可访问自己的，管理员可访问全部）
@@ -532,6 +534,21 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		"config": s.configPath,
 		"logDir": s.logDir,
 	})
+}
+
+// handleSockets GET 返回两个固定 socket（监听 / 上游）的状态与"是否正常"判断，
+// 供 Web UI 的 Socket 状态页展示。属于只读诊断信息，无需管理员权限。
+func (s *Server) handleSockets(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", "GET")
+		writeJSONError(w, http.StatusMethodNotAllowed, "不支持的请求方法")
+
+		return
+	}
+
+	writeJSON(w, http.StatusOK, proxy.ProbeSockets())
 }
 
 // handleSettings 处理全局设置（playback、playlist、logging）的更新 API。
