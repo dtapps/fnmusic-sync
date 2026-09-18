@@ -6,6 +6,11 @@ import (
 	"path/filepath"
 )
 
+// goroutineDumpFile 是 debug 模式下 goroutine 快照的文件名。
+// 实际路径为「日志目录/goroutineDumpFile」：日志目录在 deb 模式为 /var/log/fnmusic-sync，
+// 在 fpk 模式为 <pkgVar>/logs（见 runtimeInfo.LogDir），通过拼接自动适配两种安装模式。
+const goroutineDumpFile = "goroutine-dump.txt"
+
 // RuntimeMode 表示应用的运行模式。
 type RuntimeMode int
 
