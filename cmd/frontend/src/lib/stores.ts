@@ -42,7 +42,7 @@ export function showToast(message: string, type: 'success' | 'error' = 'success'
 }
 
 // 当前激活的 Tab（从 URL hash 恢复，刷新后保持当前页）
-const validTabs = ['users', 'settings', 'state', 'logs', 'users_list'];
+const validTabs = ['users', 'settings', 'state', 'logs', 'users_list', 'sockets'];
 function getTabFromHash(): string {
   if (typeof window === 'undefined') return 'users';
   const hash = window.location.hash.replace('#', '');

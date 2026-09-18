@@ -1,6 +1,6 @@
 module cnb.cool/dtapp/fnmusic-sync
 
-go 1.27.0
+go 1.27.1
 
 ignore ./cmd/frontend
 
@@ -14,7 +14,7 @@ require (
 )
 
 require (
-	github.com/dustin/go-humanize v1.0.1 // indirect
+	github.com/dustin/go-humanize v1.1.0 // indirect
 	github.com/go-viper/mapstructure/v2 v2.5.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect

@@ -80,6 +80,11 @@ type Proxy struct {
 	detector  *playback.Detector
 	capture   *CaptureLogger
 
+	// lastUpstreamPID 记录上次直连到的上游（飞牛音乐）进程 PID。
+	// 每次新建上游连接会比对，一旦 PID 变化（上游重启 / 重新拉起）
+	// 就清空空闲连接池，避免复用指向"已死旧进程"的陈旧连接。
+	lastUpstreamPID atomic.Int64
+
 	server *http.Server
 }
 
@@ -102,7 +107,16 @@ func New(
 		) (net.Conn, error) {
 			dialer := &net.Dialer{Timeout: 5 * time.Second}
 
-			return dialer.DialContext(ctx, "unix", cfg.UpstreamSocket)
+			conn, err := dialer.DialContext(ctx, "unix", cfg.UpstreamSocket)
+			if err != nil {
+				return nil, err
+			}
+
+			// 每个请求本就要 dial 上游，顺带比对上游进程 PID：
+			// 发现上游重启就清空空闲连接池，避免复用死连接。
+			p.detectUpstreamChange(conn)
+
+			return conn, nil
 		},
 		MaxIdleConns:          64,
 		MaxIdleConnsPerHost:   16,
@@ -141,6 +155,35 @@ func New(
 // UserCache 返回代理内部的用户缓存，供其他服务（如歌单同步）使用。
 func (p *Proxy) UserCache() *playback.UserCache {
 	return p.userCache
+}
+
+// detectUpstreamChange 比对本次上游连接的进程 PID 与上次记录：
+// 一旦不一致（上游 trim-music 重启 / 重新拉起），立即清空 http.Transport 的
+// 空闲连接池，避免复用指向"已死旧进程"的陈旧连接（否则 POST 类请求会一直
+// broken pipe，直到 90s 空闲超时自然淘汰）。
+//
+// 该检测随每次新建上游连接触发——每个请求本就要 dial，零额外开销，无需后台轮询。
+func (p *Proxy) detectUpstreamChange(conn net.Conn) {
+	uc, ok := conn.(*net.UnixConn)
+	if !ok {
+		return
+	}
+
+	pid, ok := peerPIDOf(uc)
+	if !ok {
+		return
+	}
+
+	last := p.lastUpstreamPID.Load()
+	if last != 0 && pid != last {
+		p.logger.Warn("检测到上游进程重启，清理空闲连接池",
+			"旧PID", last,
+			"新PID", pid,
+		)
+		p.transport.CloseIdleConnections()
+	}
+
+	p.lastUpstreamPID.Store(pid)
 }
 
 // Close 释放代理资源（抓包日志文件等）。
@@ -249,8 +292,16 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// 播放事件（track_play）→ 开启播放会话。
 	if strings.Contains(r.URL.Path, "/event/report") {
+		uc := userFromCtx(r.Context())
+		// 调试用：直接确认 event/report 被解析成了哪个用户（空串=不推送）。
+		p.logger.Info("播放事件(event/report)用户识别",
+			"用户名", uc.Name,
+			"来源", uc.Source,
+			"userKey前8位", strutil.FirstN8(uc.Key),
+			"是否推送", uc.Name != "",
+		)
 		p.detector.HandleEventReport(
-			userFromCtx(r.Context()).Name,
+			uc.Name,
 			body,
 		)
 	}
