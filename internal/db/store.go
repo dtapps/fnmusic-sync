@@ -150,7 +150,7 @@ func (s *Store) hasUniqueIndexOn(ctx context.Context, table, column string) (boo
 
 // uniqueIndexNames 返回表上全部唯一索引名（含 sqlite_autoindex_*）。
 func (s *Store) uniqueIndexNames(ctx context.Context, table string) ([]string, error) {
-	rows, err := s.db.QueryContext(ctx, "PRAGMA index_list("+quoteIdent(table)+")")
+	rows, err := s.db.QueryContext(ctx, fmt.Sprintf("PRAGMA index_list(%s)", quoteIdent(table)))
 	if err != nil {
 		return nil, err
 	}
@@ -177,7 +177,9 @@ func (s *Store) uniqueIndexNames(ctx context.Context, table string) ([]string, e
 
 // indexHasColumn 判断索引是否包含指定列。
 func (s *Store) indexHasColumn(ctx context.Context, index, column string) (bool, error) {
-	rows, err := s.db.QueryContext(ctx, "PRAGMA index_info("+quoteIdent(index)+")")
+	// 索引名来自 PRAGMA index_list（sqlite 自身元数据），经 quoteIdent 转义后作为
+	// PRAGMA 函数参数；PRAGMA 的括号参数不接受 ? 占位符，故此处只能内联转义值。
+	rows, err := s.db.QueryContext(ctx, fmt.Sprintf("PRAGMA index_info(%s)", quoteIdent(index)))
 	if err != nil {
 		return false, err
 	}
@@ -229,6 +231,10 @@ func sqliteBool(v any) bool {
 }
 
 // quoteIdent 用单引号包裹 SQL 标识符，供 PRAGMA 函数参数使用。
+//
+// 调用方传入的 table / index 均取自 sqlite 自身元数据（schema.sql 中的表名、
+// PRAGMA index_list 返回的索引名），且此处按 SQL 字面量规则转义单引号；
+// PRAGMA 的括号参数不支持 ? 占位符，故只能用转义后的字面量内联。
 func quoteIdent(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", "''") + "'"
 }
