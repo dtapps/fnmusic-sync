@@ -8,6 +8,20 @@ import (
 	"database/sql"
 )
 
+type PlaybackLog struct {
+	ID          int64          `json:"id"`
+	Username    string         `json:"username"`
+	TokenPrefix sql.NullString `json:"token_prefix"`
+	Guid        sql.NullString `json:"guid"`
+	Title       string         `json:"title"`
+	Artist      sql.NullString `json:"artist"`
+	Album       sql.NullString `json:"album"`
+	DurationMs  sql.NullInt64  `json:"duration_ms"`
+	StartedAt   string         `json:"started_at"`
+	EndedAt     sql.NullString `json:"ended_at"`
+	CreatedAt   string         `json:"created_at"`
+}
+
 type RunStatus struct {
 	Username              string         `json:"username"`
 	LastfmScrobbles       int64          `json:"lastfm_scrobbles"`

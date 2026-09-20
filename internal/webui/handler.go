@@ -166,6 +166,7 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	// 用户级 API（普通用户可访问自己的，管理员可访问全部）
 	mux.HandleFunc(gatewayPrefix+"/api/config", s.handleConfig)
 	mux.HandleFunc(gatewayPrefix+"/api/state", s.handleState)
+	mux.HandleFunc(gatewayPrefix+"/api/playlist", s.handlePlaylist)
 	mux.HandleFunc(gatewayPrefix+"/api/user/{name}", s.handleUser)
 	mux.HandleFunc(gatewayPrefix+"/api/lastfm/auth", s.handleLastFMAuth)
 	mux.HandleFunc(gatewayPrefix+"/api/lastfm/poll", s.handleLastFMPoll)
@@ -452,6 +453,78 @@ func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{"users": users})
+}
+
+// handlePlaylist GET 返回播放记录（通过代理流量检测、关联用户的播放历史）。
+//
+// 查询参数：
+//   - user：指定音乐用户名（管理员可指定；普通用户忽略、只看自己）。
+//     省略时返回全部用户的最近记录（仅管理员）。
+//   - limit：返回条数上限（默认 100，最大 1000）。
+//
+// 权限：普通用户只看自己的播放记录；管理员可看全部或指定用户。
+func (s *Server) handlePlaylist(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", "GET")
+		writeJSONError(w, http.StatusMethodNotAllowed, "不支持的请求方法")
+		return
+	}
+
+	gwUser := readGatewayUser(r)
+
+	// 解析 limit（默认 100，最大 1000）。
+	limit := int64(100)
+	if n, err := strconv.ParseInt(r.URL.Query().Get("limit"), 10, 64); err == nil && n > 0 {
+		if n > 1000 {
+			n = 1000
+		}
+		limit = n
+	}
+
+	// 普通用户强制只看自己；管理员可用 user 参数过滤或查全部。
+	user := ""
+	if gwUser.IsAdmin {
+		user = strings.TrimSpace(r.URL.Query().Get("user"))
+	} else {
+		user = gwUser.Username
+	}
+
+	if s.db == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"entries": []any{}})
+		return
+	}
+
+	var rows []db.PlaybackLog
+	var err error
+	if user == "" {
+		rows, err = s.db.ListRecentPlaybacks(r.Context(), limit)
+	} else {
+		rows, err = s.db.ListPlaybacksByUser(r.Context(), user, limit)
+	}
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "读取播放记录失败: "+err.Error())
+		return
+	}
+
+	entries := make([]map[string]any, 0, len(rows))
+	for _, p := range rows {
+		entries = append(entries, map[string]any{
+			"id":           p.ID,
+			"username":     p.Username,
+			"token_prefix": p.TokenPrefix.String,
+			"guid":         p.Guid.String,
+			"title":        p.Title,
+			"artist":       p.Artist.String,
+			"album":        p.Album.String,
+			"duration_ms":  p.DurationMs.Int64,
+			"started_at":   p.StartedAt,
+			"ended_at":     p.EndedAt.String,
+		})
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"entries": entries})
 }
 
 // handleLogs GET 返回日志文件尾部内容。

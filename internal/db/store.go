@@ -365,6 +365,86 @@ func (s *Store) ListUsers(ctx context.Context) ([]User, error) {
 	return s.q.ListUsers(ctx)
 }
 
+// PlaybackRecord 描述一次"开始播放"的写入意图。
+// 关联音乐用户名（username），并记录曲目元数据与开始时刻；
+// 结束时刻（ended_at）由下一首开始或进程退出时回填，进行中的播放为 NULL。
+type PlaybackRecord struct {
+	Username    string
+	TokenPrefix string
+	GUID        string
+	Title       string
+	Artist      string
+	Album       string
+	Duration    time.Duration
+	StartedAt   time.Time
+}
+
+// RecordPlayback 写入一条播放记录，返回自增主键 id（用于后续回填 ended_at）。
+func (s *Store) RecordPlayback(p PlaybackRecord) (int64, error) {
+	if s == nil || s.q == nil {
+		return 0, nil
+	}
+	now := time.Now().Format(time.RFC3339)
+	started := now
+	if !p.StartedAt.IsZero() {
+		started = p.StartedAt.Format(time.RFC3339)
+	}
+	return s.q.InsertPlayback(context.Background(), InsertPlaybackParams{
+		Username:    p.Username,
+		TokenPrefix: nullStr(p.TokenPrefix),
+		Guid:        nullStr(p.GUID),
+		Title:       p.Title,
+		Artist:      nullStr(p.Artist),
+		Album:       nullStr(p.Album),
+		DurationMs:  sql.NullInt64{Int64: p.Duration.Milliseconds(), Valid: true},
+		StartedAt:   started,
+		EndedAt:     sql.NullString{},
+		CreatedAt:   now,
+	})
+}
+
+// ListPlaybacksByUser 返回某用户的播放记录，按 started_at 降序（最近播放在前）。
+func (s *Store) ListPlaybacksByUser(ctx context.Context, username string, limit int64) ([]PlaybackLog, error) {
+	if s == nil {
+		return nil, nil
+	}
+	if limit <= 0 {
+		limit = 100
+	}
+	return s.q.ListPlaybacksByUser(ctx, ListPlaybacksByUserParams{Username: username, LimitRows: limit})
+}
+
+// ListRecentPlaybacks 返回全部用户的最近播放记录（管理员总览用）。
+func (s *Store) ListRecentPlaybacks(ctx context.Context, limit int64) ([]PlaybackLog, error) {
+	if s == nil {
+		return nil, nil
+	}
+	if limit <= 0 {
+		limit = 200
+	}
+	return s.q.ListRecentPlaybacks(ctx, limit)
+}
+
+// ClosePlayback 回填某条播放记录的结束时刻（下一首开始 / 进程退出时调用）。
+func (s *Store) ClosePlayback(id int64, endedAt string) error {
+	if s == nil || s.q == nil || id <= 0 {
+		return nil
+	}
+	return s.q.UpdatePlaybackEndedAt(context.Background(), UpdatePlaybackEndedAtParams{
+		EndedAt: nullStr(endedAt),
+		ID:      id,
+	})
+}
+
+// CloseOpenPlaybacks 回填所有仍未结束（ended_at IS NULL）的播放记录，
+// 进程退出时调用，把"进行中"的播放统一标记为在给定时刻结束。
+func (s *Store) CloseOpenPlaybacks(endedAt string) error {
+	if s == nil || s.q == nil {
+		return nil
+	}
+	return s.q.CloseOpenPlaybacks(context.Background(), nullStr(endedAt))
+}
+
 // nullStr 把 Go 字符串转成可空的 sql.NullString（空串视为 NULL）。
 func nullStr(s string) sql.NullString {
 	if s == "" {

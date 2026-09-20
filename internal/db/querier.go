@@ -6,19 +6,25 @@ package db
 
 import (
 	"context"
+	"database/sql"
 )
 
 type Querier interface {
 	BindUserPlatform(ctx context.Context, arg BindUserPlatformParams) error
+	CloseOpenPlaybacks(ctx context.Context, endedAt sql.NullString) error
 	GetRunStatus(ctx context.Context, username string) (RunStatus, error)
 	GetRunStatusTotal(ctx context.Context) (GetRunStatusTotalRow, error)
 	GetUser(ctx context.Context, username string) (User, error)
 	IncrementScrobble(ctx context.Context, arg IncrementScrobbleParams) (RunStatus, error)
+	InsertPlayback(ctx context.Context, arg InsertPlaybackParams) (int64, error)
+	ListPlaybacksByUser(ctx context.Context, arg ListPlaybacksByUserParams) ([]PlaybackLog, error)
+	ListRecentPlaybacks(ctx context.Context, limitRows int64) ([]PlaybackLog, error)
 	ListRunStatus(ctx context.Context) ([]RunStatus, error)
 	ListUsers(ctx context.Context) ([]User, error)
 	ListUsersWithUARaw(ctx context.Context) ([]ListUsersWithUARawRow, error)
 	SetUserAgent(ctx context.Context, arg SetUserAgentParams) error
 	TouchUserSeenByToken(ctx context.Context, arg TouchUserSeenByTokenParams) error
+	UpdatePlaybackEndedAt(ctx context.Context, arg UpdatePlaybackEndedAtParams) error
 	UpsertRunStatus(ctx context.Context, arg UpsertRunStatusParams) (RunStatus, error)
 	UpsertUser(ctx context.Context, arg UpsertUserParams) (User, error)
 }

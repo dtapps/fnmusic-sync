@@ -160,6 +160,12 @@ func run(doCheck, debug bool, wait time.Duration, logger *slog.Logger, levelVar 
 		store.RecordScrobble(username, provider)
 	})
 
+	// 播放记录持久化：从代理流量检测"用户在播什么"，落库 playback_log 并关联用户。
+	// 开始播放时写入一行（started_at），结束时刻由下一首开始 / 进程退出时回填。
+	recorder := playback.NewRecorder(dbStore)
+	manager.SetPlaybackStartHook(recorder.OnPlay)
+	defer recorder.CloseOpen(time.Now())
+
 	cfg := proxy.Config{
 		ListenSocket:   listen,
 		UpstreamSocket: upstream,

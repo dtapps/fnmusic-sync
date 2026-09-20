@@ -1,5 +1,14 @@
 // 飞牛音乐 Scrobble 代理 - API 封装
-import type { VersionInfo, AppConfig, StateData, UserAccount, LogData, ActiveUserList, SocketOverview } from './types';
+import type {
+  VersionInfo,
+  AppConfig,
+  StateData,
+  UserAccount,
+  LogData,
+  ActiveUserList,
+  SocketOverview,
+  PlaylistData,
+} from './types';
 
 // 从 Go 模板注入的 window.BaseURL 获取前缀路径
 const BASE_URL = window.BaseURL || '/app/fnmusic-sync';
@@ -52,6 +61,16 @@ export function getSockets() {
 // 返回当前通过 token 识别的活跃用户列表（仅管理员可访问）
 export function getActiveUsers() {
   return apiCall<ActiveUserList>('/users');
+}
+
+// 返回播放记录（通过代理检测、关联用户的播放历史）。
+// user 为空时返回全部用户最近记录（仅管理员）；limit 为条数上限。
+export function getPlaylist(user?: string, limit: number = 100) {
+  const params = new URLSearchParams();
+  if (user) params.set('user', user);
+  if (limit > 0) params.set('limit', String(limit));
+  const qs = params.toString();
+  return apiCall<PlaylistData>(`/playlist${qs ? `?${qs}` : ''}`);
 }
 
 export function saveUser(name: string, data: UserAccount) {

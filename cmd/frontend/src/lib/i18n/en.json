@@ -10,7 +10,8 @@
     "settings": "Settings",
     "state": "Status",
     "logs": "Logs",
-    "sockets": "Socket Status"
+    "sockets": "Socket Status",
+    "playlist": "Playback"
   },
   "users_list": {
     "title": "User List",
@@ -27,6 +28,18 @@
     "last_seen": "Last Seen",
     "online_count": "{count} user(s) identified",
     "load_failed": "Failed to load user list: {message}"
+  },
+  "playlist": {
+    "title": "Playback History",
+    "empty": "No playback records yet",
+    "all_users": "All users",
+    "col_title": "Title",
+    "col_artist": "Artist",
+    "col_album": "Album",
+    "col_duration": "Duration",
+    "col_started": "Started",
+    "col_status": "Status",
+    "playing": "Playing"
   },
   "users": {
     "add_user": "+ Add User",

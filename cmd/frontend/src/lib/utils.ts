@@ -34,6 +34,21 @@ export function formatBuildTime(timeStr: string): string {
   return formatDate(d);
 }
 
+// 格式化时长（毫秒）→ "m:ss"（超过一小时显示 "h:mm:ss"）。0/负数返回空串。
+export function formatDuration(ms?: number): string {
+  if (!ms || ms <= 0) return '';
+  const totalSec = Math.round(ms / 1000);
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const s = totalSec % 60;
+  const ss = String(s).padStart(2, '0');
+  if (h > 0) {
+    const mm = String(m).padStart(2, '0');
+    return `${h}:${mm}:${ss}`;
+  }
+  return `${m}:${ss}`;
+}
+
 // 从 unknown 异常中安全提取错误信息（strict 模式下 catch 变量类型为 unknown）
 export function errMessage(e: unknown): string {
   return e instanceof Error ? e.message : String(e);

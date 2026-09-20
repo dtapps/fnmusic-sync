@@ -162,6 +162,24 @@ export interface ActiveUserList {
   users: ActiveUser[];
 }
 
+// ===== 播放记录（来自 /api/playlist，由代理流量检测并关联用户）=====
+export interface PlaybackEntry {
+  id: number;
+  username: string; // 音乐用户名
+  token_prefix?: string; // 触发播放的客户端 token 前缀（多端区分）
+  guid?: string; // 曲目 guid
+  title: string;
+  artist?: string;
+  album?: string;
+  duration_ms?: number; // 时长（毫秒）
+  started_at: string; // 开始播放（RFC3339）
+  ended_at?: string; // 结束时间；进行中/未知为 null
+}
+
+export interface PlaylistData {
+  entries: PlaybackEntry[];
+}
+
 // ===== Last.fm 授权响应 =====
 export interface LastFmAuthResponse {
   auth_url: string;

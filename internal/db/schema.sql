@@ -55,3 +55,28 @@ CREATE INDEX IF NOT EXISTS idx_users_admin ON users (is_admin);
 
 -- 平台绑定按用户名 UPDATE（BindUserPlatform WHERE username），需要该索引。
 CREATE INDEX IF NOT EXISTS idx_users_username ON users (username);
+
+-- ============================================================
+-- 表 3：播放记录（playback_log）
+-- 通过代理流量检测用户"在播什么"，落库并关联【音乐用户】。
+-- 一首歌开始播放时插入一行（started_at）；无真实"播完"事件（飞牛只上报
+-- track_play，没有 pause/stop/end），故 ended_at 通常为空，仅在"下一首开始"
+-- 或"进程退出"时回填为上一首的结束时刻。
+-- ============================================================
+CREATE TABLE IF NOT EXISTS playback_log (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  username TEXT NOT NULL, -- 音乐用户名（来自 /user/me）
+  token_prefix TEXT, -- 触发该次播放的客户端 token 前缀（多端区分）
+  guid TEXT, -- 曲目 guid（飞牛内部标识）
+  title TEXT NOT NULL, -- 标题
+  artist TEXT, -- 艺人
+  album TEXT, -- 专辑
+  duration_ms INTEGER, -- 时长（毫秒）
+  started_at TEXT NOT NULL, -- 开始播放时刻（RFC3339）
+  ended_at TEXT, -- 结束时刻；未知/进行中为 NULL
+  created_at TEXT NOT NULL -- 入库时刻（RFC3339）
+);
+
+CREATE INDEX IF NOT EXISTS idx_playback_user_started ON playback_log (username, started_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_playback_started ON playback_log (started_at DESC);

@@ -40,6 +40,19 @@ func (q *Queries) BindUserPlatform(ctx context.Context, arg BindUserPlatformPara
 	return err
 }
 
+const closeOpenPlaybacks = `-- name: CloseOpenPlaybacks :exec
+UPDATE playback_log
+SET
+  ended_at = ?1
+WHERE
+  ended_at IS NULL
+`
+
+func (q *Queries) CloseOpenPlaybacks(ctx context.Context, endedAt sql.NullString) error {
+	_, err := q.db.ExecContext(ctx, closeOpenPlaybacks, endedAt)
+	return err
+}
+
 const getRunStatus = `-- name: GetRunStatus :one
 SELECT
   username, lastfm_scrobbles, listenbrainz_scrobbles, total_scrobbles, lastfm_enabled, listenbrainz_enabled, last_scrobbled_at, updated_at
@@ -168,6 +181,185 @@ func (q *Queries) IncrementScrobble(ctx context.Context, arg IncrementScrobblePa
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const insertPlayback = `-- name: InsertPlayback :one
+INSERT INTO
+  playback_log (
+    username,
+    token_prefix,
+    guid,
+    title,
+    artist,
+    album,
+    duration_ms,
+    started_at,
+    ended_at,
+    created_at
+  )
+VALUES
+  (
+    ?1,
+    ?2,
+    ?3,
+    ?4,
+    ?5,
+    ?6,
+    ?7,
+    ?8,
+    ?9,
+    ?10
+  ) RETURNING id
+`
+
+type InsertPlaybackParams struct {
+	Username    string         `json:"username"`
+	TokenPrefix sql.NullString `json:"token_prefix"`
+	Guid        sql.NullString `json:"guid"`
+	Title       string         `json:"title"`
+	Artist      sql.NullString `json:"artist"`
+	Album       sql.NullString `json:"album"`
+	DurationMs  sql.NullInt64  `json:"duration_ms"`
+	StartedAt   string         `json:"started_at"`
+	EndedAt     sql.NullString `json:"ended_at"`
+	CreatedAt   string         `json:"created_at"`
+}
+
+func (q *Queries) InsertPlayback(ctx context.Context, arg InsertPlaybackParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, insertPlayback,
+		arg.Username,
+		arg.TokenPrefix,
+		arg.Guid,
+		arg.Title,
+		arg.Artist,
+		arg.Album,
+		arg.DurationMs,
+		arg.StartedAt,
+		arg.EndedAt,
+		arg.CreatedAt,
+	)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
+const listPlaybacksByUser = `-- name: ListPlaybacksByUser :many
+SELECT
+  id,
+  username,
+  token_prefix,
+  guid,
+  title,
+  artist,
+  album,
+  duration_ms,
+  started_at,
+  ended_at,
+  created_at
+FROM
+  playback_log
+WHERE
+  username = ?1
+ORDER BY
+  started_at DESC
+LIMIT
+  ?2
+`
+
+type ListPlaybacksByUserParams struct {
+	Username  string `json:"username"`
+	LimitRows int64  `json:"limit_rows"`
+}
+
+func (q *Queries) ListPlaybacksByUser(ctx context.Context, arg ListPlaybacksByUserParams) ([]PlaybackLog, error) {
+	rows, err := q.db.QueryContext(ctx, listPlaybacksByUser, arg.Username, arg.LimitRows)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []PlaybackLog{}
+	for rows.Next() {
+		var i PlaybackLog
+		if err := rows.Scan(
+			&i.ID,
+			&i.Username,
+			&i.TokenPrefix,
+			&i.Guid,
+			&i.Title,
+			&i.Artist,
+			&i.Album,
+			&i.DurationMs,
+			&i.StartedAt,
+			&i.EndedAt,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRecentPlaybacks = `-- name: ListRecentPlaybacks :many
+SELECT
+  id,
+  username,
+  token_prefix,
+  guid,
+  title,
+  artist,
+  album,
+  duration_ms,
+  started_at,
+  ended_at,
+  created_at
+FROM
+  playback_log
+ORDER BY
+  started_at DESC
+LIMIT
+  ?1
+`
+
+func (q *Queries) ListRecentPlaybacks(ctx context.Context, limitRows int64) ([]PlaybackLog, error) {
+	rows, err := q.db.QueryContext(ctx, listRecentPlaybacks, limitRows)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []PlaybackLog{}
+	for rows.Next() {
+		var i PlaybackLog
+		if err := rows.Scan(
+			&i.ID,
+			&i.Username,
+			&i.TokenPrefix,
+			&i.Guid,
+			&i.Title,
+			&i.Artist,
+			&i.Album,
+			&i.DurationMs,
+			&i.StartedAt,
+			&i.EndedAt,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listRunStatus = `-- name: ListRunStatus :many
@@ -334,6 +526,24 @@ type TouchUserSeenByTokenParams struct {
 
 func (q *Queries) TouchUserSeenByToken(ctx context.Context, arg TouchUserSeenByTokenParams) error {
 	_, err := q.db.ExecContext(ctx, touchUserSeenByToken, arg.LastSeenAt, arg.UpdatedAt, arg.TokenPrefix)
+	return err
+}
+
+const updatePlaybackEndedAt = `-- name: UpdatePlaybackEndedAt :exec
+UPDATE playback_log
+SET
+  ended_at = ?1
+WHERE
+  id = ?2
+`
+
+type UpdatePlaybackEndedAtParams struct {
+	EndedAt sql.NullString `json:"ended_at"`
+	ID      int64          `json:"id"`
+}
+
+func (q *Queries) UpdatePlaybackEndedAt(ctx context.Context, arg UpdatePlaybackEndedAtParams) error {
+	_, err := q.db.ExecContext(ctx, updatePlaybackEndedAt, arg.EndedAt, arg.ID)
 	return err
 }
 

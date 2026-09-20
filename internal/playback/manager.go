@@ -63,6 +63,10 @@ type Manager struct {
 
 	onScrobbled func(username, provider string)
 
+	// onPlayStart 在用户开始播放一首歌时触发（不论是否由真实取流佐证），
+	// 用于持久化播放记录（关联用户 + 开始/结束时刻）。username 为空时不触发。
+	onPlayStart func(username string, track model.Track, startedAt time.Time)
+
 	logger *slog.Logger
 }
 
@@ -109,6 +113,12 @@ func (m *Manager) UpdateProviders(providersByUser map[string][]scrobbler.Scrobbl
 // 用于持久化用户统计（如推送次数）。username 为空时不会被调用。
 func (m *Manager) SetScrobbledHook(f func(username, provider string)) {
 	m.onScrobbled = f
+}
+
+// SetPlaybackStartHook 注册一个回调：每当某用户开始播放一首歌时触发，
+// 用于持久化播放记录（关联用户 + 开始/结束时刻）。username 为空时不会被调用。
+func (m *Manager) SetPlaybackStartHook(f func(username string, track model.Track, startedAt time.Time)) {
+	m.onPlayStart = f
 }
 
 func (m *Manager) Play(
@@ -170,6 +180,11 @@ func (m *Manager) Play(
 	session := m.current
 
 	m.mu.Unlock()
+
+	// 持久化"用户开始播放"记录（关联用户 + 开始时刻；结束时刻后续回填）。
+	if m.onPlayStart != nil && username != "" {
+		m.onPlayStart(username, track, now)
+	}
 
 	if noThreshold {
 		// 关闭阈值判断：每次播放即推送（不判断进度）。

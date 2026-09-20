@@ -173,3 +173,87 @@ SET
   ua_client = sqlc.arg (ua_client)
 WHERE
   id = sqlc.arg (id);
+
+-- name: InsertPlayback :one
+INSERT INTO
+  playback_log (
+    username,
+    token_prefix,
+    guid,
+    title,
+    artist,
+    album,
+    duration_ms,
+    started_at,
+    ended_at,
+    created_at
+  )
+VALUES
+  (
+    sqlc.arg (username),
+    sqlc.arg (token_prefix),
+    sqlc.arg (guid),
+    sqlc.arg (title),
+    sqlc.arg (artist),
+    sqlc.arg (album),
+    sqlc.arg (duration_ms),
+    sqlc.arg (started_at),
+    sqlc.arg (ended_at),
+    sqlc.arg (created_at)
+  ) RETURNING id;
+
+-- name: ListPlaybacksByUser :many
+SELECT
+  id,
+  username,
+  token_prefix,
+  guid,
+  title,
+  artist,
+  album,
+  duration_ms,
+  started_at,
+  ended_at,
+  created_at
+FROM
+  playback_log
+WHERE
+  username = sqlc.arg (username)
+ORDER BY
+  started_at DESC
+LIMIT
+  sqlc.arg (limit_rows);
+
+-- name: ListRecentPlaybacks :many
+SELECT
+  id,
+  username,
+  token_prefix,
+  guid,
+  title,
+  artist,
+  album,
+  duration_ms,
+  started_at,
+  ended_at,
+  created_at
+FROM
+  playback_log
+ORDER BY
+  started_at DESC
+LIMIT
+  sqlc.arg (limit_rows);
+
+-- name: UpdatePlaybackEndedAt :exec
+UPDATE playback_log
+SET
+  ended_at = sqlc.arg (ended_at)
+WHERE
+  id = sqlc.arg (id);
+
+-- name: CloseOpenPlaybacks :exec
+UPDATE playback_log
+SET
+  ended_at = sqlc.arg (ended_at)
+WHERE
+  ended_at IS NULL;

@@ -10,7 +10,8 @@
     "settings": "全局设置",
     "state": "运行状态",
     "logs": "日志",
-    "sockets": "Socket 状态"
+    "sockets": "Socket 状态",
+    "playlist": "播放记录"
   },
   "users_list": {
     "title": "用户列表",
@@ -27,6 +28,18 @@
     "last_seen": "最后使用",
     "online_count": "累计识别 {count} 个用户",
     "load_failed": "加载用户列表失败: {message}"
+  },
+  "playlist": {
+    "title": "播放记录",
+    "empty": "暂无播放记录",
+    "all_users": "全部用户",
+    "col_title": "歌曲",
+    "col_artist": "艺人",
+    "col_album": "专辑",
+    "col_duration": "时长",
+    "col_started": "开始时间",
+    "col_status": "状态",
+    "playing": "播放中"
   },
   "users": {
     "add_user": "+ 添加用户",
