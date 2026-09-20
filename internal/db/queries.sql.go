@@ -53,6 +53,33 @@ func (q *Queries) CloseOpenPlaybacks(ctx context.Context, endedAt sql.NullString
 	return err
 }
 
+const getLastSuccessTime = `-- name: GetLastSuccessTime :one
+SELECT
+  finished_at
+FROM
+  sync_log
+WHERE
+  username = ?1
+  AND provider = ?2
+  AND status = 'success'
+ORDER BY
+  finished_at DESC
+LIMIT
+  1
+`
+
+type GetLastSuccessTimeParams struct {
+	Username string `json:"username"`
+	Provider string `json:"provider"`
+}
+
+func (q *Queries) GetLastSuccessTime(ctx context.Context, arg GetLastSuccessTimeParams) (string, error) {
+	row := q.db.QueryRowContext(ctx, getLastSuccessTime, arg.Username, arg.Provider)
+	var finished_at string
+	err := row.Scan(&finished_at)
+	return finished_at, err
+}
+
 const getRunStatus = `-- name: GetRunStatus :one
 SELECT
   username, lastfm_scrobbles, listenbrainz_scrobbles, total_scrobbles, lastfm_enabled, listenbrainz_enabled, last_scrobbled_at, updated_at
@@ -243,6 +270,73 @@ func (q *Queries) InsertPlayback(ctx context.Context, arg InsertPlaybackParams) 
 	return id, err
 }
 
+const insertSyncLog = `-- name: InsertSyncLog :one
+INSERT INTO
+  sync_log (
+    username,
+    provider,
+    status,
+    trigger,
+    playlists,
+    tracks,
+    message,
+    started_at,
+    finished_at
+  )
+VALUES
+  (
+    ?1,
+    ?2,
+    ?3,
+    ?4,
+    ?5,
+    ?6,
+    ?7,
+    ?8,
+    ?9
+  ) RETURNING id, username, provider, status, "trigger", playlists, tracks, message, started_at, finished_at
+`
+
+type InsertSyncLogParams struct {
+	Username   string         `json:"username"`
+	Provider   string         `json:"provider"`
+	Status     string         `json:"status"`
+	Trigger    string         `json:"trigger"`
+	Playlists  int64          `json:"playlists"`
+	Tracks     int64          `json:"tracks"`
+	Message    sql.NullString `json:"message"`
+	StartedAt  string         `json:"started_at"`
+	FinishedAt string         `json:"finished_at"`
+}
+
+func (q *Queries) InsertSyncLog(ctx context.Context, arg InsertSyncLogParams) (SyncLog, error) {
+	row := q.db.QueryRowContext(ctx, insertSyncLog,
+		arg.Username,
+		arg.Provider,
+		arg.Status,
+		arg.Trigger,
+		arg.Playlists,
+		arg.Tracks,
+		arg.Message,
+		arg.StartedAt,
+		arg.FinishedAt,
+	)
+	var i SyncLog
+	err := row.Scan(
+		&i.ID,
+		&i.Username,
+		&i.Provider,
+		&i.Status,
+		&i.Trigger,
+		&i.Playlists,
+		&i.Tracks,
+		&i.Message,
+		&i.StartedAt,
+		&i.FinishedAt,
+	)
+	return i, err
+}
+
 const listPlaybacksByUser = `-- name: ListPlaybacksByUser :many
 SELECT
   id,
@@ -362,6 +456,51 @@ func (q *Queries) ListRecentPlaybacks(ctx context.Context, limitRows int64) ([]P
 	return items, nil
 }
 
+const listRecentSyncLogs = `-- name: ListRecentSyncLogs :many
+SELECT
+  id, username, provider, status, "trigger", playlists, tracks, message, started_at, finished_at
+FROM
+  sync_log
+ORDER BY
+  finished_at DESC
+LIMIT
+  ?1
+`
+
+func (q *Queries) ListRecentSyncLogs(ctx context.Context, limitRows int64) ([]SyncLog, error) {
+	rows, err := q.db.QueryContext(ctx, listRecentSyncLogs, limitRows)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []SyncLog{}
+	for rows.Next() {
+		var i SyncLog
+		if err := rows.Scan(
+			&i.ID,
+			&i.Username,
+			&i.Provider,
+			&i.Status,
+			&i.Trigger,
+			&i.Playlists,
+			&i.Tracks,
+			&i.Message,
+			&i.StartedAt,
+			&i.FinishedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listRunStatus = `-- name: ListRunStatus :many
 SELECT
   username, lastfm_scrobbles, listenbrainz_scrobbles, total_scrobbles, lastfm_enabled, listenbrainz_enabled, last_scrobbled_at, updated_at
@@ -390,6 +529,58 @@ func (q *Queries) ListRunStatus(ctx context.Context) ([]RunStatus, error) {
 			&i.ListenbrainzEnabled,
 			&i.LastScrobbledAt,
 			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listSyncLogsByUser = `-- name: ListSyncLogsByUser :many
+SELECT
+  id, username, provider, status, "trigger", playlists, tracks, message, started_at, finished_at
+FROM
+  sync_log
+WHERE
+  username = ?1
+ORDER BY
+  finished_at DESC
+LIMIT
+  ?2
+`
+
+type ListSyncLogsByUserParams struct {
+	Username  string `json:"username"`
+	LimitRows int64  `json:"limit_rows"`
+}
+
+func (q *Queries) ListSyncLogsByUser(ctx context.Context, arg ListSyncLogsByUserParams) ([]SyncLog, error) {
+	rows, err := q.db.QueryContext(ctx, listSyncLogsByUser, arg.Username, arg.LimitRows)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []SyncLog{}
+	for rows.Next() {
+		var i SyncLog
+		if err := rows.Scan(
+			&i.ID,
+			&i.Username,
+			&i.Provider,
+			&i.Status,
+			&i.Trigger,
+			&i.Playlists,
+			&i.Tracks,
+			&i.Message,
+			&i.StartedAt,
+			&i.FinishedAt,
 		); err != nil {
 			return nil, err
 		}

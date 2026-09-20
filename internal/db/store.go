@@ -8,6 +8,7 @@ import (
 	"context"
 	"database/sql"
 	"embed"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -443,6 +444,104 @@ func (s *Store) CloseOpenPlaybacks(endedAt string) error {
 		return nil
 	}
 	return s.q.CloseOpenPlaybacks(context.Background(), nullStr(endedAt))
+}
+
+// SyncLogStatus* 是 sync_log.status 的取值。
+const (
+	SyncLogStatusSuccess = "success"
+	SyncLogStatusFailed  = "failed"
+)
+
+// SyncLogTrigger* 是 sync_log.trigger 的取值（触发来源）。
+const (
+	SyncLogTriggerInterval       = "interval"        // 定时同步（ticker）
+	SyncLogTriggerUserIdentified = "user_identified" // 用户识别回调触发
+	SyncLogTriggerManual         = "manual"          // 手动触发
+)
+
+// SyncLogRecord 描述一条同步记录的写入意图（关联音乐用户名 + provider）。
+// provider 取 "lastfm" / "listenbrainz"（与 IncrementScrobble 一致）。
+type SyncLogRecord struct {
+	Username  string
+	Provider  string
+	Status    string // SyncLogStatus*
+	Trigger   string // SyncLogTrigger*
+	Playlists int
+	Tracks    int
+	Message   string
+	StartedAt time.Time
+}
+
+// RecordSyncLog 写入一条同步记录（无论成功或失败）。finished_at 取当前时刻。
+// 返回自增主键 id；store 为 nil 时直接返回，不报错（不影响同步主流程）。
+func (s *Store) RecordSyncLog(r SyncLogRecord) (int64, error) {
+	if s == nil || s.q == nil {
+		return 0, nil
+	}
+	now := time.Now()
+	started := now
+	if !r.StartedAt.IsZero() {
+		started = r.StartedAt
+	}
+	row, err := s.q.InsertSyncLog(context.Background(), InsertSyncLogParams{
+		Username:   r.Username,
+		Provider:   r.Provider,
+		Status:     r.Status,
+		Trigger:    r.Trigger,
+		Playlists:  int64(r.Playlists),
+		Tracks:     int64(r.Tracks),
+		Message:    nullStr(r.Message),
+		StartedAt:  started.Format(time.RFC3339),
+		FinishedAt: now.Format(time.RFC3339),
+	})
+	if err != nil {
+		return 0, err
+	}
+	return row.ID, nil
+}
+
+// GetLastSuccessTime 返回某用户在某 provider 上一次"成功"同步的完成时刻。
+// 无记录时返回零值时间（nil error），调用方据此判断是否需要同步。
+func (s *Store) GetLastSuccessTime(ctx context.Context, username, provider string) (time.Time, error) {
+	if s == nil || s.q == nil {
+		return time.Time{}, nil
+	}
+	finishedAt, err := s.q.GetLastSuccessTime(ctx, GetLastSuccessTimeParams{
+		Username: username,
+		Provider: provider,
+	})
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return time.Time{}, nil
+		}
+		return time.Time{}, err
+	}
+	// 库内时间均按 RFC3339 写入，理论上不会解析失败；
+	// 万一损坏则视为"无有效上次成功时间"，由调用方按零值跳过间隔检查。
+	t, _ := time.Parse(time.RFC3339, finishedAt)
+	return t, nil
+}
+
+// ListSyncLogsByUser 返回某用户的同步记录，按 finished_at 降序（最近在前）。
+func (s *Store) ListSyncLogsByUser(ctx context.Context, username string, limit int64) ([]SyncLog, error) {
+	if s == nil {
+		return nil, nil
+	}
+	if limit <= 0 {
+		limit = 200
+	}
+	return s.q.ListSyncLogsByUser(ctx, ListSyncLogsByUserParams{Username: username, LimitRows: limit})
+}
+
+// ListRecentSyncLogs 返回全部用户的最近同步记录（管理员总览用）。
+func (s *Store) ListRecentSyncLogs(ctx context.Context, limit int64) ([]SyncLog, error) {
+	if s == nil {
+		return nil, nil
+	}
+	if limit <= 0 {
+		limit = 200
+	}
+	return s.q.ListRecentSyncLogs(ctx, limit)
 }
 
 // nullStr 把 Go 字符串转成可空的 sql.NullString（空串视为 NULL）。

@@ -80,3 +80,27 @@ CREATE TABLE IF NOT EXISTS playback_log (
 CREATE INDEX IF NOT EXISTS idx_playback_user_started ON playback_log (username, started_at DESC);
 
 CREATE INDEX IF NOT EXISTS idx_playback_started ON playback_log (started_at DESC);
+
+-- ============================================================
+-- 表 4：同步记录（sync_log）
+-- 每次 ListenBrainz / Last.fm 歌单同步（成功 / 失败）落库，
+-- 关联【音乐用户】与 provider（listenbrainz / lastfm）。
+-- 用于 Web UI「同步列表」展示；并在每次同步前查询该用户+provider 的
+-- 上一次成功时间，据此跨重启 / 跨重复触发地约束同步间隔。
+-- ============================================================
+CREATE TABLE IF NOT EXISTS sync_log (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  username TEXT NOT NULL,
+  provider TEXT NOT NULL,
+  status TEXT NOT NULL,
+  trigger TEXT NOT NULL DEFAULT 'interval',
+  playlists INTEGER NOT NULL DEFAULT 0,
+  tracks INTEGER NOT NULL DEFAULT 0,
+  message TEXT,
+  started_at TEXT NOT NULL,
+  finished_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_sync_log_user_provider ON sync_log (username, provider, finished_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_sync_log_finished ON sync_log (finished_at DESC);

@@ -12,33 +12,35 @@ import (
 )
 
 // syncLastFMUserTokens
-func (s *SyncService) syncLastFMUserTokens(ctx context.Context, tokens []string, username string, lfm config.UserLastFM) error {
-	var lastErr error
+func (s *SyncService) syncLastFMUserTokens(ctx context.Context, tokens []string, username string, lfm config.UserLastFM) syncResult {
+	var last syncResult
 	for i, token := range tokens {
-		err := s.syncLastFMUser(ctx, token, username, lfm)
-		if err == nil {
-			return nil
+		res := s.syncLastFMUser(ctx, token, username, lfm)
+		if res.Err == nil {
+			return res
 		}
-		lastErr = err
-		if !isInvalidTokenError(err) {
-			return err
+		last = res
+		if !isInvalidTokenError(res.Err) {
+			return res
 		}
 		s.dropInvalidToken(username, token)
 		if i < len(tokens)-1 {
 			s.logger.Warn("token 失效，改用该用户的其他 token 重试", "用户", username, "用户标识", strutil.FirstN8(token))
 		}
 	}
-	return lastErr
+	return last
 }
 
 // syncLastFMUser 同步单个用户的 Last.fm 智能歌单（Top Tracks / Loved Tracks / Recent Tracks）。
 // token 参数必须是当前有效的用户认证 token（用于飞牛音乐 API）。
 // Last.fm 读取类 API 只需 api_key，不需要 session_key。
-func (s *SyncService) syncLastFMUser(ctx context.Context, token string, username string, lfm config.UserLastFM) error {
+// 返回 syncResult：Err 为 nil 表示成功（或无可同步歌单），Playlists/Tracks 为本次同步的歌单数/新增曲目数。
+func (s *SyncService) syncLastFMUser(ctx context.Context, token string, username string, lfm config.UserLastFM) syncResult {
 	playlistCfg := lfm.Playlist
 	if !playlistCfg.TopTracks.Enabled && !playlistCfg.LovedTracks.Enabled && !playlistCfg.RecentTracks.Enabled {
-		return nil
+		return syncResult{Noop: true}
 	}
+	var res syncResult
 	s.logger.Info("开始 Last.fm 智能歌单同步", "用户", username, "用户标识", strutil.FirstN8(token), "lastfm用户", lfm.Username)
 	apiClient := feiniu.NewClient(buildinfo.DefaultUpstreamSocket, token, s.logger, s.feiniuReqLog)
 	s.logger.Info("正在获取飞牛音乐曲目列表", "用户", username, "用户标识", strutil.FirstN8(token))
@@ -47,7 +49,7 @@ func (s *SyncService) syncLastFMUser(ctx context.Context, token string, username
 		if isInvalidTokenError(err) {
 			s.dropInvalidToken(username, token)
 		}
-		return fmt.Errorf("获取飞牛音乐曲目列表失败（用户标识=%s）: %w", strutil.FirstN8(token), err)
+		return syncResult{Err: fmt.Errorf("获取飞牛音乐曲目列表失败（用户标识=%s）: %w", strutil.FirstN8(token), err)}
 	}
 	s.rememberToken(username, token)
 	s.logger.Info("飞牛音乐曲目索引建立完成", "用户", username, "总曲目数", len(indexes.GUIDToTrack), "艺人+曲名索引数", len(indexes.ArtistTrackToGUID), "唯一曲名索引数", len(indexes.TitleToGUID))
@@ -66,8 +68,11 @@ func (s *SyncService) syncLastFMUser(ctx context.Context, token string, username
 			s.logger.Error("获取 Last.fm Top Tracks 失败", "用户", username, "错误", err)
 		} else if playlist != nil {
 			s.logger.Info("Last.fm Top Tracks 获取完成", "用户", username, "曲目数", len(playlist.TrackList), "歌单标题", playlist.Title)
-			if err := s.syncLastFMPlaylist(ctx, apiClient, username, playlist, name, indexes); err != nil {
+			if added, err := s.syncLastFMPlaylist(ctx, apiClient, username, playlist, name, indexes); err != nil {
 				s.logger.Error("同步 Last.fm Top Tracks 歌单失败", "用户", username, "错误", err)
+			} else {
+				res.Playlists++
+				res.Tracks += added
 			}
 		}
 	}
@@ -80,8 +85,11 @@ func (s *SyncService) syncLastFMUser(ctx context.Context, token string, username
 			s.logger.Error("获取 Last.fm Loved Tracks 失败", "用户", username, "错误", err)
 		} else if playlist != nil {
 			s.logger.Info("Last.fm Loved Tracks 获取完成", "用户", username, "曲目数", len(playlist.TrackList), "歌单标题", playlist.Title)
-			if err := s.syncLastFMPlaylist(ctx, apiClient, username, playlist, name, indexes); err != nil {
+			if added, err := s.syncLastFMPlaylist(ctx, apiClient, username, playlist, name, indexes); err != nil {
 				s.logger.Error("同步 Last.fm Loved Tracks 歌单失败", "用户", username, "错误", err)
+			} else {
+				res.Playlists++
+				res.Tracks += added
 			}
 		}
 	}
@@ -94,18 +102,22 @@ func (s *SyncService) syncLastFMUser(ctx context.Context, token string, username
 			s.logger.Error("获取 Last.fm Recent Tracks 失败", "用户", username, "错误", err)
 		} else if playlist != nil {
 			s.logger.Info("Last.fm Recent Tracks 获取完成", "用户", username, "曲目数", len(playlist.TrackList), "歌单标题", playlist.Title)
-			if err := s.syncLastFMPlaylist(ctx, apiClient, username, playlist, name, indexes); err != nil {
+			if added, err := s.syncLastFMPlaylist(ctx, apiClient, username, playlist, name, indexes); err != nil {
 				s.logger.Error("同步 Last.fm Recent Tracks 歌单失败", "用户", username, "错误", err)
+			} else {
+				res.Playlists++
+				res.Tracks += added
 			}
 		}
 	}
 	s.logger.Info("Last.fm 智能歌单同步完成", "用户", username, "lastfm用户", lfm.Username, "top_tracks启用", playlistCfg.TopTracks.Enabled, "loved_tracks启用", playlistCfg.LovedTracks.Enabled, "recent_tracks启用", playlistCfg.RecentTracks.Enabled)
-	return nil
+	return res
 }
 
 // syncLastFMPlaylist 将 Last.fm 智能歌单同步到飞牛音乐。
 // 复用与 ListenBrainz 歌单相同的匹配逻辑（matchTrack）。
-func (s *SyncService) syncLastFMPlaylist(ctx context.Context, apiClient *feiniu.Client, username string, playlist *lastfm.Playlist, playlistName string, indexes *feiniu.TrackIndexes) error {
+// 返回本次新增到歌单的曲目数，便于落库 sync_log。
+func (s *SyncService) syncLastFMPlaylist(ctx context.Context, apiClient *feiniu.Client, username string, playlist *lastfm.Playlist, playlistName string, indexes *feiniu.TrackIndexes) (int, error) {
 	s.logger.Info("开始同步 Last.fm 歌单到飞牛音乐", "用户", username, "歌单名称", playlistName, "歌单曲目数", len(playlist.TrackList))
 	trackGUIDs := make([]string, 0, len(playlist.TrackList))
 	seen := make(map[string]struct{}, len(playlist.TrackList))
@@ -145,20 +157,20 @@ func (s *SyncService) syncLastFMPlaylist(ctx context.Context, apiClient *feiniu.
 	s.logger.Info("歌单曲目匹配完成", "用户", username, "歌单名称", playlistName, "歌单曲目数", len(playlist.TrackList), "匹配数", matched, "MBID匹配", mbidMatched, "艺人曲名匹配", nameMatched, "仅曲名匹配", titleMatched, "未匹配示例", missed)
 	if len(trackGUIDs) == 0 {
 		s.logger.Warn("没有匹配的曲目，跳过歌单创建", "歌单", playlistName)
-		return nil
+		return 0, nil
 	}
 	playlistGUID, err := apiClient.FindOrCreatePlaylist(ctx, playlistName, coverId)
 	if err != nil {
-		return fmt.Errorf("查找/创建歌单失败: %w", err)
+		return 0, fmt.Errorf("查找/创建歌单失败: %w", err)
 	}
 	newGUIDs := s.diffTracks(ctx, apiClient, username, playlistName, playlistGUID, trackGUIDs)
 	if len(newGUIDs) == 0 {
 		s.logger.Info("歌单内容无变化，跳过添加", "用户", username, "歌单名称", playlistName, "歌单曲目数", len(trackGUIDs))
-		return nil
+		return 0, nil
 	}
 	if err := apiClient.AddTracksToPlaylist(ctx, playlistGUID, newGUIDs); err != nil {
-		return fmt.Errorf("添加曲目失败: %w", err)
+		return 0, fmt.Errorf("添加曲目失败: %w", err)
 	}
 	s.logger.Info("歌单同步完成", "用户", username, "歌单名称", playlistName, "本次新增", len(newGUIDs), "歌单曲目数", len(trackGUIDs))
-	return nil
+	return len(newGUIDs), nil
 }

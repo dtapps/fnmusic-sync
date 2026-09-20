@@ -33,6 +33,19 @@ type RunStatus struct {
 	UpdatedAt             string         `json:"updated_at"`
 }
 
+type SyncLog struct {
+	ID         int64          `json:"id"`
+	Username   string         `json:"username"`
+	Provider   string         `json:"provider"`
+	Status     string         `json:"status"`
+	Trigger    string         `json:"trigger"`
+	Playlists  int64          `json:"playlists"`
+	Tracks     int64          `json:"tracks"`
+	Message    sql.NullString `json:"message"`
+	StartedAt  string         `json:"started_at"`
+	FinishedAt string         `json:"finished_at"`
+}
+
 type User struct {
 	ID               int64          `json:"id"`
 	Username         string         `json:"username"`

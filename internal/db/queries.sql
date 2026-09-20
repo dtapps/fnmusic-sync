@@ -257,3 +257,65 @@ SET
   ended_at = sqlc.arg (ended_at)
 WHERE
   ended_at IS NULL;
+
+-- name: InsertSyncLog :one
+INSERT INTO
+  sync_log (
+    username,
+    provider,
+    status,
+    trigger,
+    playlists,
+    tracks,
+    message,
+    started_at,
+    finished_at
+  )
+VALUES
+  (
+    sqlc.arg (username),
+    sqlc.arg (provider),
+    sqlc.arg (status),
+    sqlc.arg (trigger),
+    sqlc.arg (playlists),
+    sqlc.arg (tracks),
+    sqlc.arg (message),
+    sqlc.arg (started_at),
+    sqlc.arg (finished_at)
+  ) RETURNING *;
+
+-- name: GetLastSuccessTime :one
+SELECT
+  finished_at
+FROM
+  sync_log
+WHERE
+  username = sqlc.arg (username)
+  AND provider = sqlc.arg (provider)
+  AND status = 'success'
+ORDER BY
+  finished_at DESC
+LIMIT
+  1;
+
+-- name: ListSyncLogsByUser :many
+SELECT
+  *
+FROM
+  sync_log
+WHERE
+  username = sqlc.arg (username)
+ORDER BY
+  finished_at DESC
+LIMIT
+  sqlc.arg (limit_rows);
+
+-- name: ListRecentSyncLogs :many
+SELECT
+  *
+FROM
+  sync_log
+ORDER BY
+  finished_at DESC
+LIMIT
+  sqlc.arg (limit_rows);

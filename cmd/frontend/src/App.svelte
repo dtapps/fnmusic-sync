@@ -27,6 +27,7 @@
   import UserListPage from './pages/UserListPage.svelte';
   import SocketPage from './pages/SocketPage.svelte';
   import PlaylistPage from './pages/PlaylistPage.svelte';
+  import SyncLogPage from './pages/SyncLogPage.svelte';
   import { BASE_URL } from '$lib/api';
   import { getPlatformConfig, onThemeChange, onLanguageChange, isHostEnvironment } from '$lib/trim';
 
@@ -163,6 +164,11 @@
           {$activeTab === 'playlist' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'}"
         onclick={() => setActiveTab('playlist')}>{$_('tabs.playlist')}</button
       >
+      <button
+        class="px-3 sm:px-4 py-1.5 sm:py-2 rounded-md text-xs sm:text-sm whitespace-nowrap transition-colors cursor-pointer shrink-0
+          {$activeTab === 'synclog' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'}"
+        onclick={() => setActiveTab('synclog')}>{$_('tabs.synclog')}</button
+      >
       {#if $currentUser.isAdmin}
         <button
           class="px-3 sm:px-4 py-1.5 sm:py-2 rounded-md text-xs sm:text-sm whitespace-nowrap transition-colors cursor-pointer shrink-0
@@ -186,6 +192,8 @@
       <StatePage />
     {:else if $activeTab === 'playlist'}
       <PlaylistPage />
+    {:else if $activeTab === 'synclog'}
+      <SyncLogPage />
     {:else if $activeTab === 'logs'}
       <LogsPage />
     {/if}

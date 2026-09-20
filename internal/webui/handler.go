@@ -167,6 +167,7 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc(gatewayPrefix+"/api/config", s.handleConfig)
 	mux.HandleFunc(gatewayPrefix+"/api/state", s.handleState)
 	mux.HandleFunc(gatewayPrefix+"/api/playlist", s.handlePlaylist)
+	mux.HandleFunc(gatewayPrefix+"/api/synclog", s.handleSyncLog)
 	mux.HandleFunc(gatewayPrefix+"/api/user/{name}", s.handleUser)
 	mux.HandleFunc(gatewayPrefix+"/api/lastfm/auth", s.handleLastFMAuth)
 	mux.HandleFunc(gatewayPrefix+"/api/lastfm/poll", s.handleLastFMPoll)
@@ -521,6 +522,76 @@ func (s *Server) handlePlaylist(w http.ResponseWriter, r *http.Request) {
 			"duration_ms":  p.DurationMs.Int64,
 			"started_at":   p.StartedAt,
 			"ended_at":     p.EndedAt.String,
+		})
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"entries": entries})
+}
+
+// handleSyncLog GET 返回同步记录（每次 ListenBrainz / Last.fm 歌单同步的成功/失败记录）。
+//
+// 查询参数：
+//   - user：指定音乐用户名（管理员可指定；普通用户忽略、只看自己）。
+//     省略时返回全部用户的最近记录（仅管理员）。
+//   - limit：返回条数上限（默认 200，最大 1000）。
+//
+// 权限：普通用户只看自己的同步记录；管理员可看全部或指定用户。
+func (s *Server) handleSyncLog(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", "GET")
+		writeJSONError(w, http.StatusMethodNotAllowed, "不支持的请求方法")
+		return
+	}
+
+	gwUser := readGatewayUser(r)
+
+	limit := int64(200)
+	if n, err := strconv.ParseInt(r.URL.Query().Get("limit"), 10, 64); err == nil && n > 0 {
+		if n > 1000 {
+			n = 1000
+		}
+		limit = n
+	}
+
+	user := ""
+	if gwUser.IsAdmin {
+		user = strings.TrimSpace(r.URL.Query().Get("user"))
+	} else {
+		user = gwUser.Username
+	}
+
+	if s.db == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"entries": []any{}})
+		return
+	}
+
+	var rows []db.SyncLog
+	var err error
+	if user == "" {
+		rows, err = s.db.ListRecentSyncLogs(r.Context(), limit)
+	} else {
+		rows, err = s.db.ListSyncLogsByUser(r.Context(), user, limit)
+	}
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "读取同步记录失败: "+err.Error())
+		return
+	}
+
+	entries := make([]map[string]any, 0, len(rows))
+	for _, l := range rows {
+		entries = append(entries, map[string]any{
+			"id":          l.ID,
+			"username":    l.Username,
+			"provider":    l.Provider,
+			"status":      l.Status,
+			"trigger":     l.Trigger,
+			"playlists":   l.Playlists,
+			"tracks":      l.Tracks,
+			"message":     l.Message.String,
+			"started_at":  l.StartedAt,
+			"finished_at": l.FinishedAt,
 		})
 	}
 

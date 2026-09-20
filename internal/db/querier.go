@@ -12,14 +12,18 @@ import (
 type Querier interface {
 	BindUserPlatform(ctx context.Context, arg BindUserPlatformParams) error
 	CloseOpenPlaybacks(ctx context.Context, endedAt sql.NullString) error
+	GetLastSuccessTime(ctx context.Context, arg GetLastSuccessTimeParams) (string, error)
 	GetRunStatus(ctx context.Context, username string) (RunStatus, error)
 	GetRunStatusTotal(ctx context.Context) (GetRunStatusTotalRow, error)
 	GetUser(ctx context.Context, username string) (User, error)
 	IncrementScrobble(ctx context.Context, arg IncrementScrobbleParams) (RunStatus, error)
 	InsertPlayback(ctx context.Context, arg InsertPlaybackParams) (int64, error)
+	InsertSyncLog(ctx context.Context, arg InsertSyncLogParams) (SyncLog, error)
 	ListPlaybacksByUser(ctx context.Context, arg ListPlaybacksByUserParams) ([]PlaybackLog, error)
 	ListRecentPlaybacks(ctx context.Context, limitRows int64) ([]PlaybackLog, error)
+	ListRecentSyncLogs(ctx context.Context, limitRows int64) ([]SyncLog, error)
 	ListRunStatus(ctx context.Context) ([]RunStatus, error)
+	ListSyncLogsByUser(ctx context.Context, arg ListSyncLogsByUserParams) ([]SyncLog, error)
 	ListUsers(ctx context.Context) ([]User, error)
 	ListUsersWithUARaw(ctx context.Context) ([]ListUsersWithUARawRow, error)
 	SetUserAgent(ctx context.Context, arg SetUserAgentParams) error

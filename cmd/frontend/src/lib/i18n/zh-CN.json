@@ -11,7 +11,8 @@
     "state": "运行状态",
     "logs": "日志",
     "sockets": "Socket 状态",
-    "playlist": "播放记录"
+    "playlist": "播放记录",
+    "synclog": "同步记录"
   },
   "users_list": {
     "title": "用户列表",
@@ -40,6 +41,25 @@
     "col_started": "开始时间",
     "col_status": "状态",
     "playing": "播放中"
+  },
+  "synclog": {
+    "title": "同步记录",
+    "empty": "暂无同步记录",
+    "all_users": "全部用户",
+    "col_user": "用户",
+    "col_provider": "同步源",
+    "col_status": "状态",
+    "col_playlists": "歌单数",
+    "col_tracks": "新增曲目",
+    "col_trigger": "触发方式",
+    "col_finished": "完成时间",
+    "success": "成功",
+    "failed": "失败",
+    "provider_listenbrainz": "ListenBrainz",
+    "provider_lastfm": "Last.fm",
+    "trigger_interval": "定时",
+    "trigger_user_identified": "用户识别",
+    "trigger_manual": "手动"
   },
   "users": {
     "add_user": "+ 添加用户",

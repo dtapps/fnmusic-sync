@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"cnb.cool/dtapp/fnmusic-sync/internal/config"
+	"cnb.cool/dtapp/fnmusic-sync/internal/db"
 	"cnb.cool/dtapp/fnmusic-sync/internal/feiniu"
 	"cnb.cool/dtapp/fnmusic-sync/internal/playback"
 	"cnb.cool/dtapp/fnmusic-sync/internal/reqlog"
@@ -155,6 +156,7 @@ type SyncService struct {
 	logger    *slog.Logger
 	client    *http.Client
 	userCache *playback.UserCache
+	dbStore   *db.Store
 
 	// 请求日志：各客户端独立写入各自的日志文件。
 	feiniuReqLog *reqlog.Logger
@@ -194,11 +196,84 @@ type recommendationCache struct {
 // recommendationCacheTTL 推荐歌单缓存有效期。
 const recommendationCacheTTL = 2 * time.Minute
 
+// syncResult 汇总一次 provider（lastfm / listenbrainz）同步的结果，用于落库 sync_log。
+type syncResult struct {
+	Playlists int   // 实际同步的歌单数
+	Tracks    int   // 实际新增到歌单的曲目数
+	Noop      bool  // 没有可同步的歌单（子项全关），不落库
+	Err       error // 同步错误（nil 表示成功）
+}
+
+// syncInterval 解析配置中的同步间隔，非法或 <=0 时回退到默认 30 分钟。
+func (s *SyncService) syncInterval() time.Duration {
+	interval, err := time.ParseDuration(s.cfg.Playlist.SyncInterval)
+	if err != nil || interval <= 0 {
+		return 30 * time.Minute
+	}
+	return interval
+}
+
+// syncProvider 执行一次 provider 同步，并：
+//  1. 同步前查该用户+provider 上一次成功时间，未到间隔则跳过——这是"持久化的同步间隔"，
+//     跨重启、跨用户识别回调的多次触发都能生效（interval 未到不再重复跑）；
+//  2. 同步后无论成功/失败都落库 sync_log（供 Web UI「同步列表」展示与排查）。
+//
+// fn 执行真正的同步逻辑（返回 syncResult）；Noop=true 时不记录（无歌单可同步）。
+func (s *SyncService) syncProvider(ctx context.Context, username, provider, trigger string, interval time.Duration, fn func() syncResult) {
+	// 1. 间隔检查（仅当配置生效且已有上次成功记录时）。
+	if s.dbStore != nil && interval > 0 {
+		if last, err := s.dbStore.GetLastSuccessTime(ctx, username, provider); err == nil && !last.IsZero() {
+			if elapsed := time.Since(last); elapsed < interval {
+				s.logger.Info("同步间隔未到，跳过",
+					"用户", username,
+					"provider", provider,
+					"上次成功", last.Format(time.RFC3339),
+					"已过去", elapsed.Round(time.Second).String(),
+					"间隔", interval.String(),
+				)
+				return
+			}
+		}
+	}
+
+	// 2. 执行同步。
+	started := time.Now()
+	res := fn()
+	if res.Noop {
+		return
+	}
+
+	// 3. 落库（无论成功或失败）。
+	if s.dbStore != nil {
+		status := db.SyncLogStatusSuccess
+		msg := ""
+		if res.Err != nil {
+			status = db.SyncLogStatusFailed
+			msg = res.Err.Error()
+			s.logger.Error("歌单同步失败",
+				"用户", username, "provider", provider, "错误", res.Err)
+		}
+		if _, rerr := s.dbStore.RecordSyncLog(db.SyncLogRecord{
+			Username:  username,
+			Provider:  provider,
+			Status:    status,
+			Trigger:   trigger,
+			Playlists: res.Playlists,
+			Tracks:    res.Tracks,
+			Message:   msg,
+			StartedAt: started,
+		}); rerr != nil {
+			s.logger.Warn("写入同步记录失败", "用户", username, "provider", provider, "错误", rerr)
+		}
+	}
+}
+
 // NewSyncService 创建歌单同步服务。
 func NewSyncService(
 	cfg *config.Config,
 	logger *slog.Logger,
 	userCache *playback.UserCache,
+	dbStore *db.Store,
 	feiniuReqLog, lfReqLog, lbReqLog *reqlog.Logger,
 ) *SyncService {
 	s := &SyncService{
@@ -208,6 +283,7 @@ func NewSyncService(
 			Timeout: 60 * time.Second,
 		},
 		userCache:       userCache,
+		dbStore:         dbStore,
 		feiniuReqLog:    feiniuReqLog,
 		lfReqLog:        lfReqLog,
 		lbReqLog:        lbReqLog,
@@ -370,34 +446,18 @@ func (s *SyncService) onUserIdentified(token, username string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
+	interval := s.syncInterval()
+
 	if lbOK {
-		if err := s.syncUser(ctx, token, username, lb); err != nil {
-			s.logger.Error("ListenBrainz 歌单同步失败",
-				"用户", username,
-				"用户标识", strutil.FirstN8(token),
-				"错误", err,
-			)
-		} else {
-			s.logger.Info("ListenBrainz 歌单同步成功",
-				"用户", username,
-				"用户标识", strutil.FirstN8(token),
-			)
-		}
+		s.syncProvider(ctx, username, "listenbrainz", db.SyncLogTriggerUserIdentified, interval, func() syncResult {
+			return s.syncUser(ctx, token, username, lb)
+		})
 	}
 
 	if lfmOK {
-		if err := s.syncLastFMUser(ctx, token, username, lfm); err != nil {
-			s.logger.Error("Last.fm 歌单同步失败",
-				"用户", username,
-				"用户标识", strutil.FirstN8(token),
-				"错误", err,
-			)
-		} else {
-			s.logger.Info("Last.fm 歌单同步成功",
-				"用户", username,
-				"用户标识", strutil.FirstN8(token),
-			)
-		}
+		s.syncProvider(ctx, username, "lastfm", db.SyncLogTriggerUserIdentified, interval, func() syncResult {
+			return s.syncLastFMUser(ctx, token, username, lfm)
+		})
 	}
 }
 
@@ -434,26 +494,20 @@ func (s *SyncService) syncAll(ctx context.Context) {
 		lb := userCfg.ListenBrainz
 		lfm := userCfg.LastFM
 
+		interval := s.syncInterval()
+
 		// ListenBrainz 歌单同步
 		if lb.Enabled && lb.Username != "" {
-			if err := s.syncUserTokens(ctx, tokens, username, lb); err != nil {
-				s.logger.Error("ListenBrainz 歌单同步失败",
-					"用户", username,
-					"尝试token数", len(tokens),
-					"错误", err,
-				)
-			}
+			s.syncProvider(ctx, username, "listenbrainz", db.SyncLogTriggerInterval, interval, func() syncResult {
+				return s.syncUserTokens(ctx, tokens, username, lb)
+			})
 		}
 
 		// Last.fm 智能歌单同步
 		if lfm.Enabled && lfm.Username != "" {
-			if err := s.syncLastFMUserTokens(ctx, tokens, username, lfm); err != nil {
-				s.logger.Error("Last.fm 歌单同步失败",
-					"用户", username,
-					"尝试token数", len(tokens),
-					"错误", err,
-				)
-			}
+			s.syncProvider(ctx, username, "lastfm", db.SyncLogTriggerInterval, interval, func() syncResult {
+				return s.syncLastFMUserTokens(ctx, tokens, username, lfm)
+			})
 		}
 	}
 }

@@ -193,7 +193,7 @@ func run(doCheck, debug bool, wait time.Duration, logger *slog.Logger, levelVar 
 	p := proxy.New(cfg, manager, logger)
 
 	// 创建歌单同步服务（使用代理的 UserCache 获取活跃用户）
-	playlistSync := playlist.NewSyncService(appCfg, logger, p.UserCache(), feiniuReqLog, lfReqLog, lbReqLog)
+	playlistSync := playlist.NewSyncService(appCfg, logger, p.UserCache(), dbStore, feiniuReqLog, lfReqLog, lbReqLog)
 
 	// applyConfig 统一处理：重建各用户推送平台、更新日志级别、打印用户列表。
 	// 启动与配置热更新都走它，保证两处行为一致。

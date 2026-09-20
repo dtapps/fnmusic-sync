@@ -180,6 +180,24 @@ export interface PlaylistData {
   entries: PlaybackEntry[];
 }
 
+// ===== 同步记录（来自 /api/synclog，每次 ListenBrainz / Last.fm 歌单同步的成功/失败记录）=====
+export interface SyncLogEntry {
+  id: number;
+  username: string; // 音乐用户名
+  provider: string; // 'listenbrainz' | 'lastfm'
+  status: string; // 'success' | 'failed'
+  trigger?: string; // 'interval' | 'user_identified' | 'manual'
+  playlists: number; // 本次同步的歌单数
+  tracks: number; // 本次新增到歌单的曲目数
+  message?: string; // 失败原因 / 摘要
+  started_at: string; // 开始（RFC3339）
+  finished_at: string; // 完成（RFC3339）
+}
+
+export interface SyncLogData {
+  entries: SyncLogEntry[];
+}
+
 // ===== Last.fm 授权响应 =====
 export interface LastFmAuthResponse {
   auth_url: string;

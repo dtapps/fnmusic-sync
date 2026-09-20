@@ -70,19 +70,21 @@ func (s *SyncService) syncUserTokens(
 	tokens []string,
 	username string,
 	lb config.UserListenBrainz,
-) error {
-	var lastErr error
+) syncResult {
+	var last syncResult
 
 	for i, token := range tokens {
-		err := s.syncUser(ctx, token, username, lb)
-		if err == nil {
-			return nil
+		res := s.syncUser(ctx, token, username, lb)
+		// 成功（或无可同步歌单）即终止尝试。
+		if res.Err == nil {
+			return res
 		}
 
-		lastErr = err
+		last = res
 
-		if !isInvalidTokenError(err) {
-			return err
+		// 非凭证类错误换 token 不会更好，直接返回。
+		if !isInvalidTokenError(res.Err) {
+			return res
 		}
 
 		// 凭证失效：剔除后换该用户下一个客户端的 token 重试。
@@ -96,17 +98,18 @@ func (s *SyncService) syncUserTokens(
 		}
 	}
 
-	return lastErr
+	return last
 }
 
 // syncUser 同步单个用户的 ListenBrainz 推荐歌单。
 // token 参数必须是当前有效的用户认证 token。
+// 返回 syncResult：Err 为 nil 表示成功（或无可同步歌单），Playlists/Tracks 为本次同步的歌单数/新增曲目数。
 func (s *SyncService) syncUser(
 	ctx context.Context,
 	token string,
 	username string,
 	lb config.UserListenBrainz,
-) error {
+) syncResult {
 	playlistCfg := lb.Playlist
 
 	// 检查是否有任何歌单需要同步
@@ -115,7 +118,7 @@ func (s *SyncService) syncUser(
 		!playlistCfg.WeeklyExploration.Enabled &&
 		!playlistCfg.YearDiscoveries.Enabled &&
 		!playlistCfg.YearMissed.Enabled {
-		return nil
+		return syncResult{Noop: true}
 	}
 
 	s.logger.Info("开始 ListenBrainz 歌单同步",
@@ -123,6 +126,8 @@ func (s *SyncService) syncUser(
 		"用户标识", strutil.FirstN8(token),
 		"listenbrainz用户", lb.Username,
 	)
+
+	var res syncResult
 
 	// 创建飞牛音乐 API 客户端（直接使用传入的 token）
 	apiClient := feiniu.NewClient(buildinfo.DefaultUpstreamSocket, token, s.logger, s.feiniuReqLog)
@@ -140,7 +145,7 @@ func (s *SyncService) syncUser(
 			s.dropInvalidToken(username, token)
 		}
 
-		return fmt.Errorf("获取飞牛音乐曲目列表失败（用户标识=%s）: %w", strutil.FirstN8(token), err)
+		return syncResult{Err: fmt.Errorf("获取飞牛音乐曲目列表失败（用户标识=%s）: %w", strutil.FirstN8(token), err)}
 	}
 
 	// 该 token 可用，后续定时同步优先复用它。
@@ -160,7 +165,7 @@ func (s *SyncService) syncUser(
 	)
 	dailyJams, weeklyJams, weeklyExploration, yearDiscoveries, yearMissed, err := s.fetchRecommendations(ctx, lb.Username)
 	if err != nil {
-		return fmt.Errorf("获取 ListenBrainz 推荐歌单失败: %w", err)
+		return syncResult{Err: fmt.Errorf("获取 ListenBrainz 推荐歌单失败: %w", err)}
 	}
 
 	s.logger.Info("ListenBrainz 推荐歌单获取完成",
@@ -185,33 +190,42 @@ func (s *SyncService) syncUser(
 	// 同步 daily_jams
 	if playlistCfg.DailyJams.Enabled && dailyJams != nil {
 		name := playlistName(playlistCfg.DailyJams, "LB 每日推荐")
-		if err := s.syncPlaylist(ctx, apiClient, username, dailyJams, name, indexes); err != nil {
+		if added, err := s.syncPlaylist(ctx, apiClient, username, dailyJams, name, indexes); err != nil {
 			s.logger.Error("同步 daily_jams 失败",
 				"用户", username,
 				"错误", err,
 			)
+		} else {
+			res.Playlists++
+			res.Tracks += added
 		}
 	}
 
 	// 同步 weekly_jams
 	if playlistCfg.WeeklyJams.Enabled && weeklyJams != nil {
 		name := playlistName(playlistCfg.WeeklyJams, "LB 每周推荐")
-		if err := s.syncPlaylist(ctx, apiClient, username, weeklyJams, name, indexes); err != nil {
+		if added, err := s.syncPlaylist(ctx, apiClient, username, weeklyJams, name, indexes); err != nil {
 			s.logger.Error("同步 weekly_jams 失败",
 				"用户", username,
 				"错误", err,
 			)
+		} else {
+			res.Playlists++
+			res.Tracks += added
 		}
 	}
 
 	// 同步 weekly_exploration
 	if playlistCfg.WeeklyExploration.Enabled && weeklyExploration != nil {
 		name := playlistName(playlistCfg.WeeklyExploration, "LB 每周探索")
-		if err := s.syncPlaylist(ctx, apiClient, username, weeklyExploration, name, indexes); err != nil {
+		if added, err := s.syncPlaylist(ctx, apiClient, username, weeklyExploration, name, indexes); err != nil {
 			s.logger.Error("同步 weekly_exploration 失败",
 				"用户", username,
 				"错误", err,
 			)
+		} else {
+			res.Playlists++
+			res.Tracks += added
 		}
 	}
 
@@ -219,11 +233,14 @@ func (s *SyncService) syncUser(
 	if playlistCfg.YearDiscoveries.Enabled && yearDiscoveries != nil {
 		year := yearDiscoveries.YearFromSourcePatch()
 		name := resolvePlaylistName(playlistCfg.YearDiscoveries.Name, "LB "+year+"年度发现", map[string]string{"year": year})
-		if err := s.syncPlaylist(ctx, apiClient, username, yearDiscoveries, name, indexes); err != nil {
+		if added, err := s.syncPlaylist(ctx, apiClient, username, yearDiscoveries, name, indexes); err != nil {
 			s.logger.Error("同步 year_discoveries 失败",
 				"用户", username,
 				"错误", err,
 			)
+		} else {
+			res.Playlists++
+			res.Tracks += added
 		}
 	}
 
@@ -231,15 +248,18 @@ func (s *SyncService) syncUser(
 	if playlistCfg.YearMissed.Enabled && yearMissed != nil {
 		year := yearMissed.YearFromSourcePatch()
 		name := resolvePlaylistName(playlistCfg.YearMissed.Name, "LB "+year+"年度遗珠", map[string]string{"year": year})
-		if err := s.syncPlaylist(ctx, apiClient, username, yearMissed, name, indexes); err != nil {
+		if added, err := s.syncPlaylist(ctx, apiClient, username, yearMissed, name, indexes); err != nil {
 			s.logger.Error("同步 year_missed 失败",
 				"用户", username,
 				"错误", err,
 			)
+		} else {
+			res.Playlists++
+			res.Tracks += added
 		}
 	}
 
-	return nil
+	return res
 }
 
 // syncPlaylist 同步单个歌单到飞牛音乐。
@@ -247,6 +267,8 @@ func (s *SyncService) syncUser(
 //  1. MBID 精确匹配（优先，飞牛曲库通常没有 MBID）
 //  2. 艺人名+曲名匹配（主要方案）
 //  3. 仅曲名匹配（应对艺人名繁简/译名差异，仅在曲库内曲名唯一时命中）
+//
+// 返回本次新增到歌单的曲目数，便于落库 sync_log。
 func (s *SyncService) syncPlaylist(
 	ctx context.Context,
 	apiClient *feiniu.Client,
@@ -254,7 +276,7 @@ func (s *SyncService) syncPlaylist(
 	playlist *scrobbler.ListenBrainzPlaylist,
 	playlistName string,
 	indexes *feiniu.TrackIndexes,
-) error {
+) (int, error) {
 	s.logger.Info("开始同步歌单到飞牛音乐",
 		"用户", username,
 		"歌单名称", playlistName,
@@ -320,13 +342,13 @@ func (s *SyncService) syncPlaylist(
 		s.logger.Warn("没有匹配的曲目，跳过歌单创建",
 			"歌单", playlistName,
 		)
-		return nil
+		return 0, nil
 	}
 
 	// 查找或创建歌单
 	playlistGUID, err := apiClient.FindOrCreatePlaylist(ctx, playlistName, coverId)
 	if err != nil {
-		return fmt.Errorf("查找/创建歌单失败: %w", err)
+		return 0, fmt.Errorf("查找/创建歌单失败: %w", err)
 	}
 
 	// 只添加歌单里还没有的曲目：add-track 是追加语义，
@@ -339,11 +361,11 @@ func (s *SyncService) syncPlaylist(
 			"歌单曲目数", len(trackGUIDs),
 		)
 
-		return nil
+		return 0, nil
 	}
 
 	if err := apiClient.AddTracksToPlaylist(ctx, playlistGUID, newGUIDs); err != nil {
-		return fmt.Errorf("添加曲目失败: %w", err)
+		return 0, fmt.Errorf("添加曲目失败: %w", err)
 	}
 
 	s.logger.Info("歌单同步完成",
@@ -353,5 +375,5 @@ func (s *SyncService) syncPlaylist(
 		"歌单曲目数", len(trackGUIDs),
 	)
 
-	return nil
+	return len(newGUIDs), nil
 }

@@ -8,6 +8,7 @@ import type {
   ActiveUserList,
   SocketOverview,
   PlaylistData,
+  SyncLogData,
 } from './types';
 
 // 从 Go 模板注入的 window.BaseURL 获取前缀路径
@@ -71,6 +72,16 @@ export function getPlaylist(user?: string, limit: number = 100) {
   if (limit > 0) params.set('limit', String(limit));
   const qs = params.toString();
   return apiCall<PlaylistData>(`/playlist${qs ? `?${qs}` : ''}`);
+}
+
+// 返回同步记录（每次 ListenBrainz / Last.fm 歌单同步的成功/失败记录）。
+// user 为空时返回全部用户最近记录（仅管理员）；limit 为条数上限。
+export function getSyncLog(user?: string, limit: number = 200) {
+  const params = new URLSearchParams();
+  if (user) params.set('user', user);
+  if (limit > 0) params.set('limit', String(limit));
+  const qs = params.toString();
+  return apiCall<SyncLogData>(`/synclog${qs ? `?${qs}` : ''}`);
 }
 
 export function saveUser(name: string, data: UserAccount) {

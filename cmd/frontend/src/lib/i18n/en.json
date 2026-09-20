@@ -11,7 +11,8 @@
     "state": "Status",
     "logs": "Logs",
     "sockets": "Socket Status",
-    "playlist": "Playback"
+    "playlist": "Playback",
+    "synclog": "Sync Log"
   },
   "users_list": {
     "title": "User List",
@@ -40,6 +41,25 @@
     "col_started": "Started",
     "col_status": "Status",
     "playing": "Playing"
+  },
+  "synclog": {
+    "title": "Sync Log",
+    "empty": "No sync records yet",
+    "all_users": "All Users",
+    "col_user": "User",
+    "col_provider": "Provider",
+    "col_status": "Status",
+    "col_playlists": "Playlists",
+    "col_tracks": "Tracks Added",
+    "col_trigger": "Trigger",
+    "col_finished": "Finished",
+    "success": "Success",
+    "failed": "Failed",
+    "provider_listenbrainz": "ListenBrainz",
+    "provider_lastfm": "Last.fm",
+    "trigger_interval": "Interval",
+    "trigger_user_identified": "User Identified",
+    "trigger_manual": "Manual"
   },
   "users": {
     "add_user": "+ Add User",
