@@ -150,7 +150,7 @@ func (s *SyncService) syncLastFMPlaylist(ctx context.Context, apiClient *feiniu.
 		matched++
 		if coverId == "" {
 			if t, ok := indexes.GUIDToTrack[guid]; ok && t.CoverId != "" {
-				coverId = t.CoverId
+				coverId, _ = apiClient.ResolvePlaylistCover(ctx, t.CoverId)
 			}
 		}
 	}
