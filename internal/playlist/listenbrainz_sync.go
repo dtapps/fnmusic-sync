@@ -319,10 +319,11 @@ func (s *SyncService) syncPlaylist(
 		trackGUIDs = append(trackGUIDs, guid)
 		matched++
 
-		// 使用第一首歌的封面作为歌单封面
+		// 使用第一首（有封面）匹配曲目的封面作为歌单封面。
+		// 曲目 coverId 不能直接用作歌单封面，需先下载再上传成 playlist 类型封面。
 		if coverId == "" {
 			if t, ok := indexes.GUIDToTrack[guid]; ok && t.CoverId != "" {
-				coverId = t.CoverId
+				coverId, _ = apiClient.ResolvePlaylistCover(ctx, t.CoverId)
 			}
 		}
 	}

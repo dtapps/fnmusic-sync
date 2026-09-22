@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"mime/multipart"
 	"net"
 	"net/http"
 	"time"
@@ -173,6 +174,118 @@ func (c *Client) doPost(ctx context.Context, path string, body, result any) erro
 	}
 
 	return err
+}
+
+// getBytes 发送 GET 请求并返回原始响应体（不按 JSON 解码）。
+// 与 doGet 独立实现：doGet 会把响应当 JSON 解码，二进制资源（图片等）不能用它。
+// 调用方自行决定如何解析返回的字节。
+func (c *Client) getBytes(ctx context.Context, path string) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, virtualHost+path, nil)
+	if err != nil {
+		return nil, err
+	}
+	if c.userToken != "" {
+		req.Header.Set("Cookie", "music-token="+c.userToken)
+	}
+
+	// 请求日志：不记录二进制响应体，仅记请求/响应状态。
+	entry := c.reqLog.Begin(req.Method, path, "", req.Header.Clone(), nil)
+	defer func() {
+		if entry != nil {
+			entry.Finish(0, nil, nil, 0)
+		}
+	}()
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("请求失败 %s: %w", path, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		if entry != nil {
+			entry.Finish(resp.StatusCode, resp.Header.Clone(), b, resp.ContentLength)
+			entry = nil
+		}
+		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(b))
+	}
+
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("读取响应失败 %s: %w", path, err)
+	}
+	if entry != nil {
+		entry.Finish(resp.StatusCode, resp.Header.Clone(), nil, resp.ContentLength)
+		entry = nil
+	}
+	return data, nil
+}
+
+// uploadMultipart 发送 multipart/form-data POST 请求，返回原始响应体。
+// 与 doPost 独立实现：doPost 只发 JSON 编码的请求体。
+//
+// path 为目标接口路径；fieldName 为表单字段名（如 "file"）；fileName 为上传文件名；
+// data 为待上传的字节。响应体解析由调用方按需处理（如从 JSON 中取出业务字段）。
+func (c *Client) uploadMultipart(ctx context.Context, path, fieldName, fileName string, data []byte) ([]byte, error) {
+	if len(data) == 0 {
+		return nil, fmt.Errorf("上传数据为空")
+	}
+
+	bodyBuf := &bytes.Buffer{}
+	w := multipart.NewWriter(bodyBuf)
+	part, err := w.CreateFormFile(fieldName, fileName)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := part.Write(data); err != nil {
+		return nil, err
+	}
+	if err := w.Close(); err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, virtualHost+path, bodyBuf)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", w.FormDataContentType())
+	if c.userToken != "" {
+		req.Header.Set("Cookie", "music-token="+c.userToken)
+	}
+
+	// 不记录二进制响应体，仅记请求/响应状态。
+	entry := c.reqLog.Begin(req.Method, path, "", req.Header.Clone(), nil)
+	defer func() {
+		if entry != nil {
+			entry.Finish(0, nil, nil, 0)
+		}
+	}()
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("上传请求失败 %s: %w", path, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		if entry != nil {
+			entry.Finish(resp.StatusCode, resp.Header.Clone(), b, resp.ContentLength)
+			entry = nil
+		}
+		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(b))
+	}
+
+	respData, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("读取上传响应失败 %s: %w", path, err)
+	}
+	if entry != nil {
+		entry.Finish(resp.StatusCode, resp.Header.Clone(), nil, resp.ContentLength)
+		entry = nil
+	}
+	return respData, nil
 }
 
 // limitedBuffer 是一个最多写入 maxLogBody 字节的 bytes.Buffer。
