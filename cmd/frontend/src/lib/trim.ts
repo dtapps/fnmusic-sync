@@ -99,6 +99,64 @@ export function isHostEnvironment(): boolean {
 }
 
 /**
+ * 打开 fnOS 原生文件夹选择器，返回用户选中的目录内部路径（如 /vol1/1000/音乐）。
+ * 基于 TrimApp.pickFile({ directory: true })，返回 string[]（可多选）。
+ *
+ * 非宿主环境（独立浏览器 / 本地调试）返回 null，调用方应降级为手动输入路径。
+ */
+export async function pickDirectory(): Promise<string[] | null> {
+  const app = getTrimApp();
+  if (!app) return null;
+  try {
+    const params = { directory: true } as unknown as Parameters<TrimApp['pickFile']>[0];
+    const paths = await app.pickFile(params);
+    if (paths && paths.length > 0) return paths;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 单个路径转换结果。
+ */
+export interface ConvertPathItem {
+  path: string;
+  semanticPath: string;
+}
+
+/**
+ * 将内部存储路径（如 /vol1/1000/音乐）转换为语义化展示路径（如 存储空间1/admin 的文件/音乐）。
+ * 基于飞牛 trim.file.convertPath API（scope: trim.file.path）。
+ *
+ * - 非宿主环境或调用失败时返回空对象，调用方应降级为展示原始路径。
+ * - language 必填（如 zh-CN / en-US），按当前界面语言传入以保证展示一致。
+ * - 返回 { 内部路径: 语义路径 } 映射，便于按原路径索引渲染。
+ */
+export async function convertPaths(paths: string[], language?: string): Promise<Record<string, string>> {
+  const app = getTrimApp();
+  const valid = (paths || []).filter((p) => !!p);
+  if (!app || valid.length === 0) return {};
+  const lang = language && language.trim() ? language.trim() : (await getPlatformConfig()).language || 'zh-CN';
+  try {
+    const res = await app.query<{ status: number; result: ConvertPathItem[] }>({
+      req: 'trim.file.convertPath',
+      data: { path: valid, language: lang },
+    });
+    const map: Record<string, string> = {};
+    const result = res?.data?.result;
+    if (Array.isArray(result)) {
+      for (const item of result) {
+        if (item?.path) map[item.path] = item.semanticPath || item.path;
+      }
+    }
+    return map;
+  } catch {
+    return {};
+  }
+}
+
+/**
  * 判断是否为移动端环境（移动端 App 内嵌页面）。
  * 移动端 isWeb === false，不支持 $on 事件监听。
  */

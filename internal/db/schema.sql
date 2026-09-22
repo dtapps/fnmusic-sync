@@ -104,3 +104,8 @@ CREATE TABLE IF NOT EXISTS sync_log (
 CREATE INDEX IF NOT EXISTS idx_sync_log_user_provider ON sync_log (username, provider, finished_at DESC);
 
 CREATE INDEX IF NOT EXISTS idx_sync_log_finished ON sync_log (finished_at DESC);
+
+-- ============================================================
+--（注：曲目 MBID 映射 track_mbid_map 已拆分到独立的 data.db / internal/datadb，
+-- 与下方「运营状态」表分离，详见 internal/datadb/schema.sql）
+-- ============================================================

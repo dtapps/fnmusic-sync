@@ -13,7 +13,7 @@ It takes over Feiniu Music's (trim-music) communication link via a unix socket, 
 - **Dual log output**: Simultaneously writes to the console (stderr) and the log file `/var/log/fnmusic-sync/fnmusic-sync.log`, with automatic rotation, gzip compression and expiry cleanup.
 - **One-click install**: The install script auto-downloads the system package, registers the systemd service, enables boot-time autostart and starts it — no manual steps.
 - **Self-upgrade**: `fnmusic-sync self-upgrade` auto-detects the system package manager (dpkg), downloads the matching package and installs it, then auto-restarts the service after upgrade.
-- **ListenBrainz recommended-playlist sync**: Auto-syncs ListenBrainz's daily_jams, weekly_jams, weekly_exploration, year_discoveries and year_missed recommended playlists to Feiniu Music.
+- **ListenBrainz recommended/stats-playlist sync**: Auto-syncs ListenBrainz's daily_jams, weekly_jams, weekly_exploration, year_discoveries and year_missed recommended playlists, plus the listening-stats-based top_recordings (most played) and loved_tracks (loved recordings) to Feiniu Music.
 - **Last.fm smart-playlist sync**: Auto-generates top_tracks (most played), loved_tracks (red-heart favorites) and recent_tracks (recently played) playlists based on scrobble data.
 
 ## How it works
@@ -32,7 +32,8 @@ A socket is bound to an inode. After renaming with `os.Rename` (mv), the officia
 | ------------------------ | ---------------------------------------- | -------------------------------------------- |
 | Binary                   | `/usr/bin/fnmusic-sync`                  | `/var/apps/fnmusic-sync/target/fnmusic-sync` |
 | Config file              | `/etc/fnmusic-sync/config.yaml`          | `$TRIM_PKGETC/config.yaml`                   |
-| Database (state/users)   | `/var/lib/fnmusic-sync/state.db`         | `$TRIM_PKGVAR/state.db`                      |
+| Database (state)         | `/var/lib/fnmusic-sync/state.db`         | `$TRIM_PKGVAR/state.db`                      |
+| Database (MBID data)     | `/var/lib/fnmusic-sync/data.db`          | `$TRIM_PKGVAR/data.db`                       |
 | Log file                 | `/var/log/fnmusic-sync/fnmusic-sync.log` | `$TRIM_PKGVAR/logs/fnmusic-sync.log`         |
 | Proxy listen socket      | `/var/run/trim_music.socket`             | same as left                                 |
 | Official upstream socket | `/var/run/trim_music_upstream.socket`    | same as left                                 |
@@ -242,6 +243,8 @@ logging:
 | `users.<name>.listenbrainz.playlist.weekly_exploration` | Weekly exploration playlist (discover new music)                                                                                                                                                              |
 | `users.<name>.listenbrainz.playlist.year_discoveries`   | Year of discoveries playlist ({year} auto-replaced)                                                                                                                                                           |
 | `users.<name>.listenbrainz.playlist.year_missed`        | Year of missed playlist ({year} auto-replaced)                                                                                                                                                                |
+| `users.<name>.listenbrainz.playlist.top_recordings`     | Most-played recordings playlist (based on ListenBrainz listening stats); optional `range`: week/month/quarter/half_year/year/all_time/this_year, default all_time                                             |
+| `users.<name>.listenbrainz.playlist.loved_tracks`       | Loved recordings playlist (ListenBrainz loved recordings)                                                                                                                                                     |
 | `logging`                                               | Log level and rotation policy (rotation size, backups kept, expiry days, whether to compress). Log path is fixed to `/var/log/fnmusic-sync/fnmusic-sync.log`, **directory and filename are not configurable** |
 
 ### Last.fm authorization
@@ -253,17 +256,19 @@ logging:
 
 ListenBrainz only needs `token`; when `username` is empty it is auto-fetched and written back.
 
-### ListenBrainz recommended-playlist sync
+### ListenBrainz recommended/stats-playlist sync
 
-Syncs ListenBrainz recommended playlists to Feiniu Music, configured independently per user.
+Syncs ListenBrainz recommended and listening-stats playlists to Feiniu Music, configured independently per user.
 
-| Playlist type        | Description                             | Special requirement                                                               |
-| -------------------- | --------------------------------------- | --------------------------------------------------------------------------------- |
-| `daily_jams`         | Daily recommendation                    | Must follow [`troi-bot`](https://listenbrainz.org/user/troi-bot/) on ListenBrainz |
-| `weekly_jams`        | Weekly recommendation                   | None                                                                              |
-| `weekly_exploration` | Weekly exploration (discover new music) | None                                                                              |
-| `year_discoveries`   | Year of discoveries playlist            | None (auto-generated by ListenBrainz every year)                                  |
-| `year_missed`        | Year of missed playlist                 | None (auto-generated by ListenBrainz every year)                                  |
+| Playlist type        | Description                                      | Special requirement                                                               |
+| -------------------- | ------------------------------------------------ | --------------------------------------------------------------------------------- |
+| `daily_jams`         | Daily recommendation                             | Must follow [`troi-bot`](https://listenbrainz.org/user/troi-bot/) on ListenBrainz |
+| `weekly_jams`        | Weekly recommendation                            | None                                                                              |
+| `weekly_exploration` | Weekly exploration (discover new music)          | None                                                                              |
+| `year_discoveries`   | Year of discoveries playlist                     | None (auto-generated by ListenBrainz every year)                                  |
+| `year_missed`        | Year of missed playlist                          | None (auto-generated by ListenBrainz every year)                                  |
+| `top_recordings`     | Most-played recordings (based on scrobble stats) | Optional `range` (week/month/quarter/half_year/year/all_time/this_year)           |
+| `loved_tracks`       | Loved recordings (ListenBrainz loved recordings) | None                                                                              |
 
 **Enabling conditions:**
 
@@ -372,6 +377,19 @@ configs/              config examples
 scripts/              install.sh (install/upgrade/uninstall) + postinstall.sh + preremove.sh
 fpkg/                 fnOS app package (fpk) source
 ```
+
+## Planned (playlist sources under consideration)
+
+The following are still being evaluated and not yet implemented:
+
+- **B class: return albums/artists, requiring an extra "expand to tracks" step (high implementation cost, low marginal value)**
+  - ListenBrainz `top_releases` (top albums) → expand to the album's tracks
+  - ListenBrainz `top_artists` (top artists) → take each artist's representative tracks
+  - Last.fm `top_albums` / `top_artists` (top albums/artists) → expand to tracks
+- **A class: high implementation cost or limited value, deferred for now**
+  - ListenBrainz `recommendations` (similar-user recommendations) — returns only recording MBIDs, needs extra title resolution, depends on an MBID-backed library
+  - Last.fm `friends` recent tracks — requires per-friend fetching (N+1 calls)
+  - Last.fm `neighbours` hot tracks — requires per-neighbour fetching (N+1 calls)
 
 ## License
 

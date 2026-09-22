@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"path"
+	"strconv"
 	"strings"
 	"time"
 
@@ -25,6 +26,53 @@ const playlistsCreatedForEndpoint = "https://api.listenbrainz.org/1/user/%s/play
 // playlistDetailEndpoint 单个歌单详情。
 // 列表接口（createdfor）返回的歌单 track 恒为空数组，必须再按 MBID 拉详情才有曲目。
 const playlistDetailEndpoint = "https://api.listenbrainz.org/1/playlist/%s"
+
+// 用户统计类歌单接口（基于收听数据，非 troi-bot 推荐）。
+const (
+	// userTopRecordingsEndpoint 用户最常听录音（按收听次数排序）。
+	// 支持 range 维度：week/month/quarter/half_year/year/all_time/this_year。
+	userTopRecordingsEndpoint = "https://api.listenbrainz.org/1/user/%s/recordings"
+	// userLovedRecordingsEndpoint 用户"喜欢"的录音（ListenBrainz loved recordings）。
+	userLovedRecordingsEndpoint = "https://api.listenbrainz.org/1/user/%s/loved-recordings"
+	// userListensEndpoint 用户最近收听记录（listens），用于"最近在听"歌单。
+	userListensEndpoint = "https://api.listenbrainz.org/1/user/%s/listens"
+)
+
+// lbStatsTrackMetadata 是 LB 统计接口（top recordings / loved recordings）
+// 曲目元数据的统一结构，与 JSPF 不同，元信息包在 track_metadata 下。
+type lbStatsTrackMetadata struct {
+	ArtistName         string `json:"artist_name"`
+	TrackName          string `json:"track_name"`
+	ReleaseName        string `json:"release_name"`
+	AdditionalMetadata struct {
+		RecordingMBID string   `json:"recording_mbid"`
+		ArtistMBIDs   []string `json:"artist_mbids"`
+		ReleaseMBID   string   `json:"release_mbid"`
+	} `json:"additional_metadata"`
+}
+
+// lbStatsRecording 是 LB 统计接口返回的单个录音条目。
+// top recordings 与 loved recordings 共用该结构（各自仅填部分字段）。
+type lbStatsRecording struct {
+	RecordingMBID string               `json:"recording_mbid"`
+	TrackMetadata lbStatsTrackMetadata `json:"track_metadata"`
+	ListenCount   int                  `json:"listen_count"`
+	CreatedAt     string               `json:"created_at"`
+}
+
+// toPlaylistTrack 把统计条目映射为统一的 PlaylistTrack，便于复用现有匹配逻辑。
+func (r lbStatsRecording) toPlaylistTrack() PlaylistTrack {
+	mbid := r.RecordingMBID
+	if mbid == "" {
+		mbid = r.TrackMetadata.AdditionalMetadata.RecordingMBID
+	}
+	return PlaylistTrack{
+		ArtistName:    r.TrackMetadata.ArtistName,
+		TrackName:     r.TrackMetadata.TrackName,
+		ReleaseName:   r.TrackMetadata.ReleaseName,
+		RecordingMBID: mbid,
+	}
+}
 
 // JSPF 扩展字段的命名空间 key。
 const (
@@ -399,6 +447,125 @@ func (c *PlaylistClient) FetchTroiBotPlaylists(
 	yearMissed = c.withTracks(ctx, latest[kindYearMissed])
 
 	return dailyJams, weeklyJams, weeklyExploration, yearDiscoveries, yearMissed, nil
+}
+
+// FetchTopRecordings 获取用户最常听的录音（基于 ListenBrainz 收听统计）。
+// range 维度可选：week/month/quarter/half_year/year/all_time/this_year，默认 all_time。
+// count 为返回数量上限（<=0 表示不限制，由 LB 决定）。
+// 返回 *Playlist（TrackList 已按收听次数降序），无数据或接口失败时返回 (nil, err)。
+func (c *PlaylistClient) FetchTopRecordings(ctx context.Context, count int, rng string) (*Playlist, error) {
+	if rng == "" {
+		rng = "all_time"
+	}
+
+	endpoint := fmt.Sprintf(userTopRecordingsEndpoint, url.PathEscape(c.Username))
+	q := url.Values{}
+	q.Set("range", rng)
+	if count > 0 {
+		q.Set("count", strconv.Itoa(count))
+	}
+	endpoint += "?" + q.Encode()
+
+	var result struct {
+		Recordings []lbStatsRecording `json:"recordings"`
+	}
+	if err := c.getJSON(ctx, endpoint, &result); err != nil {
+		return nil, err
+	}
+
+	return statsToPlaylist(result.Recordings, "Top Recordings ("+rng+")"), nil
+}
+
+// FetchLovedRecordings 获取用户"喜欢"的录音（ListenBrainz loved recordings）。
+// count 为返回数量上限（<=0 表示不限制，由 LB 决定）。
+// 返回 *Playlist，无数据或接口失败时返回 (nil, err)。
+func (c *PlaylistClient) FetchLovedRecordings(ctx context.Context, count int) (*Playlist, error) {
+	endpoint := fmt.Sprintf(userLovedRecordingsEndpoint, url.PathEscape(c.Username))
+	q := url.Values{}
+	if count > 0 {
+		q.Set("count", strconv.Itoa(count))
+	}
+	endpoint += "?" + q.Encode()
+
+	var result struct {
+		Recordings []lbStatsRecording `json:"recordings"`
+	}
+	if err := c.getJSON(ctx, endpoint, &result); err != nil {
+		return nil, err
+	}
+
+	return statsToPlaylist(result.Recordings, "Loved Recordings"), nil
+}
+
+// lbListen 是 ListenBrainz listens 端点返回的单个收听记录。
+type lbListen struct {
+	ListenedAt    int64 `json:"listened_at"`
+	TrackMetadata struct {
+		ArtistName     string `json:"artist_name"`
+		TrackName      string `json:"track_name"`
+		ReleaseName    string `json:"release_name"`
+		AdditionalInfo struct {
+			RecordingMBID string   `json:"recording_mbid"`
+			ArtistMBIDs   []string `json:"artist_mbids"`
+			ReleaseMBID   string   `json:"release_mbid"`
+		} `json:"additional_info"`
+	} `json:"track_metadata"`
+}
+
+// FetchRecentlyPlayed 获取用户最近收听的录音（基于 ListenBrainz listens 记录）.
+// count 为返回数量上限（<=0 表示不限制，由 LB 决定，默认近若干条）。
+// 返回 *Playlist（TrackList 按收听时间倒序），无数据或接口失败时返回 (nil, err)。
+func (c *PlaylistClient) FetchRecentlyPlayed(ctx context.Context, count int) (*Playlist, error) {
+	endpoint := fmt.Sprintf(userListensEndpoint, url.PathEscape(c.Username))
+	q := url.Values{}
+	if count > 0 {
+		q.Set("count", strconv.Itoa(count))
+	}
+	endpoint += "?" + q.Encode()
+
+	var result struct {
+		Payload struct {
+			Listens []lbListen `json:"listens"`
+		} `json:"payload"`
+	}
+	if err := c.getJSON(ctx, endpoint, &result); err != nil {
+		return nil, err
+	}
+
+	recs := make([]lbStatsRecording, 0, len(result.Payload.Listens))
+	for i := range result.Payload.Listens {
+		l := &result.Payload.Listens[i]
+		tm := lbStatsTrackMetadata{
+			ArtistName:  l.TrackMetadata.ArtistName,
+			TrackName:   l.TrackMetadata.TrackName,
+			ReleaseName: l.TrackMetadata.ReleaseName,
+		}
+		tm.AdditionalMetadata.RecordingMBID = l.TrackMetadata.AdditionalInfo.RecordingMBID
+		tm.AdditionalMetadata.ArtistMBIDs = l.TrackMetadata.AdditionalInfo.ArtistMBIDs
+		tm.AdditionalMetadata.ReleaseMBID = l.TrackMetadata.AdditionalInfo.ReleaseMBID
+		recs = append(recs, lbStatsRecording{
+			RecordingMBID: l.TrackMetadata.AdditionalInfo.RecordingMBID,
+			TrackMetadata: tm,
+		})
+	}
+
+	return statsToPlaylist(recs, "Recently Played"), nil
+}
+
+// statsToPlaylist 把统计接口返回的录音列表组装成 *Playlist。
+// 空列表返回 nil（调用方按"歌单不存在"处理）。
+func statsToPlaylist(recs []lbStatsRecording, title string) *Playlist {
+	if len(recs) == 0 {
+		return nil
+	}
+
+	pl := &Playlist{Title: title}
+	pl.TrackList = make([]PlaylistTrack, 0, len(recs))
+	for i := range recs {
+		pl.TrackList = append(pl.TrackList, recs[i].toPlaylistTrack())
+	}
+
+	return pl
 }
 
 // withTracks 为歌单补齐曲目：列表里的歌单 track 为空，需要拉详情。

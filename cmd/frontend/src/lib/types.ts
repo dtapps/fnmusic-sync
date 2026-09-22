@@ -20,6 +20,8 @@ export interface LastFmPlaylist {
   top_tracks: LastFmTopTracks;
   loved_tracks: LastFmLovedTracks;
   recent_tracks: LastFmRecentTracks;
+  weekly_charts: LastFmWeeklyCharts;
+  library: LastFmLibrary;
 }
 
 export interface LastFmTopTracks {
@@ -41,6 +43,18 @@ export interface LastFmRecentTracks {
   limit?: number;
 }
 
+export interface LastFmWeeklyCharts {
+  enabled?: boolean;
+  name?: string;
+  limit?: number;
+}
+
+export interface LastFmLibrary {
+  enabled?: boolean;
+  name?: string;
+  limit?: number;
+}
+
 export interface LastFmConfig {
   enabled?: boolean;
   api_key?: string;
@@ -57,12 +71,18 @@ export interface ListenBrainzPlaylist {
   weekly_exploration: LBPlaylistItem;
   year_discoveries: LBPlaylistItem;
   year_missed: LBPlaylistItem;
+  top_recordings: LBPlaylistItem;
+  loved_tracks: LBPlaylistItem;
+  recently_played: LBPlaylistItem;
 }
 
 export interface LBPlaylistItem {
   enabled?: boolean;
   name?: string;
   limit?: number;
+  // range 统计维度，仅 top_recordings 适用：
+  // week | month | quarter | half_year | year | all_time | this_year
+  range?: string;
 }
 
 export interface ListenBrainzConfig {
@@ -97,12 +117,20 @@ export interface LoggingConfig {
   compress?: boolean;
 }
 
+// ===== 本地音乐目录（解析音频标签获取 MBID）=====
+export interface LibraryConfig {
+  directories?: string[]; // 音乐文件所在目录（绝对路径，递归扫描）
+  scan_interval?: string; // MBID 本地扫描去抖间隔，如 6h、12h
+  mbid_online_lookup?: boolean; // 本地无 MBID 时在线查 MusicBrainz 补全录音 MBID
+}
+
 // ===== 完整配置 =====
 export interface AppConfig {
   users?: Record<string, UserAccount>;
   playback?: PlaybackConfig;
   playlist?: PlaylistConfig;
   logging?: LoggingConfig;
+  library?: LibraryConfig;
 }
 
 // ===== 运行状态 =====
@@ -230,6 +258,8 @@ export function createEmptyUser(): UserAccount {
         },
         loved_tracks: { enabled: false, name: 'LF 红心收藏', limit: 50 },
         recent_tracks: { enabled: false, name: 'LF 最近播放', limit: 50 },
+        weekly_charts: { enabled: false, name: 'LF 本周榜单', limit: 50 },
+        library: { enabled: false, name: 'LF 我的曲库', limit: 50 },
       },
     },
     listenbrainz: {
@@ -246,6 +276,9 @@ export function createEmptyUser(): UserAccount {
           limit: 50,
         },
         year_missed: { enabled: false, name: 'LB {year} 年度遗珠', limit: 50 },
+        top_recordings: { enabled: false, name: 'LB 最常听', limit: 50, range: 'all_time' },
+        loved_tracks: { enabled: false, name: 'LB 喜欢的音乐', limit: 50 },
+        recently_played: { enabled: false, name: 'LB 最近在听', limit: 50 },
       },
     },
   };
