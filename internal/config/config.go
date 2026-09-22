@@ -18,6 +18,27 @@ type Config struct {
 	Playback PlaybackConfig         `mapstructure:"playback" json:"playback"`
 	Playlist PlaylistConfig         `mapstructure:"playlist" json:"playlist"`
 	Logging  LoggingConfig          `mapstructure:"logging" json:"logging"`
+	// Library 本地音乐文件目录配置：解析音频标签获取 MBID，建立「MBID ↔ 飞牛 GUID」映射。
+	Library LibraryConfig `mapstructure:"library" json:"library"`
+}
+
+// LibraryConfig 本地音乐文件目录配置。
+// 用于扫描音频文件标签（ID3/FLAC/M4A 中的 MusicBrainz 标签）获取 MBID，
+// 关联到飞牛曲目的 GUID，从而让 scrobble / 歌单匹配优先走精确的录音 MBID。
+// 目录必须是 fnmusic-sync 能直接读到的路径（NAS 本机路径，或已挂载的 SMB/NFS 共享）。
+type LibraryConfig struct {
+	// Directories 音乐文件所在目录列表（数组形式，支持多个目录，递归扫描）。
+	// 留空表示不解析文件标签，MBID 匹配退化为「艺人名+曲名」。
+	Directories []string `mapstructure:"directories" json:"directories"`
+	// ScanInterval 本地音乐标签扫描（MBID 解析）的去抖间隔，如 "6h"、"12h"。
+	// 为避免每次用户识别/定时同步都全量遍历音乐目录（大规模曲库代价高），
+	// 两次扫描至少间隔该时长。空或非法值回退到 6h。
+	ScanInterval string `mapstructure:"scan_interval" json:"scan_interval"`
+	// MBIDOnlineLookup 是否在本地文件标签缺 MBID 时，在线查询 MusicBrainz 补全录音 MBID。
+	// 开启后扫描会按「艺人名+曲名」请求 MusicBrainz WS/2（遵守其 1 请求/秒限速），
+	// 把查到的 recording MBID 落库（matched_by=musicbrainz），无需手动用 Picard 打标。
+	// 默认关闭：避免无谓外网依赖；仅在希望启用 MBID 精确匹配层时打开。
+	MBIDOnlineLookup bool `mapstructure:"mbid_online_lookup" json:"mbid_online_lookup"`
 }
 
 type ServerConfig struct {
@@ -75,6 +96,10 @@ type UserPlaylistConfig struct {
 	YearDiscoveries PlaylistSourceConfig `mapstructure:"year_discoveries" json:"year_discoveries"`
 	// YearMissed 年度遗珠歌单（top-missed-recordings-of-{year}），ListenBrainz 每年自动生成。
 	YearMissed PlaylistSourceConfig `mapstructure:"year_missed" json:"year_missed"`
+	// TopRecordings 最常听录音歌单（基于 LB 收听统计），可按时间维度统计（见 PlaylistSourceConfig.Range）。
+	TopRecordings PlaylistSourceConfig `mapstructure:"top_recordings" json:"top_recordings"`
+	// RecentlyPlayed 最近在听歌单（基于 ListenBrainz listens 收听记录）。
+	RecentlyPlayed PlaylistSourceConfig `mapstructure:"recently_played" json:"recently_played"`
 }
 
 // UserLastFMPlaylistConfig Last.fm 智能歌单同步配置。
@@ -87,6 +112,10 @@ type UserLastFMPlaylistConfig struct {
 	LovedTracks LastFMPlaylistSourceConfig `mapstructure:"loved_tracks" json:"loved_tracks"`
 	// RecentTracks 最近播放曲目歌单
 	RecentTracks LastFMPlaylistSourceConfig `mapstructure:"recent_tracks" json:"recent_tracks"`
+	// WeeklyCharts 本周曲目榜单（Last.fm weeklytrackchart）
+	WeeklyCharts LastFMPlaylistSourceConfig `mapstructure:"weekly_charts" json:"weekly_charts"`
+	// Library 用户曲库曲目歌单（Last.fm library.getTracks，基于 scrobble 历史）
+	Library LastFMPlaylistSourceConfig `mapstructure:"library" json:"library"`
 }
 
 // LastFMPlaylistSourceConfig Last.fm 单个智能歌单源的同步配置。
@@ -106,6 +135,9 @@ type PlaylistSourceConfig struct {
 	Name    string `mapstructure:"name" json:"name"`
 	// Limit 最多同步的曲目数量，0 表示不限制（使用歌单全量）。
 	Limit int `mapstructure:"limit" json:"limit"`
+	// Range 统计维度，仅 top_recordings 适用。
+	// 可选值：week / month / quarter / half_year / year / all_time / this_year，默认 all_time。
+	Range string `mapstructure:"range" json:"range"`
 }
 
 // LoggingConfig 日志配置。
@@ -388,6 +420,16 @@ func userAccountToMap(u UserAccount) map[string]any {
 				"name":    u.LastFM.Playlist.RecentTracks.Name,
 				"limit":   u.LastFM.Playlist.RecentTracks.Limit,
 			},
+			"weekly_charts": map[string]any{
+				"enabled": u.LastFM.Playlist.WeeklyCharts.Enabled,
+				"name":    u.LastFM.Playlist.WeeklyCharts.Name,
+				"limit":   u.LastFM.Playlist.WeeklyCharts.Limit,
+			},
+			"library": map[string]any{
+				"enabled": u.LastFM.Playlist.Library.Enabled,
+				"name":    u.LastFM.Playlist.Library.Name,
+				"limit":   u.LastFM.Playlist.Library.Limit,
+			},
 		},
 	}
 
@@ -421,6 +463,17 @@ func userAccountToMap(u UserAccount) map[string]any {
 				"enabled": u.ListenBrainz.Playlist.YearMissed.Enabled,
 				"name":    u.ListenBrainz.Playlist.YearMissed.Name,
 				"limit":   u.ListenBrainz.Playlist.YearMissed.Limit,
+			},
+			"top_recordings": map[string]any{
+				"enabled": u.ListenBrainz.Playlist.TopRecordings.Enabled,
+				"name":    u.ListenBrainz.Playlist.TopRecordings.Name,
+				"limit":   u.ListenBrainz.Playlist.TopRecordings.Limit,
+				"range":   u.ListenBrainz.Playlist.TopRecordings.Range,
+			},
+			"recently_played": map[string]any{
+				"enabled": u.ListenBrainz.Playlist.RecentlyPlayed.Enabled,
+				"name":    u.ListenBrainz.Playlist.RecentlyPlayed.Name,
+				"limit":   u.ListenBrainz.Playlist.RecentlyPlayed.Limit,
 			},
 		},
 	}
@@ -464,6 +517,32 @@ func SaveSettings(path string, playback PlaybackConfig, playlist PlaylistConfig,
 	return v.WriteConfig()
 }
 
+// SaveLibrary 保存本地音乐目录配置（library.directories / library.scan_interval / library.mbid_online_lookup）并持久化。
+// 利用 viper 的 v.Set 更新，不影响 users / playback / playlist / logging 等其他配置项。
+// dirs 应为已校验、去重、规范化的绝对路径列表；scanInterval 为 MBID 扫描去抖间隔（如 "6h"），
+// 空字符串表示不修改该字段（保留原值）；mbidOnlineLookup 为在线补全 MBID 开关（始终写入）。
+func SaveLibrary(path string, dirs []string, scanInterval string, mbidOnlineLookup bool) error {
+	if path == "" {
+		return fmt.Errorf("配置文件路径为空，无法写入")
+	}
+
+	v := viper.New()
+	v.SetConfigFile(path)
+	v.SetConfigType("yaml")
+
+	if err := v.ReadInConfig(); err != nil {
+		return fmt.Errorf("读取配置文件 %s 失败: %w", path, err)
+	}
+
+	v.Set("library.directories", dirs)
+	if scanInterval != "" {
+		v.Set("library.scan_interval", scanInterval)
+	}
+	v.Set("library.mbid_online_lookup", mbidOnlineLookup)
+
+	return v.WriteConfig()
+}
+
 // SetListenBrainzUsername 把指定用户的 ListenBrainz 用户名写回配置文件并持久化。
 // 在启动时对"已启用但缺 username"的用户自动调用 /1/validate-token 获取用户名后写入。
 func SetListenBrainzUsername(path, feiniuUsername, lbUsername string) error {
@@ -495,6 +574,8 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("logging.max_backups", 5)
 	v.SetDefault("logging.max_age", 7)
 	v.SetDefault("logging.compress", true)
+	v.SetDefault("library.scan_interval", "6h")
+	v.SetDefault("library.mbid_online_lookup", false)
 }
 
 // DefaultLogging 返回日志默认值（配置文件缺失或读取失败时的兜底），

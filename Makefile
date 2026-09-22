@@ -108,12 +108,14 @@ update-deps:
 	@echo "[Deps] 完成。"
 
 # 生成 sqlc 持久化代码（需要 sqlc：go install github.com/sqlc-dev/sqlc/cmd/sqlc@latest）
-# 在 internal/db 目录执行，读取 sqlc.yaml 生成 db.go / models.go / querier.go / queries.sql.go。
+# internal/db 生成运营状态表（state.db），internal/datadb 生成数据表（data.db，MBID 映射）。
 # 注意：queries.sql 不能有注释（sqlc v1.31 多查询文件有解析 bug），表结构注释放在 schema.sql。
 .PHONY: sqlc
 sqlc:
-	@echo "[SQLC] 生成 internal/db 持久化代码..."
+	@echo "[SQLC] 生成 internal/db 持久化代码 (state.db)..."
 	cd $(CURDIR)/internal/db && sqlc generate
+	@echo "[SQLC] 生成 internal/datadb 持久化代码 (data.db)..."
+	cd $(CURDIR)/internal/datadb && sqlc generate
 	@echo "[SQLC] 完成。"
 
 # 启动本地开发后端（模拟飞牛网关 + API，监听 :8080）

@@ -37,6 +37,7 @@ import (
 	"cnb.cool/dtapp/fnmusic-sync/internal/config"
 	"cnb.cool/dtapp/fnmusic-sync/internal/db"
 	"cnb.cool/dtapp/fnmusic-sync/internal/lastfm"
+	"cnb.cool/dtapp/fnmusic-sync/internal/mbid"
 	"cnb.cool/dtapp/fnmusic-sync/internal/proxy"
 	"cnb.cool/dtapp/fnmusic-sync/internal/safego"
 	"cnb.cool/dtapp/fnmusic-sync/internal/strutil"
@@ -53,6 +54,15 @@ type ActiveUserProvider interface {
 	ActiveUsers() map[string]string
 }
 
+// LibraryScanResult 本地音乐 MBID 扫描的统计结果（Web UI 返回结构，见 mbid.ScanStats）。
+type LibraryScanResult = mbid.ScanStats
+
+// MBIDScanner 触发一次本地音乐 MBID 扫描的接口，由 playlist.SyncService 实现。
+// 通过接口解耦，避免 webui 直接依赖 playlist 包（webui 仅依赖 mbid 的数据结构）。
+type MBIDScanner interface {
+	ScanMBID(ctx context.Context) (mbid.ScanStats, error)
+}
+
 // Server 提供 Web 配置界面 HTTP 服务。
 type Server struct {
 	configPath   string
@@ -64,18 +74,21 @@ type Server struct {
 	latestCfg    *config.Config
 	userProvider ActiveUserProvider
 	db           *db.Store
+	mbidScanner  MBIDScanner
 }
 
 // NewServer 创建 Web UI 服务。
 // configPath/logDir 由 runtime 模式决定（fpk 模式下使用 TRIM_* 变量）。
 // dbStore 为持久化层（用户列表 / 运行状态），可为 nil（仅影响 /api/state、/api/users）。
-func NewServer(configPath, logDir string, logger *slog.Logger, userProvider ActiveUserProvider, dbStore *db.Store) *Server {
+// mbidScanner 用于触发本地音乐 MBID 扫描，可为 nil（传统模式下无歌单同步服务）。
+func NewServer(configPath, logDir string, logger *slog.Logger, userProvider ActiveUserProvider, dbStore *db.Store, mbidScanner MBIDScanner) *Server {
 	return &Server{
 		configPath:   configPath,
 		logDir:       logDir,
 		logger:       logger,
 		userProvider: userProvider,
 		db:           dbStore,
+		mbidScanner:  mbidScanner,
 	}
 }
 
@@ -175,6 +188,9 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	// 管理员级 API
 	mux.HandleFunc(gatewayPrefix+"/api/logs", s.requireAdmin(s.handleLogs))
 	mux.HandleFunc(gatewayPrefix+"/api/settings", s.requireAdmin(s.handleSettings))
+	mux.HandleFunc(gatewayPrefix+"/api/library", s.requireAdmin(s.handleLibrary))
+	// POST /api/library/scan → 触发一次本地音乐标签扫描，把 MBID 关联到飞牛曲目（需管理员）。
+	mux.HandleFunc(gatewayPrefix+"/api/library/scan", s.requireAdmin(s.handleLibraryScan))
 	mux.HandleFunc(gatewayPrefix+"/api/users", s.requireAdmin(s.handleActiveUsers))
 	mux.HandleFunc(gatewayPrefix+"/api/upgrade/check", s.requireAdmin(s.handleUpgradeCheck))
 	mux.HandleFunc(gatewayPrefix+"/api/upgrade", s.requireAdmin(s.handleUpgrade))
@@ -732,6 +748,135 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 
 	s.logger.Info("全局设置已通过 Web UI 保存")
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// handleLibrary 处理本地音乐目录（library.directories）的读取与保存 API。
+//
+//	GET  /api/library → 返回当前目录列表 { directories: [...] }
+//	PUT  /api/library → body: { directories: [...] }，校验后写入配置
+//
+// 权限：仅管理员可访问。目录用于解析音频标签获取 MBID，必须为本应用可读取的
+// 真实绝对路径（如 fnOS 上的 /vol1/1000/音乐），不允许相对路径或路径穿越。
+func (s *Server) handleLibrary(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+
+	switch r.Method {
+	case http.MethodGet:
+		s.mu.RLock()
+		cfg := s.latestCfg
+		s.mu.RUnlock()
+		if cfg == nil {
+			cfgLoaded, err := config.Load(s.configPath)
+			if err != nil {
+				writeJSONError(w, http.StatusInternalServerError, "读取配置失败: "+err.Error())
+				return
+			}
+			cfg = cfgLoaded
+			s.mu.Lock()
+			s.latestCfg = cfg
+			s.mu.Unlock()
+		}
+
+		dirs := []string{}
+		scanInterval := ""
+		mbidOnlineLookup := false
+		if cfg != nil {
+			dirs = cfg.Library.Directories
+			scanInterval = cfg.Library.ScanInterval
+			mbidOnlineLookup = cfg.Library.MBIDOnlineLookup
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"directories":        dirs,
+			"scan_interval":      scanInterval,
+			"mbid_online_lookup": mbidOnlineLookup,
+		})
+
+	case http.MethodPut, http.MethodPost:
+		var req struct {
+			Directories      []string `json:"directories"`
+			ScanInterval     string   `json:"scan_interval"`
+			MBIDOnlineLookup bool     `json:"mbid_online_lookup"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeJSONError(w, http.StatusBadRequest, "解析请求体失败: "+err.Error())
+			return
+		}
+
+		cleaned := cleanDirectories(req.Directories)
+		if err := config.SaveLibrary(s.configPath, cleaned, req.ScanInterval, req.MBIDOnlineLookup); err != nil {
+			writeJSONError(w, http.StatusInternalServerError, "保存音乐目录失败: "+err.Error())
+			return
+		}
+
+		// 刷新内存缓存
+		if cfg, err := config.Load(s.configPath); err == nil {
+			s.mu.Lock()
+			s.latestCfg = cfg
+			s.mu.Unlock()
+		}
+
+		s.logger.Info("音乐目录配置已通过 Web UI 保存", "目录数", len(cleaned), "扫描间隔", req.ScanInterval, "在线补全MBID", req.MBIDOnlineLookup)
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "directories": cleaned, "scan_interval": req.ScanInterval, "mbid_online_lookup": req.MBIDOnlineLookup})
+
+	default:
+		w.Header().Set("Allow", "GET, PUT")
+		writeJSONError(w, http.StatusMethodNotAllowed, "不支持的请求方法")
+	}
+}
+
+// handleLibraryScan 触发一次本地音乐标签扫描，把 MBID 关联到飞牛曲目。
+// 扫描可能耗时（遍历整个音乐目录），这里同步等待并返回统计；
+// 前端应给出"扫描中"反馈（实际大规模场景建议改为异步 + 轮询，但当前实现已足够）。
+//
+//	POST /api/library/scan → { scanned, matched, updated, skipped, errors, elapsed_ms, message }
+func (s *Server) handleLibraryScan(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", "POST")
+		writeJSONError(w, http.StatusMethodNotAllowed, "仅支持 POST")
+		return
+	}
+	if s.mbidScanner == nil {
+		writeJSONError(w, http.StatusServiceUnavailable, "MBID 扫描服务不可用（未启用歌单同步）")
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Minute)
+	defer cancel()
+
+	stats, err := s.mbidScanner.ScanMBID(ctx)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "MBID 扫描失败: "+err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, stats)
+}
+
+// cleanDirectories 校验并规范化目录列表：
+//   - 过滤空值与重复项
+//   - 仅保留绝对路径（拒绝相对路径，避免歧义）
+//   - 用 filepath.Clean 规范化（自动消解 ../ 等路径穿越）
+func cleanDirectories(dirs []string) []string {
+	seen := make(map[string]struct{}, len(dirs))
+	out := make([]string, 0, len(dirs))
+	for _, d := range dirs {
+		d = strings.TrimSpace(d)
+		if d == "" {
+			continue
+		}
+		if !filepath.IsAbs(d) {
+			// 仅接受绝对路径
+			continue
+		}
+		clean := filepath.Clean(d)
+		if _, ok := seen[clean]; ok {
+			continue
+		}
+		seen[clean] = struct{}{}
+		out = append(out, clean)
+	}
+	return out
 }
 
 // handleUser 处理单个用户的增删改 API。
