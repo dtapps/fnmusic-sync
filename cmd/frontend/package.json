@@ -28,7 +28,7 @@
     "prettier": "^3.9.8",
     "prettier-plugin-sql": "^0.20.0",
     "prettier-plugin-svelte": "^4.1.1",
-    "svelte": "^5.57.0",
+    "svelte": "^5.57.1",
     "svelte-i18n": "^4.0.1",
     "tailwind-merge": "^3.7.0",
     "tailwind-variants": "^3.3.1",
