@@ -19,7 +19,7 @@
     "@tailwindcss/postcss": "^4.3.3",
     "@trimjs/web-app": "^0.4.2",
     "@tsconfig/svelte": "^5.0.8",
-    "@types/node": "^26.6.1",
+    "@types/node": "^26.6.2",
     "autoprefixer": "^10.6.1",
     "clsx": "^2.1.1",
     "lucide-svelte": "^1.0.1",
