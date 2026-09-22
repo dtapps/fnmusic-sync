@@ -550,6 +550,81 @@ func (s *Store) ListRecentSyncLogs(ctx context.Context, limit int64) ([]SyncLog,
 	return s.q.ListRecentSyncLogs(ctx, limit)
 }
 
+// TrackMBID 描述一条「飞牛曲目 GUID ↔ MBID」映射的写入意图。
+// 对应 schema 的 track_mbid_map 表，查询返回直接用 sqlc 生成的 TrackMbidMap 结构。
+type TrackMBID struct {
+	FeiniuGUID       string
+	FilePath         string
+	Title            string
+	Artist           string
+	Album            string
+	RecordingMBID    string // 录音 MBID（匹配优先级最高）
+	ReleaseMBID      string // 专辑发行 MBID
+	ReleaseGroupMBID string // 专辑组 MBID
+	ArtistMBID       string // 艺人 MBID
+	WorkMBID         string // 作品 MBID
+	MatchedBy        string // tag | musicbrainz | manual
+}
+
+// SaveTrackMBID 写入/更新一条曲目 MBID 映射（按 feiniu_guid 幂等）。
+// feiniu_guid 为空时直接跳过（映射必须关联到具体飞牛曲目）。
+func (s *Store) SaveTrackMBID(m TrackMBID) error {
+	if s == nil || s.q == nil || m.FeiniuGUID == "" {
+		return nil
+	}
+	if m.MatchedBy == "" {
+		m.MatchedBy = "tag"
+	}
+	now := time.Now().Format(time.RFC3339)
+	_, err := s.q.UpsertTrackMBID(context.Background(), UpsertTrackMBIDParams{
+		FeiniuGuid:       m.FeiniuGUID,
+		FilePath:         nullStr(m.FilePath),
+		Title:            nullStr(m.Title),
+		Artist:           nullStr(m.Artist),
+		Album:            nullStr(m.Album),
+		RecordingMbid:    nullStr(m.RecordingMBID),
+		ReleaseMbid:      nullStr(m.ReleaseMBID),
+		ReleaseGroupMbid: nullStr(m.ReleaseGroupMBID),
+		ArtistMbid:       nullStr(m.ArtistMBID),
+		WorkMbid:         nullStr(m.WorkMBID),
+		MatchedBy:        m.MatchedBy,
+		UpdatedAt:        now,
+	})
+	return err
+}
+
+// GetTrackMBID 按飞牛 GUID 查询映射。
+func (s *Store) GetTrackMBID(ctx context.Context, guid string) (TrackMbidMap, error) {
+	if s == nil || s.q == nil {
+		return TrackMbidMap{}, nil
+	}
+	return s.q.GetTrackMBID(ctx, guid)
+}
+
+// GetTrackMBIDByPath 按来源文件路径查询映射（反查 / 调试用）。
+func (s *Store) GetTrackMBIDByPath(ctx context.Context, path string) (TrackMbidMap, error) {
+	if s == nil || s.q == nil {
+		return TrackMbidMap{}, nil
+	}
+	return s.q.GetTrackMBIDByPath(ctx, nullStr(path))
+}
+
+// ListTrackMBIDs 返回全部映射（按更新时间降序），供 BuildTrackIndexes 加载进 MBIDToGUID。
+func (s *Store) ListTrackMBIDs(ctx context.Context) ([]TrackMbidMap, error) {
+	if s == nil || s.q == nil {
+		return nil, nil
+	}
+	return s.q.ListTrackMBIDs(ctx)
+}
+
+// DeleteTrackMBID 删除某飞牛曲目的 MBID 映射。
+func (s *Store) DeleteTrackMBID(ctx context.Context, guid string) error {
+	if s == nil || s.q == nil {
+		return nil
+	}
+	return s.q.DeleteTrackMBID(ctx, guid)
+}
+
 // nullStr 把 Go 字符串转成可空的 sql.NullString（空串视为 NULL）。
 func nullStr(s string) sql.NullString {
 	if s == "" {

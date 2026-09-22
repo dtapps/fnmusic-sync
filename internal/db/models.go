@@ -46,6 +46,21 @@ type SyncLog struct {
 	FinishedAt string         `json:"finished_at"`
 }
 
+type TrackMbidMap struct {
+	FeiniuGuid       string         `json:"feiniu_guid"`
+	FilePath         sql.NullString `json:"file_path"`
+	Title            sql.NullString `json:"title"`
+	Artist           sql.NullString `json:"artist"`
+	Album            sql.NullString `json:"album"`
+	RecordingMbid    sql.NullString `json:"recording_mbid"`
+	ReleaseMbid      sql.NullString `json:"release_mbid"`
+	ReleaseGroupMbid sql.NullString `json:"release_group_mbid"`
+	ArtistMbid       sql.NullString `json:"artist_mbid"`
+	WorkMbid         sql.NullString `json:"work_mbid"`
+	MatchedBy        string         `json:"matched_by"`
+	UpdatedAt        string         `json:"updated_at"`
+}
+
 type User struct {
 	ID               int64          `json:"id"`
 	Username         string         `json:"username"`

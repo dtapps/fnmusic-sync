@@ -53,6 +53,17 @@ func (q *Queries) CloseOpenPlaybacks(ctx context.Context, endedAt sql.NullString
 	return err
 }
 
+const deleteTrackMBID = `-- name: DeleteTrackMBID :exec
+DELETE FROM track_mbid_map
+WHERE
+  feiniu_guid = ?1
+`
+
+func (q *Queries) DeleteTrackMBID(ctx context.Context, feiniuGuid string) error {
+	_, err := q.db.ExecContext(ctx, deleteTrackMBID, feiniuGuid)
+	return err
+}
+
 const getLastSuccessTime = `-- name: GetLastSuccessTime :one
 SELECT
   finished_at
@@ -130,6 +141,64 @@ func (q *Queries) GetRunStatusTotal(ctx context.Context) (GetRunStatusTotalRow, 
 		&i.Lastfm,
 		&i.Listenbrainz,
 		&i.UserCount,
+	)
+	return i, err
+}
+
+const getTrackMBID = `-- name: GetTrackMBID :one
+SELECT
+  feiniu_guid, file_path, title, artist, album, recording_mbid, release_mbid, release_group_mbid, artist_mbid, work_mbid, matched_by, updated_at
+FROM
+  track_mbid_map
+WHERE
+  feiniu_guid = ?1
+`
+
+func (q *Queries) GetTrackMBID(ctx context.Context, feiniuGuid string) (TrackMbidMap, error) {
+	row := q.db.QueryRowContext(ctx, getTrackMBID, feiniuGuid)
+	var i TrackMbidMap
+	err := row.Scan(
+		&i.FeiniuGuid,
+		&i.FilePath,
+		&i.Title,
+		&i.Artist,
+		&i.Album,
+		&i.RecordingMbid,
+		&i.ReleaseMbid,
+		&i.ReleaseGroupMbid,
+		&i.ArtistMbid,
+		&i.WorkMbid,
+		&i.MatchedBy,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getTrackMBIDByPath = `-- name: GetTrackMBIDByPath :one
+SELECT
+  feiniu_guid, file_path, title, artist, album, recording_mbid, release_mbid, release_group_mbid, artist_mbid, work_mbid, matched_by, updated_at
+FROM
+  track_mbid_map
+WHERE
+  file_path = ?1
+`
+
+func (q *Queries) GetTrackMBIDByPath(ctx context.Context, filePath sql.NullString) (TrackMbidMap, error) {
+	row := q.db.QueryRowContext(ctx, getTrackMBIDByPath, filePath)
+	var i TrackMbidMap
+	err := row.Scan(
+		&i.FeiniuGuid,
+		&i.FilePath,
+		&i.Title,
+		&i.Artist,
+		&i.Album,
+		&i.RecordingMbid,
+		&i.ReleaseMbid,
+		&i.ReleaseGroupMbid,
+		&i.ArtistMbid,
+		&i.WorkMbid,
+		&i.MatchedBy,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
@@ -595,6 +664,51 @@ func (q *Queries) ListSyncLogsByUser(ctx context.Context, arg ListSyncLogsByUser
 	return items, nil
 }
 
+const listTrackMBIDs = `-- name: ListTrackMBIDs :many
+SELECT
+  feiniu_guid, file_path, title, artist, album, recording_mbid, release_mbid, release_group_mbid, artist_mbid, work_mbid, matched_by, updated_at
+FROM
+  track_mbid_map
+ORDER BY
+  updated_at DESC
+`
+
+func (q *Queries) ListTrackMBIDs(ctx context.Context) ([]TrackMbidMap, error) {
+	rows, err := q.db.QueryContext(ctx, listTrackMBIDs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []TrackMbidMap{}
+	for rows.Next() {
+		var i TrackMbidMap
+		if err := rows.Scan(
+			&i.FeiniuGuid,
+			&i.FilePath,
+			&i.Title,
+			&i.Artist,
+			&i.Album,
+			&i.RecordingMbid,
+			&i.ReleaseMbid,
+			&i.ReleaseGroupMbid,
+			&i.ArtistMbid,
+			&i.WorkMbid,
+			&i.MatchedBy,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listUsers = `-- name: ListUsers :many
 SELECT
   id, username, platform_uid, platform_username, is_admin, token_prefix, ua_raw, ua_system, ua_client, first_seen_at, last_seen_at, created_at, updated_at
@@ -787,6 +901,100 @@ func (q *Queries) UpsertRunStatus(ctx context.Context, arg UpsertRunStatusParams
 		&i.LastfmEnabled,
 		&i.ListenbrainzEnabled,
 		&i.LastScrobbledAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const upsertTrackMBID = `-- name: UpsertTrackMBID :one
+INSERT INTO
+  track_mbid_map (
+    feiniu_guid,
+    file_path,
+    title,
+    artist,
+    album,
+    recording_mbid,
+    release_mbid,
+    release_group_mbid,
+    artist_mbid,
+    work_mbid,
+    matched_by,
+    updated_at
+  )
+VALUES
+  (
+    ?1,
+    ?2,
+    ?3,
+    ?4,
+    ?5,
+    ?6,
+    ?7,
+    ?8,
+    ?9,
+    ?10,
+    ?11,
+    ?12
+  ) ON CONFLICT (feiniu_guid) DO
+UPDATE
+SET
+  file_path = excluded.file_path,
+  title = excluded.title,
+  artist = excluded.artist,
+  album = excluded.album,
+  recording_mbid = excluded.recording_mbid,
+  release_mbid = excluded.release_mbid,
+  release_group_mbid = excluded.release_group_mbid,
+  artist_mbid = excluded.artist_mbid,
+  work_mbid = excluded.work_mbid,
+  matched_by = excluded.matched_by,
+  updated_at = excluded.updated_at RETURNING feiniu_guid, file_path, title, artist, album, recording_mbid, release_mbid, release_group_mbid, artist_mbid, work_mbid, matched_by, updated_at
+`
+
+type UpsertTrackMBIDParams struct {
+	FeiniuGuid       string         `json:"feiniu_guid"`
+	FilePath         sql.NullString `json:"file_path"`
+	Title            sql.NullString `json:"title"`
+	Artist           sql.NullString `json:"artist"`
+	Album            sql.NullString `json:"album"`
+	RecordingMbid    sql.NullString `json:"recording_mbid"`
+	ReleaseMbid      sql.NullString `json:"release_mbid"`
+	ReleaseGroupMbid sql.NullString `json:"release_group_mbid"`
+	ArtistMbid       sql.NullString `json:"artist_mbid"`
+	WorkMbid         sql.NullString `json:"work_mbid"`
+	MatchedBy        string         `json:"matched_by"`
+	UpdatedAt        string         `json:"updated_at"`
+}
+
+func (q *Queries) UpsertTrackMBID(ctx context.Context, arg UpsertTrackMBIDParams) (TrackMbidMap, error) {
+	row := q.db.QueryRowContext(ctx, upsertTrackMBID,
+		arg.FeiniuGuid,
+		arg.FilePath,
+		arg.Title,
+		arg.Artist,
+		arg.Album,
+		arg.RecordingMbid,
+		arg.ReleaseMbid,
+		arg.ReleaseGroupMbid,
+		arg.ArtistMbid,
+		arg.WorkMbid,
+		arg.MatchedBy,
+		arg.UpdatedAt,
+	)
+	var i TrackMbidMap
+	err := row.Scan(
+		&i.FeiniuGuid,
+		&i.FilePath,
+		&i.Title,
+		&i.Artist,
+		&i.Album,
+		&i.RecordingMbid,
+		&i.ReleaseMbid,
+		&i.ReleaseGroupMbid,
+		&i.ArtistMbid,
+		&i.WorkMbid,
+		&i.MatchedBy,
 		&i.UpdatedAt,
 	)
 	return i, err

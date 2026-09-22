@@ -317,7 +317,7 @@ func run(doCheck, debug bool, wait time.Duration, logger *slog.Logger, levelVar 
 	defer playlistSync.Stop()
 
 	// fpk 模式：启动 Web UI（统一网关监听 app.sock）
-	webUI, webUIErr := startWebUI(logger, p.UserCache(), dbStore)
+	webUI, webUIErr := startWebUI(logger, p.UserCache(), dbStore, playlistSync)
 	if webUIErr != nil {
 		logger.Warn("Web UI 启动失败（不影响代理功能）", "错误", webUIErr)
 	} else if webUI != nil {

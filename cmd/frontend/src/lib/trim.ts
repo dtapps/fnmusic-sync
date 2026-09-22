@@ -99,6 +99,25 @@ export function isHostEnvironment(): boolean {
 }
 
 /**
+ * 打开 fnOS 原生文件夹选择器，返回用户选中的目录内部路径（如 /vol1/1000/音乐）。
+ * 基于 TrimApp.pickFile({ directory: true })，返回 string[]（可多选）。
+ *
+ * 非宿主环境（独立浏览器 / 本地调试）返回 null，调用方应降级为手动输入路径。
+ */
+export async function pickDirectory(): Promise<string[] | null> {
+  const app = getTrimApp();
+  if (!app) return null;
+  try {
+    const params = { directory: true } as unknown as Parameters<TrimApp['pickFile']>[0];
+    const paths = await app.pickFile(params);
+    if (paths && paths.length > 0) return paths;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * 判断是否为移动端环境（移动端 App 内嵌页面）。
  * 移动端 isWeb === false，不支持 $on 事件监听。
  */

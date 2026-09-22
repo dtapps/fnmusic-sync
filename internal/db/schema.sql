@@ -104,3 +104,40 @@ CREATE TABLE IF NOT EXISTS sync_log (
 CREATE INDEX IF NOT EXISTS idx_sync_log_user_provider ON sync_log (username, provider, finished_at DESC);
 
 CREATE INDEX IF NOT EXISTS idx_sync_log_finished ON sync_log (finished_at DESC);
+
+-- ============================================================
+-- 表 5：曲目 MBID 映射（track_mbid_map）
+-- 把外部 MusicBrainz ID（录音 / 专辑 / 艺人 / 作品 MBID）关联到飞牛曲目 GUID，
+-- 让 scrobble / 歌单匹配优先走精确的「录音 MBID」(优于「艺人名+曲名」模糊匹配)。
+--
+-- 数据来源（matched_by）：
+--   · tag：解析本地音乐文件标签（ID3/FLAC/M4A 中的 MusicBrainz 标签）获取，零网络、无频限；
+--   · musicbrainz：本地无标签时，用「艺人+曲名(+专辑)」查询 MusicBrainz API 补全；
+--   · manual：手动维护。
+--
+-- 解析器（mbid_resolver）流程：
+--   1. 扫描 library.directories 得到 文件绝对路径 → 标签中的 MBID；
+--   2. 按飞牛曲目 AudioSpec.Path（路径匹配，优先）或 元数据（艺人+曲名，兜底）匹配到 feiniu_guid；
+--   3. 以 feiniu_guid 为主键写入本表；BuildTrackIndexes 加载时优先取 MBID 填 MBIDToGUID。
+--
+-- feiniu_guid 为主键（NOT NULL）：一行 = 一个飞牛曲目与其 MBID；未匹配到飞牛曲目的文件
+-- 在解析器内用「路径→MBID」内存映射暂存，确定 feiniu_guid 后再落库，避免无主键的孤立行。
+-- ============================================================
+CREATE TABLE IF NOT EXISTS track_mbid_map (
+  feiniu_guid TEXT NOT NULL PRIMARY KEY, -- 飞牛曲目 GUID（关联主体）
+  file_path TEXT, -- 来源文件绝对路径（路径匹配用，索引便于反查）
+  title TEXT, -- 曲目标题（元数据匹配备用）
+  artist TEXT, -- 艺人名
+  album TEXT, -- 专辑名
+  recording_mbid TEXT, -- 录音 MBID（recording，匹配优先级最高）
+  release_mbid TEXT, -- 专辑发行 MBID（release）
+  release_group_mbid TEXT, -- 专辑组 MBID（release-group）
+  artist_mbid TEXT, -- 艺人 MBID（artist）
+  work_mbid TEXT, -- 作品 MBID（work）
+  matched_by TEXT NOT NULL DEFAULT 'tag', -- tag | musicbrainz | manual
+  updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_mbid_map_path ON track_mbid_map (file_path);
+
+CREATE INDEX IF NOT EXISTS idx_mbid_map_meta ON track_mbid_map (title, artist);

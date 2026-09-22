@@ -12,9 +12,12 @@ import (
 type Querier interface {
 	BindUserPlatform(ctx context.Context, arg BindUserPlatformParams) error
 	CloseOpenPlaybacks(ctx context.Context, endedAt sql.NullString) error
+	DeleteTrackMBID(ctx context.Context, feiniuGuid string) error
 	GetLastSuccessTime(ctx context.Context, arg GetLastSuccessTimeParams) (string, error)
 	GetRunStatus(ctx context.Context, username string) (RunStatus, error)
 	GetRunStatusTotal(ctx context.Context) (GetRunStatusTotalRow, error)
+	GetTrackMBID(ctx context.Context, feiniuGuid string) (TrackMbidMap, error)
+	GetTrackMBIDByPath(ctx context.Context, filePath sql.NullString) (TrackMbidMap, error)
 	GetUser(ctx context.Context, username string) (User, error)
 	IncrementScrobble(ctx context.Context, arg IncrementScrobbleParams) (RunStatus, error)
 	InsertPlayback(ctx context.Context, arg InsertPlaybackParams) (int64, error)
@@ -24,12 +27,14 @@ type Querier interface {
 	ListRecentSyncLogs(ctx context.Context, limitRows int64) ([]SyncLog, error)
 	ListRunStatus(ctx context.Context) ([]RunStatus, error)
 	ListSyncLogsByUser(ctx context.Context, arg ListSyncLogsByUserParams) ([]SyncLog, error)
+	ListTrackMBIDs(ctx context.Context) ([]TrackMbidMap, error)
 	ListUsers(ctx context.Context) ([]User, error)
 	ListUsersWithUARaw(ctx context.Context) ([]ListUsersWithUARawRow, error)
 	SetUserAgent(ctx context.Context, arg SetUserAgentParams) error
 	TouchUserSeenByToken(ctx context.Context, arg TouchUserSeenByTokenParams) error
 	UpdatePlaybackEndedAt(ctx context.Context, arg UpdatePlaybackEndedAtParams) error
 	UpsertRunStatus(ctx context.Context, arg UpsertRunStatusParams) (RunStatus, error)
+	UpsertTrackMBID(ctx context.Context, arg UpsertTrackMBIDParams) (TrackMbidMap, error)
 	UpsertUser(ctx context.Context, arg UpsertUserParams) (User, error)
 }
 
