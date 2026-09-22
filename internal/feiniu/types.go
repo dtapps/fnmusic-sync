@@ -79,6 +79,14 @@ type createPlaylistResponse struct {
 	} `json:"data"`
 }
 
+// editPlaylistRequest 更新歌单信息请求。
+// 飞牛 edit 接口要求同时传 guid 与 name，仅改封面时也带上当前名称（保持不变）。
+type editPlaylistRequest struct {
+	CoverId string `json:"coverId"`
+	Name    string `json:"name"`
+	GUID    string `json:"guid"`
+}
+
 // addTrackRequest 添加曲目到歌单请求。
 type addTrackRequest struct {
 	GUID       string   `json:"guid"`
@@ -190,6 +198,20 @@ func (c *Client) FindOrCreatePlaylist(ctx context.Context, name, coverId string)
 	}
 
 	if playlist != nil {
+		// 已存在：对比现有封面与目标封面，仅在确有差异且目标非空时更新。
+		// （历史歌单若用了不显示的 album_xxx 封面，这里会被识别为"需要更新"。）
+		if coverId != "" {
+			cur, err := c.playlistCoverId(ctx, playlist.GUID)
+			if err != nil {
+				c.logger.Warn("读取歌单当前封面失败，跳过封面更新",
+					"歌单", name, "错误", err)
+			} else if cur != coverId {
+				if uerr := c.editPlaylist(ctx, playlist.GUID, name, coverId); uerr != nil {
+					c.logger.Warn("更新已存在歌单封面失败（不影响曲目同步）",
+						"歌单", name, "错误", uerr)
+				}
+			}
+		}
 		return playlist.GUID, nil
 	}
 
@@ -260,6 +282,48 @@ func (c *Client) createPlaylist(ctx context.Context, name, coverId string) (stri
 	return resp.Data.GUID, nil
 }
 
+// editPlaylist 更新歌单信息（名称、封面等），对应 POST /music/api/v1/playlist/edit。
+func (c *Client) editPlaylist(ctx context.Context, guid, name, coverId string) error {
+	req := editPlaylistRequest{
+		GUID:    guid,
+		Name:    name,
+		CoverId: coverId,
+	}
+
+	var resp Response
+	if err := c.doPost(ctx, "/music/api/v1/playlist/edit", req, &resp); err != nil {
+		return err
+	}
+	if resp.Code != 0 {
+		return fmt.Errorf("更新歌单失败 code=%d msg=%s", resp.Code, resp.Msg)
+	}
+	return nil
+}
+
+// purgeTrackCountResponse 清除失效歌曲响应。data.total 为本次清除数量。
+type purgeTrackCountResponse struct {
+	Code int    `json:"code"`
+	Msg  string `json:"msg"`
+	Data struct {
+		Total int `json:"total"`
+	} `json:"data"`
+}
+
+// PurgeInvalidTracks 清理歌单里指向已删除曲目的失效引用（"清除失效歌曲"）。
+// 建议在每次歌单同步完成后调用，避免歌单残留曲库里已不存在的死链。返回本次清除数量。
+func (c *Client) PurgeInvalidTracks(ctx context.Context, guid string) (int, error) {
+	path := "/music/api/v1/playlist/purge-track-count?guid=" + url.QueryEscape(guid)
+
+	var resp purgeTrackCountResponse
+	if err := c.doGet(ctx, path, &resp); err != nil {
+		return 0, err
+	}
+	if resp.Code != 0 {
+		return 0, fmt.Errorf("清除失效歌曲失败 code=%d msg=%s", resp.Code, resp.Msg)
+	}
+	return resp.Data.Total, nil
+}
+
 // addTracksBatchSize 单次 add-track 请求的曲目数量上限，避免请求体过大。
 const addTracksBatchSize = 50
 
@@ -290,6 +354,7 @@ type playlistDetailResponse struct {
 	Msg  string `json:"msg"`
 	Data struct {
 		GUID       string   `json:"guid"`
+		CoverId    string   `json:"coverId"`
 		TrackGUIDs []string `json:"trackGUIDs"`
 		Tracks     []struct {
 			GUID string `json:"guid"`
@@ -301,6 +366,18 @@ type playlistDetailResponse struct {
 			GUID string `json:"guid"`
 		} `json:"trackList"`
 	} `json:"data"`
+}
+
+// playlistCoverId 读取歌单当前封面 ID。
+// 走 playlist/detail，该接口稳定返回 coverId（列表中不一定带，detail 必定带）。
+func (c *Client) playlistCoverId(ctx context.Context, guid string) (string, error) {
+	path := "/music/api/v1/playlist/detail?guid=" + url.QueryEscape(guid)
+
+	var resp playlistDetailResponse
+	if err := c.doGet(ctx, path, &resp); err != nil {
+		return "", err
+	}
+	return resp.Data.CoverId, nil
 }
 
 // PlaylistTrackGUIDs 读取歌单现有曲目 GUID 集合，用于差量同步。

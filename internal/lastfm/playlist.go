@@ -256,6 +256,66 @@ func (c *Client) GetRecentTracks(ctx context.Context, username string, limit int
 	return p, nil
 }
 
+// GetWeeklyTrackChart 获取用户本周曲目榜单（Last.fm weeklytrackchart）。
+// limit 最多返回的曲目数（Last.fm 上限约 1000），0 表示不限制（取上限 1000）。
+// 返回按排名排序的歌单；接口无数据时返回空歌单（TrackList 为空）。
+func (c *Client) GetWeeklyTrackChart(ctx context.Context, username string, limit int) (*Playlist, error) {
+	if username == "" {
+		return nil, fmt.Errorf("用户名不能为空")
+	}
+	if limit <= 0 || limit > 1000 {
+		limit = 1000
+	}
+
+	params := url.Values{}
+	params.Set("method", "user.getWeeklyTrackChart")
+	params.Set("api_key", c.APIKey)
+	params.Set("user", username)
+	params.Set("limit", strconv.Itoa(limit))
+	params.Set("format", "json")
+
+	endpoint := APIEndpoint + "?" + params.Encode()
+
+	var result struct {
+		WeeklyTrackChart struct {
+			Track []struct {
+				Name   string `json:"name"`
+				MBID   string `json:"mbid"`
+				Artist struct {
+					Name string `json:"#text"`
+					MBID string `json:"mbid"`
+				} `json:"artist"`
+				PlayCount int `json:"playcount,string"`
+			} `json:"track"`
+		} `json:"weeklytrackchart"`
+		Error   int    `json:"error"`
+		Message string `json:"message"`
+	}
+
+	if err := c.getJSON(ctx, endpoint, &result); err != nil {
+		return nil, err
+	}
+	if result.Error != 0 {
+		return nil, fmt.Errorf("last.fm error %d: %s", result.Error, result.Message)
+	}
+
+	p := &Playlist{
+		Title: "Last.fm Weekly Track Chart",
+		Date:  time.Now().Format("2006-01-02"),
+	}
+	for _, t := range result.WeeklyTrackChart.Track {
+		p.TrackList = append(p.TrackList, PlaylistTrack{
+			ArtistName: t.Artist.Name,
+			TrackName:  t.Name,
+			MBID:       t.MBID,
+			ArtistMBID: t.Artist.MBID,
+			PlayCount:  t.PlayCount,
+		})
+	}
+
+	return p, nil
+}
+
 // getJSON 发送 GET 请求并解析 JSON 响应。
 // Last.fm 的读取类 API（user.getTopTracks 等）只需 api_key，无需签名。
 func (c *Client) getJSON(ctx context.Context, endpoint string, out any) error {

@@ -8,6 +8,7 @@ import (
 	"cnb.cool/dtapp/fnmusic-sync/internal/config"
 	"cnb.cool/dtapp/fnmusic-sync/internal/feiniu"
 	"cnb.cool/dtapp/fnmusic-sync/internal/lastfm"
+	"cnb.cool/dtapp/fnmusic-sync/internal/mbid"
 	"cnb.cool/dtapp/fnmusic-sync/internal/strutil"
 )
 
@@ -37,7 +38,8 @@ func (s *SyncService) syncLastFMUserTokens(ctx context.Context, tokens []string,
 // 返回 syncResult：Err 为 nil 表示成功（或无可同步歌单），Playlists/Tracks 为本次同步的歌单数/新增曲目数。
 func (s *SyncService) syncLastFMUser(ctx context.Context, token string, username string, lfm config.UserLastFM) syncResult {
 	playlistCfg := lfm.Playlist
-	if !playlistCfg.TopTracks.Enabled && !playlistCfg.LovedTracks.Enabled && !playlistCfg.RecentTracks.Enabled {
+	if !playlistCfg.TopTracks.Enabled && !playlistCfg.LovedTracks.Enabled && !playlistCfg.RecentTracks.Enabled &&
+		!playlistCfg.WeeklyCharts.Enabled {
 		return syncResult{Noop: true}
 	}
 	var res syncResult
@@ -50,6 +52,10 @@ func (s *SyncService) syncLastFMUser(ctx context.Context, token string, username
 			s.dropInvalidToken(username, token)
 		}
 		return syncResult{Err: fmt.Errorf("获取飞牛音乐曲目列表失败（用户标识=%s）: %w", strutil.FirstN8(token), err)}
+	}
+	// 注入已落库的 MBID 映射，使匹配优先走精确录音 MBID。
+	if e := mbid.EnrichIndexes(ctx, s.dataStore, indexes); e != nil {
+		s.logger.Warn("加载 MBID 索引失败（不影响艺人+曲名匹配）", "错误", e)
 	}
 	s.rememberToken(username, token)
 	s.logger.Info("飞牛音乐曲目索引建立完成", "用户", username, "总曲目数", len(indexes.GUIDToTrack), "艺人+曲名索引数", len(indexes.ArtistTrackToGUID), "唯一曲名索引数", len(indexes.TitleToGUID))
@@ -110,7 +116,24 @@ func (s *SyncService) syncLastFMUser(ctx context.Context, token string, username
 			}
 		}
 	}
-	s.logger.Info("Last.fm 智能歌单同步完成", "用户", username, "lastfm用户", lfm.Username, "top_tracks启用", playlistCfg.TopTracks.Enabled, "loved_tracks启用", playlistCfg.LovedTracks.Enabled, "recent_tracks启用", playlistCfg.RecentTracks.Enabled)
+	// 同步 Weekly Charts（本周曲目榜单）
+	if playlistCfg.WeeklyCharts.Enabled {
+		name := lastFMPlaylistName(playlistCfg.WeeklyCharts, "LF 本周榜单")
+		s.logger.Info("正在获取 Last.fm Weekly Track Chart", "用户", username, "lastfm用户", lfm.Username, "数量限制", playlistCfg.WeeklyCharts.Limit)
+		playlist, err := lfmClient.GetWeeklyTrackChart(ctx, lfm.Username, playlistCfg.WeeklyCharts.Limit)
+		if err != nil {
+			s.logger.Error("获取 Last.fm Weekly Track Chart 失败", "用户", username, "错误", err)
+		} else if playlist != nil {
+			s.logger.Info("Last.fm Weekly Track Chart 获取完成", "用户", username, "曲目数", len(playlist.TrackList), "歌单标题", playlist.Title)
+			if added, err := s.syncLastFMPlaylist(ctx, apiClient, username, playlist, name, indexes); err != nil {
+				s.logger.Error("同步 Last.fm Weekly Track Chart 歌单失败", "用户", username, "错误", err)
+			} else {
+				res.Playlists++
+				res.Tracks += added
+			}
+		}
+	}
+	s.logger.Info("Last.fm 智能歌单同步完成", "用户", username, "lastfm用户", lfm.Username, "top_tracks启用", playlistCfg.TopTracks.Enabled, "loved_tracks启用", playlistCfg.LovedTracks.Enabled, "recent_tracks启用", playlistCfg.RecentTracks.Enabled, "weekly_charts启用", playlistCfg.WeeklyCharts.Enabled)
 	return res
 }
 
@@ -150,7 +173,7 @@ func (s *SyncService) syncLastFMPlaylist(ctx context.Context, apiClient *feiniu.
 		matched++
 		if coverId == "" {
 			if t, ok := indexes.GUIDToTrack[guid]; ok && t.CoverId != "" {
-				coverId = t.CoverId
+				coverId, _ = apiClient.ResolvePlaylistCover(ctx, t.CoverId)
 			}
 		}
 	}
@@ -166,11 +189,21 @@ func (s *SyncService) syncLastFMPlaylist(ctx context.Context, apiClient *feiniu.
 	newGUIDs := s.diffTracks(ctx, apiClient, username, playlistName, playlistGUID, trackGUIDs)
 	if len(newGUIDs) == 0 {
 		s.logger.Info("歌单内容无变化，跳过添加", "用户", username, "歌单名称", playlistName, "歌单曲目数", len(trackGUIDs))
-		return 0, nil
+	} else {
+		if err := apiClient.AddTracksToPlaylist(ctx, playlistGUID, newGUIDs); err != nil {
+			return 0, fmt.Errorf("添加曲目失败: %w", err)
+		}
 	}
-	if err := apiClient.AddTracksToPlaylist(ctx, playlistGUID, newGUIDs); err != nil {
-		return 0, fmt.Errorf("添加曲目失败: %w", err)
+
+	// 同步完成后清理失效曲目（曲库已删除的歌曲在歌单里留下的死链）。
+	purged, perr := apiClient.PurgeInvalidTracks(ctx, playlistGUID)
+	if perr != nil {
+		s.logger.Warn("清理失效曲目失败（不影响已同步内容）",
+			"歌单", playlistName, "错误", perr)
+	} else if purged > 0 {
+		s.logger.Info("已清理失效曲目", "歌单", playlistName, "数量", purged)
 	}
+
 	s.logger.Info("歌单同步完成", "用户", username, "歌单名称", playlistName, "本次新增", len(newGUIDs), "歌单曲目数", len(trackGUIDs))
 	return len(newGUIDs), nil
 }

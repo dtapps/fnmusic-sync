@@ -215,7 +215,7 @@
         />
       </div>
 
-      <div class="flex flex-wrap items-center gap-2">
+      <div class="flex flex-wrap items-center gap-2 mb-2">
         <label class="text-xs font-medium min-w-[80px]">{$_('lastfm.recent_tracks')}</label>
         <Switch bind:checked={user.lastfm.playlist.recent_tracks.enabled} />
         <Input
@@ -226,6 +226,23 @@
         <Input
           type="number"
           bind:value={user.lastfm.playlist.recent_tracks.limit}
+          placeholder="50"
+          min="0"
+          class="w-16"
+        />
+      </div>
+
+      <div class="flex flex-wrap items-center gap-2 mb-2">
+        <label class="text-xs font-medium min-w-[80px]">{$_('lastfm.weekly_charts')}</label>
+        <Switch bind:checked={user.lastfm.playlist.weekly_charts.enabled} />
+        <Input
+          bind:value={user.lastfm.playlist.weekly_charts.name}
+          placeholder={$_('lastfm.weekly_charts_placeholder')}
+          class="min-w-[100px] flex-1"
+        />
+        <Input
+          type="number"
+          bind:value={user.lastfm.playlist.weekly_charts.limit}
           placeholder="50"
           min="0"
           class="w-16"
@@ -323,7 +340,7 @@
         />
       </div>
 
-      <div class="flex flex-wrap items-center gap-2">
+      <div class="flex flex-wrap items-center gap-2 mb-2">
         <label class="text-xs font-medium min-w-[80px]">{$_('listenbrainz.year_missed')}</label>
         <Switch bind:checked={user.listenbrainz.playlist.year_missed.enabled} />
         <Input
@@ -334,6 +351,49 @@
         <Input
           type="number"
           bind:value={user.listenbrainz.playlist.year_missed.limit}
+          placeholder="0"
+          min="0"
+          class="w-16"
+        />
+      </div>
+
+      <div class="flex flex-wrap items-center gap-2 mb-2">
+        <label class="text-xs font-medium min-w-[80px]">{$_('listenbrainz.top_recordings')}</label>
+        <Switch bind:checked={user.listenbrainz.playlist.top_recordings.enabled} />
+        <Input
+          bind:value={user.listenbrainz.playlist.top_recordings.name}
+          placeholder={$_('listenbrainz.top_recordings_placeholder')}
+          class="min-w-[100px] flex-1"
+        />
+        <Select bind:value={user.listenbrainz.playlist.top_recordings.range} class="min-w-[90px]">
+          <option value="all_time">{$_('listenbrainz.range_all_time')}</option>
+          <option value="this_year">{$_('listenbrainz.range_this_year')}</option>
+          <option value="year">{$_('listenbrainz.range_year')}</option>
+          <option value="half_year">{$_('listenbrainz.range_half_year')}</option>
+          <option value="quarter">{$_('listenbrainz.range_quarter')}</option>
+          <option value="month">{$_('listenbrainz.range_month')}</option>
+          <option value="week">{$_('listenbrainz.range_week')}</option>
+        </Select>
+        <Input
+          type="number"
+          bind:value={user.listenbrainz.playlist.top_recordings.limit}
+          placeholder="0"
+          min="0"
+          class="w-16"
+        />
+      </div>
+
+      <div class="flex flex-wrap items-center gap-2">
+        <label class="text-xs font-medium min-w-[80px]">{$_('listenbrainz.recently_played')}</label>
+        <Switch bind:checked={user.listenbrainz.playlist.recently_played.enabled} />
+        <Input
+          bind:value={user.listenbrainz.playlist.recently_played.name}
+          placeholder={$_('listenbrainz.recently_played_placeholder')}
+          class="min-w-[100px] flex-1"
+        />
+        <Input
+          type="number"
+          bind:value={user.listenbrainz.playlist.recently_played.limit}
           placeholder="0"
           min="0"
           class="w-16"
