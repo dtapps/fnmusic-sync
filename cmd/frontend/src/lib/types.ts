@@ -97,12 +97,19 @@ export interface LoggingConfig {
   compress?: boolean;
 }
 
+// ===== 本地音乐目录（解析音频标签获取 MBID）=====
+export interface LibraryConfig {
+  directories?: string[]; // 音乐文件所在目录（绝对路径，递归扫描）
+  scan_interval?: string; // MBID 本地扫描去抖间隔，如 6h、12h
+}
+
 // ===== 完整配置 =====
 export interface AppConfig {
   users?: Record<string, UserAccount>;
   playback?: PlaybackConfig;
   playlist?: PlaylistConfig;
   logging?: LoggingConfig;
+  library?: LibraryConfig;
 }
 
 // ===== 运行状态 =====

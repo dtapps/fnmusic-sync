@@ -32,7 +32,8 @@ socket 绑定在 inode 上，用 `os.Rename`（mv）改名后官方后端仍能�
 | -------------------- | ---------------------------------------- | -------------------------------------------- |
 | 二进制               | `/usr/bin/fnmusic-sync`                  | `/var/apps/fnmusic-sync/target/fnmusic-sync` |
 | 配置文件             | `/etc/fnmusic-sync/config.yaml`          | `$TRIM_PKGETC/config.yaml`                   |
-| 数据库（状态/用户）  | `/var/lib/fnmusic-sync/state.db`         | `$TRIM_PKGVAR/state.db`                      |
+| 数据库（运营状态）   | `/var/lib/fnmusic-sync/state.db`         | `$TRIM_PKGVAR/state.db`                      |
+| 数据库（MBID 数据）  | `/var/lib/fnmusic-sync/data.db`          | `$TRIM_PKGVAR/data.db`                       |
 | 日志文件             | `/var/log/fnmusic-sync/fnmusic-sync.log` | `$TRIM_PKGVAR/logs/fnmusic-sync.log`         |
 | 代理监听 socket      | `/var/run/trim_music.socket`             | 同左                                         |
 | 官方 upstream socket | `/var/run/trim_music_upstream.socket`    | 同左                                         |

@@ -173,6 +173,19 @@
     "save_failed": "保存失败: {message}",
     "auto_saving": "保存中..."
   },
+  "library": {
+    "title": "音乐目录",
+    "desc": "配置本地音乐文件所在目录（递归扫描音频标签获取 MBID，用于关联飞牛曲目）。可添加多个目录，需为本应用可读取的真实绝对路径（如 /vol1/1000/音乐）。",
+    "empty": "暂无目录，请添加音乐目录",
+    "pick": "选择目录",
+    "add": "添加",
+    "remove": "移除",
+    "placeholder": "输入目录绝对路径，如 /vol1/1000/音乐",
+    "save_failed": "保存音乐目录失败: {message}",
+    "scan_interval": "MBID 扫描间隔",
+    "scan_interval_desc": "本地音乐标签扫描（解析 MBID）的去抖间隔，如 6h、12h。避免频繁全量遍历音乐目录。",
+    "scan_interval_placeholder": "如 6h"
+  },
   "upgrade": {
     "title": "应用升级",
     "current_version": "当前版本",

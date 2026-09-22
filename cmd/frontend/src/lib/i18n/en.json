@@ -173,6 +173,19 @@
     "save_failed": "Save failed: {message}",
     "auto_saving": "Saving..."
   },
+  "library": {
+    "title": "Music Directories",
+    "desc": "Configure local music directories (scanned recursively for audio tags to obtain MBID, used to associate FnMusic tracks). Multiple directories are supported; each must be a real absolute path readable by this app (e.g. /vol1/1000/Music).",
+    "empty": "No directories yet. Please add a music directory.",
+    "pick": "Pick Directory",
+    "add": "Add",
+    "remove": "Remove",
+    "placeholder": "Enter an absolute directory path, e.g. /vol1/1000/Music",
+    "save_failed": "Failed to save music directories: {message}",
+    "scan_interval": "MBID Scan Interval",
+    "scan_interval_desc": "Debounce interval for local music tag scanning (MBID parsing), e.g. 6h, 12h. Avoids frequent full directory scans.",
+    "scan_interval_placeholder": "e.g. 6h"
+  },
   "upgrade": {
     "title": "App Upgrade",
     "current_version": "Current Version",

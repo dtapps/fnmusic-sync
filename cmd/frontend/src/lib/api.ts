@@ -96,6 +96,19 @@ export function saveSettings(settings: AppConfig) {
   return apiCall('/settings', 'PUT', settings);
 }
 
+// 返回本地音乐目录列表（仅管理员可访问）
+export function getLibrary() {
+  return apiCall<{ directories: string[]; scan_interval?: string }>('/library');
+}
+
+// 保存本地音乐目录列表（仅管理员可访问）
+export function saveLibrary(directories: string[], scanInterval: string) {
+  return apiCall<{ ok: boolean; directories: string[]; scan_interval?: string }>('/library', 'PUT', {
+    directories,
+    scan_interval: scanInterval,
+  });
+}
+
 export function startLastFmAuth(apiKey: string, apiSecret: string, username: string) {
   return apiCall<{ auth_url: string; token: string }>('/lastfm/auth', 'POST', {
     api_key: apiKey,

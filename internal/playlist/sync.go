@@ -15,15 +15,19 @@ package playlist
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strings"
 	"sync"
 	"time"
 
+	"cnb.cool/dtapp/fnmusic-sync/internal/buildinfo"
 	"cnb.cool/dtapp/fnmusic-sync/internal/config"
+	"cnb.cool/dtapp/fnmusic-sync/internal/datadb"
 	"cnb.cool/dtapp/fnmusic-sync/internal/db"
 	"cnb.cool/dtapp/fnmusic-sync/internal/feiniu"
+	"cnb.cool/dtapp/fnmusic-sync/internal/mbid"
 	"cnb.cool/dtapp/fnmusic-sync/internal/playback"
 	"cnb.cool/dtapp/fnmusic-sync/internal/reqlog"
 	"cnb.cool/dtapp/fnmusic-sync/internal/safego"
@@ -156,7 +160,8 @@ type SyncService struct {
 	logger    *slog.Logger
 	client    *http.Client
 	userCache *playback.UserCache
-	dbStore   *db.Store
+	dbStore   *db.Store     // 运营状态（users / sync_log 等）
+	dataStore *datadb.Store // 数据（MBID 映射，独立 data.db）
 
 	// 请求日志：各客户端独立写入各自的日志文件。
 	feiniuReqLog *reqlog.Logger
@@ -181,6 +186,13 @@ type SyncService struct {
 	// 用户识别回调与定时同步可能接连触发，缓存可减少对 ListenBrainz 的请求
 	// （对方有反爬校验，短时间反复请求会拿到 HTML 校验页）。
 	recommendations map[string]recommendationCache
+
+	// mbidResolver 本地音乐标签 → 飞牛 GUID 的 MBID 解析器（可为 nil）。
+	mbidResolver *mbid.Resolver
+	// mbidMu 保护 lastMBIDScan 的并发读写。
+	mbidMu sync.Mutex
+	// lastMBIDScan 上次 MBID 本地扫描时间（用于去抖，避免频繁全量扫描）。
+	lastMBIDScan time.Time
 }
 
 // recommendationCache 推荐歌单缓存项。
@@ -274,6 +286,7 @@ func NewSyncService(
 	logger *slog.Logger,
 	userCache *playback.UserCache,
 	dbStore *db.Store,
+	dataStore *datadb.Store,
 	feiniuReqLog, lfReqLog, lbReqLog *reqlog.Logger,
 ) *SyncService {
 	s := &SyncService{
@@ -284,6 +297,7 @@ func NewSyncService(
 		},
 		userCache:       userCache,
 		dbStore:         dbStore,
+		dataStore:       dataStore,
 		feiniuReqLog:    feiniuReqLog,
 		lfReqLog:        lfReqLog,
 		lbReqLog:        lbReqLog,
@@ -293,10 +307,134 @@ func NewSyncService(
 		recommendations: make(map[string]recommendationCache),
 	}
 
+	// MBID 解析器：拉取曲库的 TrackLister 需要一个有效 token 的飞牛客户端，
+	// 这里闭包在每次扫描时动态挑一个活跃用户的 token（曲库是服务端维度，任意用户都可）。
+	s.mbidResolver = mbid.NewResolver(cfg, dataStore, func(ctx context.Context) ([]feiniu.Track, error) {
+		token := s.pickActiveToken(ctx)
+		if token == "" {
+			return nil, errors.New("无活跃飞牛用户，无法拉取曲库")
+		}
+		c := feiniu.NewClient(buildinfo.DefaultUpstreamSocket, token, s.logger, s.feiniuReqLog)
+		return fetchAllTracks(ctx, c)
+	}, logger)
+
 	// 注册用户识别回调：当首次识别到新用户时，立即触发同步。
 	userCache.SetOnUserIdentifiedCallback(s.onUserIdentified)
 
 	return s
+}
+
+// pickActiveToken 返回一个可用于拉取飞牛曲库的 token。
+// 曲库是服务端维度资源，任意有效 token 都能拉到全量曲目；
+// 这里优先选管理员 token（通常长期有效、权限最全），其次回退到任意活跃用户 token。
+func (s *SyncService) pickActiveToken(ctx context.Context) string {
+	active := s.userCache.ActiveUsers()
+	if len(active) == 0 {
+		return ""
+	}
+
+	if s.dbStore != nil {
+		if admins, err := s.adminUsernames(ctx); err == nil && len(admins) > 0 {
+			for token, name := range active {
+				if admins[name] {
+					return token
+				}
+			}
+		}
+	}
+
+	// 无管理员可选时，回退到任意活跃用户。
+	for token := range active {
+		return token
+	}
+	return ""
+}
+
+// adminUsernames 返回数据库中标记为管理员的用户名集合（来自 users.is_admin）。
+func (s *SyncService) adminUsernames(ctx context.Context) (map[string]bool, error) {
+	users, err := s.dbStore.ListUsers(ctx)
+	if err != nil {
+		return nil, err
+	}
+	set := make(map[string]bool, len(users))
+	for _, u := range users {
+		if u.IsAdmin != 0 {
+			set[u.Username] = true
+		}
+	}
+	return set, nil
+}
+
+// fetchAllTracks 分页拉取飞牛曲库全量曲目。
+func fetchAllTracks(ctx context.Context, c *feiniu.Client) ([]feiniu.Track, error) {
+	tracks := make([]feiniu.Track, 0, 200)
+	page, size := 1, 200
+	for {
+		batch, err := c.FetchTrackList(ctx, page, size)
+		if err != nil {
+			return nil, err
+		}
+		tracks = append(tracks, batch...)
+		if len(batch) < size {
+			break
+		}
+		page++
+	}
+	return tracks, nil
+}
+
+// ScanMBID 手动触发一次本地音乐 MBID 扫描（供 Web UI 按钮调用）。
+// 返回扫描统计；解析器未初始化或无需扫描时返回零值统计。
+func (s *SyncService) ScanMBID(ctx context.Context) (mbid.ScanStats, error) {
+	if s.mbidResolver == nil {
+		return mbid.ScanStats{Message: "MBID 解析器未初始化"}, nil
+	}
+	return s.mbidResolver.Scan(ctx)
+}
+
+// maybeScanMBID 去抖后后台触发一次 MBID 扫描：间隔由 library.scan_interval 控制（默认 6h），
+// 避免每次用户识别/定时同步都全量遍历音乐目录（大规模曲库代价高）。
+// 扫描在独立的后台 goroutine 中运行（自带 30m 超时），不随调用方 ctx 取消而中断。
+func (s *SyncService) maybeScanMBID() {
+	interval := s.scanInterval()
+
+	s.mbidMu.Lock()
+	if time.Since(s.lastMBIDScan) < interval {
+		s.mbidMu.Unlock()
+		return
+	}
+	s.lastMBIDScan = time.Now()
+	s.mbidMu.Unlock()
+
+	// 用独立 ctx（自带超时），避免父 ctx 在同步结束后被取消导致扫描中断。
+	scanCtx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	safego.Go(s.logger, "playlist.mbidScan", func() {
+		defer cancel()
+		if _, err := s.mbidResolver.Scan(scanCtx); err != nil {
+			s.logger.Warn("MBID 本地扫描失败", "错误", err)
+		}
+	})
+}
+
+// scanInterval 解析本地扫描去抖间隔（来自 library.scan_interval 配置），
+// 非法或为空时回退到 6h，并限制在 [1m, 24h] 之间。
+func (s *SyncService) scanInterval() time.Duration {
+	const def = 6 * time.Hour
+	d := def
+	if s.cfg != nil && s.cfg.Library.ScanInterval != "" {
+		if parsed, err := time.ParseDuration(s.cfg.Library.ScanInterval); err == nil {
+			d = parsed
+		} else {
+			s.logger.Warn("library.scan_interval 非法，回退到 6h", "值", s.cfg.Library.ScanInterval, "错误", err)
+		}
+	}
+	if d < time.Minute {
+		d = time.Minute
+	}
+	if d > 24*time.Hour {
+		d = 24 * time.Hour
+	}
+	return d
 }
 
 // UpdateConfig 更新配置（热更新时调用）。
@@ -459,6 +597,10 @@ func (s *SyncService) onUserIdentified(token, username string) {
 			return s.syncLastFMUser(ctx, token, username, lfm)
 		})
 	}
+
+	// 用户已激活：顺带触发一次 MBID 本地扫描（去抖，6 小时内仅一次），
+	// 把标签里的 MBID 落库，后续歌单匹配即可走精确录音 MBID。
+	s.maybeScanMBID()
 }
 
 // syncAll 对所有已登录且启用歌单同步的用户执行同步。
@@ -484,6 +626,9 @@ func (s *SyncService) syncAll(ctx context.Context) {
 		"活跃用户标识数", len(activeUsers),
 		"待同步用户数", len(tokensByUser),
 	)
+
+	// 定时同步时顺带刷新一次 MBID 本地扫描（去抖，6 小时内仅一次）。
+	s.maybeScanMBID()
 
 	for username, tokens := range tokensByUser {
 		userCfg, ok := cfg.Users[username]

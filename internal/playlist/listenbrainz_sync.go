@@ -8,6 +8,7 @@ import (
 	"cnb.cool/dtapp/fnmusic-sync/internal/buildinfo"
 	"cnb.cool/dtapp/fnmusic-sync/internal/config"
 	"cnb.cool/dtapp/fnmusic-sync/internal/feiniu"
+	"cnb.cool/dtapp/fnmusic-sync/internal/mbid"
 	"cnb.cool/dtapp/fnmusic-sync/internal/scrobbler"
 	"cnb.cool/dtapp/fnmusic-sync/internal/strutil"
 )
@@ -146,6 +147,11 @@ func (s *SyncService) syncUser(
 		}
 
 		return syncResult{Err: fmt.Errorf("获取飞牛音乐曲目列表失败（用户标识=%s）: %w", strutil.FirstN8(token), err)}
+	}
+
+	// 注入已落库的 MBID 映射，使匹配优先走精确录音 MBID。
+	if e := mbid.EnrichIndexes(ctx, s.dataStore, indexes); e != nil {
+		s.logger.Warn("加载 MBID 索引失败（不影响艺人+曲名匹配）", "错误", e)
 	}
 
 	// 该 token 可用，后续定时同步优先复用它。
@@ -319,10 +325,11 @@ func (s *SyncService) syncPlaylist(
 		trackGUIDs = append(trackGUIDs, guid)
 		matched++
 
-		// 使用第一首歌的封面作为歌单封面
+		// 使用第一首（有封面）匹配曲目的封面作为歌单封面。
+		// 曲目 coverId 不能直接用作歌单封面，需先下载再上传成 playlist 类型封面。
 		if coverId == "" {
 			if t, ok := indexes.GUIDToTrack[guid]; ok && t.CoverId != "" {
-				coverId = t.CoverId
+				coverId, _ = apiClient.ResolvePlaylistCover(ctx, t.CoverId)
 			}
 		}
 	}
@@ -360,12 +367,19 @@ func (s *SyncService) syncPlaylist(
 			"歌单名称", playlistName,
 			"歌单曲目数", len(trackGUIDs),
 		)
-
-		return 0, nil
+	} else {
+		if err := apiClient.AddTracksToPlaylist(ctx, playlistGUID, newGUIDs); err != nil {
+			return 0, fmt.Errorf("添加曲目失败: %w", err)
+		}
 	}
 
-	if err := apiClient.AddTracksToPlaylist(ctx, playlistGUID, newGUIDs); err != nil {
-		return 0, fmt.Errorf("添加曲目失败: %w", err)
+	// 同步完成后清理失效曲目（曲库已删除的歌曲在歌单里留下的死链）。
+	purged, perr := apiClient.PurgeInvalidTracks(ctx, playlistGUID)
+	if perr != nil {
+		s.logger.Warn("清理失效曲目失败（不影响已同步内容）",
+			"歌单", playlistName, "错误", perr)
+	} else if purged > 0 {
+		s.logger.Info("已清理失效曲目", "歌单", playlistName, "数量", purged)
 	}
 
 	s.logger.Info("歌单同步完成",
