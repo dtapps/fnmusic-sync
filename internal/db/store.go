@@ -550,6 +550,8 @@ func (s *Store) ListRecentSyncLogs(ctx context.Context, limit int64) ([]SyncLog,
 	return s.q.ListRecentSyncLogs(ctx, limit)
 }
 
+// （曲目 MBID 映射相关方法已迁移到 internal/datadb，见 datadb.Store）
+
 // nullStr 把 Go 字符串转成可空的 sql.NullString（空串视为 NULL）。
 func nullStr(s string) sql.NullString {
 	if s == "" {

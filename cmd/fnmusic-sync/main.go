@@ -17,6 +17,7 @@ import (
 
 	"cnb.cool/dtapp/fnmusic-sync/internal/buildinfo"
 	"cnb.cool/dtapp/fnmusic-sync/internal/config"
+	"cnb.cool/dtapp/fnmusic-sync/internal/datadb"
 	"cnb.cool/dtapp/fnmusic-sync/internal/db"
 	"cnb.cool/dtapp/fnmusic-sync/internal/playback"
 	"cnb.cool/dtapp/fnmusic-sync/internal/playlist"
@@ -141,13 +142,26 @@ func run(doCheck, debug bool, wait time.Duration, logger *slog.Logger, levelVar 
 	}
 
 	// 打开持久化数据库（sqlite，modernc 纯 Go 驱动）。
-	// 复用 state 路径，仅把扩展名换成 .db。
+	// 复用 state 路径，仅把扩展名换成 .db。state.db 存运营状态（users / playback_log /
+	// sync_log / run_status），MBID 等「数据」单独放在同目录的 data.db。
 	dbPath := strings.TrimSuffix(rt.StatePath, filepath.Ext(rt.StatePath)) + ".db"
 	dbStore, err := db.Open(dbPath)
 	if err != nil {
 		return fmt.Errorf("打开数据库失败 (%s): %w", dbPath, err)
 	}
 	defer dbStore.Close()
+
+	dataPath := filepath.Join(filepath.Dir(dbPath), "data.db")
+	dataStore, err := datadb.Open(dataPath)
+	if err != nil {
+		return fmt.Errorf("打开数据库失败 (%s): %w", dataPath, err)
+	}
+	defer dataStore.Close()
+
+	// 首次拆分：把旧 state.db 中的 track_mbid_map 迁移到 data.db（幂等，失败不阻断启动）。
+	if err := migrateMBID(dbStore, dataStore, dbPath); err != nil {
+		logger.Warn("MBID 数据迁移失败，将按需重新扫描", "错误", err)
+	}
 
 	store := playback.NewUserStore(dbStore, logger)
 
@@ -193,7 +207,7 @@ func run(doCheck, debug bool, wait time.Duration, logger *slog.Logger, levelVar 
 	p := proxy.New(cfg, manager, logger)
 
 	// 创建歌单同步服务（使用代理的 UserCache 获取活跃用户）
-	playlistSync := playlist.NewSyncService(appCfg, logger, p.UserCache(), dbStore, feiniuReqLog, lfReqLog, lbReqLog)
+	playlistSync := playlist.NewSyncService(appCfg, logger, p.UserCache(), dbStore, dataStore, feiniuReqLog, lfReqLog, lbReqLog)
 
 	// applyConfig 统一处理：重建各用户推送平台、更新日志级别、打印用户列表。
 	// 启动与配置热更新都走它，保证两处行为一致。
@@ -317,7 +331,7 @@ func run(doCheck, debug bool, wait time.Duration, logger *slog.Logger, levelVar 
 	defer playlistSync.Stop()
 
 	// fpk 模式：启动 Web UI（统一网关监听 app.sock）
-	webUI, webUIErr := startWebUI(logger, p.UserCache(), dbStore)
+	webUI, webUIErr := startWebUI(logger, p.UserCache(), dbStore, playlistSync)
 	if webUIErr != nil {
 		logger.Warn("Web UI 启动失败（不影响代理功能）", "错误", webUIErr)
 	} else if webUI != nil {
@@ -390,6 +404,43 @@ func waitForTakeover(ctx context.Context, t *proxy.Takeover, logger *slog.Logger
 		case <-time.After(interval):
 		}
 	}
+}
+
+// migrateMBID 把旧 state.db 中的 track_mbid_map 一次性迁移到 data.db。
+// 幂等：data.db 已有数据 / 旧表不存在则跳过；迁移成功后清理旧表。
+// 失败仅告警，不影响启动（下次扫描会重新生成 MBID 映射）。
+func migrateMBID(stateStore *db.Store, dataStore *datadb.Store, statePath string) error {
+	if stateStore == nil || dataStore == nil {
+		return nil
+	}
+	sdb := stateStore.Raw()
+	var oldCnt int
+	if err := sdb.QueryRow("SELECT COUNT(*) FROM track_mbid_map").Scan(&oldCnt); err != nil {
+		// 旧表不存在（已是新结构），无需迁移。
+		return nil
+	}
+	if oldCnt == 0 {
+		return nil
+	}
+	ddb := dataStore.Raw()
+	var newCnt int
+	if err := ddb.QueryRow("SELECT COUNT(*) FROM track_mbid_map").Scan(&newCnt); err == nil && newCnt > 0 {
+		return nil // 已迁移过，跳过
+	}
+	// modernc.org/sqlite 不支持 ATTACH 的 ? 占位符，此处 statePath 来自配置（可信），
+	// 仅做单引号转义后内联拼接。
+	quoted := "'" + strings.ReplaceAll(statePath, "'", "''") + "'"
+	if _, err := ddb.Exec("ATTACH DATABASE " + quoted + " AS oldmbid"); err != nil {
+		return err
+	}
+	defer ddb.Exec("DETACH DATABASE oldmbid")
+	if _, err := ddb.Exec("INSERT OR REPLACE INTO track_mbid_map SELECT * FROM oldmbid.track_mbid_map"); err != nil {
+		return err
+	}
+	if _, err := sdb.Exec("DROP TABLE IF EXISTS track_mbid_map"); err != nil {
+		return err
+	}
+	return nil
 }
 
 // startGoroutineDumper 在 debug 模式下常驻，平时只做 runtime.NumGoroutine 原子读（零输出）：
