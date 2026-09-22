@@ -8,6 +8,7 @@ import (
 	"cnb.cool/dtapp/fnmusic-sync/internal/buildinfo"
 	"cnb.cool/dtapp/fnmusic-sync/internal/config"
 	"cnb.cool/dtapp/fnmusic-sync/internal/feiniu"
+	"cnb.cool/dtapp/fnmusic-sync/internal/mbid"
 	"cnb.cool/dtapp/fnmusic-sync/internal/scrobbler"
 	"cnb.cool/dtapp/fnmusic-sync/internal/strutil"
 )
@@ -117,7 +118,10 @@ func (s *SyncService) syncUser(
 		!playlistCfg.WeeklyJams.Enabled &&
 		!playlistCfg.WeeklyExploration.Enabled &&
 		!playlistCfg.YearDiscoveries.Enabled &&
-		!playlistCfg.YearMissed.Enabled {
+		!playlistCfg.YearMissed.Enabled &&
+		!playlistCfg.TopRecordings.Enabled &&
+		!playlistCfg.LovedTracks.Enabled &&
+		!playlistCfg.RecentlyPlayed.Enabled {
 		return syncResult{Noop: true}
 	}
 
@@ -146,6 +150,11 @@ func (s *SyncService) syncUser(
 		}
 
 		return syncResult{Err: fmt.Errorf("获取飞牛音乐曲目列表失败（用户标识=%s）: %w", strutil.FirstN8(token), err)}
+	}
+
+	// 注入已落库的 MBID 映射，使匹配优先走精确录音 MBID。
+	if e := mbid.EnrichIndexes(ctx, s.dataStore, indexes); e != nil {
+		s.logger.Warn("加载 MBID 索引失败（不影响艺人+曲名匹配）", "错误", e)
 	}
 
 	// 该 token 可用，后续定时同步优先复用它。
@@ -259,6 +268,73 @@ func (s *SyncService) syncUser(
 		}
 	}
 
+	// 同步 top_recordings（基于 LB 收听统计的最常听录音）。
+	if playlistCfg.TopRecordings.Enabled {
+		lbClient := scrobbler.NewListenBrainzPlaylistClient(lb.Username, s.lbReqLog)
+		rng := playlistCfg.TopRecordings.Range
+		if rng == "" {
+			rng = "all_time"
+		}
+		name := resolvePlaylistName(playlistCfg.TopRecordings.Name, "LB 最常听", nil)
+		topRecs, terr := lbClient.FetchTopRecordings(ctx, playlistCfg.TopRecordings.Limit, rng)
+		if terr != nil {
+			s.logger.Error("获取 ListenBrainz 最常听失败",
+				"用户", username, "错误", terr,
+			)
+		} else if topRecs != nil {
+			if added, err := s.syncPlaylist(ctx, apiClient, username, topRecs, name, indexes); err != nil {
+				s.logger.Error("同步 top_recordings 失败",
+					"用户", username, "错误", err,
+				)
+			} else {
+				res.Playlists++
+				res.Tracks += added
+			}
+		}
+	}
+
+	// 同步 loved_tracks（ListenBrainz 喜欢的录音）。
+	if playlistCfg.LovedTracks.Enabled {
+		lbClient := scrobbler.NewListenBrainzPlaylistClient(lb.Username, s.lbReqLog)
+		name := resolvePlaylistName(playlistCfg.LovedTracks.Name, "LB 喜欢的音乐", nil)
+		loved, lerr := lbClient.FetchLovedRecordings(ctx, playlistCfg.LovedTracks.Limit)
+		if lerr != nil {
+			s.logger.Error("获取 ListenBrainz 喜欢的音乐失败",
+				"用户", username, "错误", lerr,
+			)
+		} else if loved != nil {
+			if added, err := s.syncPlaylist(ctx, apiClient, username, loved, name, indexes); err != nil {
+				s.logger.Error("同步 loved_tracks 失败",
+					"用户", username, "错误", err,
+				)
+			} else {
+				res.Playlists++
+				res.Tracks += added
+			}
+		}
+	}
+
+	// 同步 recently_played（ListenBrainz 最近收听记录）。
+	if playlistCfg.RecentlyPlayed.Enabled {
+		lbClient := scrobbler.NewListenBrainzPlaylistClient(lb.Username, s.lbReqLog)
+		name := resolvePlaylistName(playlistCfg.RecentlyPlayed.Name, "LB 最近在听", nil)
+		recent, rerr := lbClient.FetchRecentlyPlayed(ctx, playlistCfg.RecentlyPlayed.Limit)
+		if rerr != nil {
+			s.logger.Error("获取 ListenBrainz 最近在听失败",
+				"用户", username, "错误", rerr,
+			)
+		} else if recent != nil {
+			if added, err := s.syncPlaylist(ctx, apiClient, username, recent, name, indexes); err != nil {
+				s.logger.Error("同步 recently_played 失败",
+					"用户", username, "错误", err,
+				)
+			} else {
+				res.Playlists++
+				res.Tracks += added
+			}
+		}
+	}
+
 	return res
 }
 
@@ -319,10 +395,11 @@ func (s *SyncService) syncPlaylist(
 		trackGUIDs = append(trackGUIDs, guid)
 		matched++
 
-		// 使用第一首歌的封面作为歌单封面
+		// 使用第一首（有封面）匹配曲目的封面作为歌单封面。
+		// 曲目 coverId 不能直接用作歌单封面，需先下载再上传成 playlist 类型封面。
 		if coverId == "" {
 			if t, ok := indexes.GUIDToTrack[guid]; ok && t.CoverId != "" {
-				coverId = t.CoverId
+				coverId, _ = apiClient.ResolvePlaylistCover(ctx, t.CoverId)
 			}
 		}
 	}
@@ -360,12 +437,19 @@ func (s *SyncService) syncPlaylist(
 			"歌单名称", playlistName,
 			"歌单曲目数", len(trackGUIDs),
 		)
-
-		return 0, nil
+	} else {
+		if err := apiClient.AddTracksToPlaylist(ctx, playlistGUID, newGUIDs); err != nil {
+			return 0, fmt.Errorf("添加曲目失败: %w", err)
+		}
 	}
 
-	if err := apiClient.AddTracksToPlaylist(ctx, playlistGUID, newGUIDs); err != nil {
-		return 0, fmt.Errorf("添加曲目失败: %w", err)
+	// 同步完成后清理失效曲目（曲库已删除的歌曲在歌单里留下的死链）。
+	purged, perr := apiClient.PurgeInvalidTracks(ctx, playlistGUID)
+	if perr != nil {
+		s.logger.Warn("清理失效曲目失败（不影响已同步内容）",
+			"歌单", playlistName, "错误", perr)
+	} else if purged > 0 {
+		s.logger.Info("已清理失效曲目", "歌单", playlistName, "数量", purged)
 	}
 
 	s.logger.Info("歌单同步完成",

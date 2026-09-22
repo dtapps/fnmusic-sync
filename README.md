@@ -13,8 +13,8 @@
 - **日志双写**：同时输出到控制台(stderr)与日志文件 `/var/log/fnmusic-sync/fnmusic-sync.log`，自动切割、gzip 压缩、过期清理。
 - **一键安装**：安装脚本自动下载系统安装包、注册 systemd 服务、设置开机自启并启动，无需手动操作。
 - **自升级**：`fnmusic-sync self-upgrade` 自动检测系统包管理器（dpkg），下载对应安装包并安装，升级后自动重启服务。
-- **ListenBrainz 推荐歌单同步**：自动同步 ListenBrainz 的 daily_jams、weekly_jams、weekly_exploration、year_discoveries、year_missed 推荐歌单到飞牛音乐。
-- **Last.fm 智能歌单同步**：基于 scrobble 数据自动生成 top_tracks（最常听）、loved_tracks（红心收藏）、recent_tracks（最近播放）歌单。
+- **ListenBrainz 推荐/统计歌单同步**：自动同步 ListenBrainz 的 daily_jams、weekly_jams、weekly_exploration、year_discoveries、year_missed 推荐歌单，以及基于收听统计的 top_recordings（最常听）、loved_tracks（喜欢的音乐）、recently_played（最近在听）到飞牛音乐。
+- **Last.fm 智能歌单同步**：基于 scrobble 数据自动生成 top_tracks（最常听）、loved_tracks（红心收藏）、recent_tracks（最近播放）、weekly_charts（本周榜单）、library（我的曲库）歌单。
 
 ## 工作原理
 
@@ -32,7 +32,8 @@ socket 绑定在 inode 上，用 `os.Rename`（mv）改名后官方后端仍能�
 | -------------------- | ---------------------------------------- | -------------------------------------------- |
 | 二进制               | `/usr/bin/fnmusic-sync`                  | `/var/apps/fnmusic-sync/target/fnmusic-sync` |
 | 配置文件             | `/etc/fnmusic-sync/config.yaml`          | `$TRIM_PKGETC/config.yaml`                   |
-| 数据库（状态/用户）  | `/var/lib/fnmusic-sync/state.db`         | `$TRIM_PKGVAR/state.db`                      |
+| 数据库（运营状态）   | `/var/lib/fnmusic-sync/state.db`         | `$TRIM_PKGVAR/state.db`                      |
+| 数据库（MBID 数据）  | `/var/lib/fnmusic-sync/data.db`          | `$TRIM_PKGVAR/data.db`                       |
 | 日志文件             | `/var/log/fnmusic-sync/fnmusic-sync.log` | `$TRIM_PKGVAR/logs/fnmusic-sync.log`         |
 | 代理监听 socket      | `/var/run/trim_music.socket`             | 同左                                         |
 | 官方 upstream socket | `/var/run/trim_music_upstream.socket`    | 同左                                         |
@@ -235,13 +236,18 @@ logging:
 | `users`                                                 | 按飞牛用户名隔离的推送凭证，可配多个用户                                                                                                      |
 | `playback.scrobble_threshold`                           | `auto`=听满 min(时长/2, 4min)（Last.fm 规则）；`30s`/`2m`=固定时长；`50%`=按比例；`off`=收到播放即推（不建议日常用）                          |
 | `playlist`                                              | 歌单同步总开关与间隔                                                                                                                          |
-| `users.<name>.lastfm.playlist`                          | Last.fm 智能歌单同步（top_tracks / loved_tracks / recent_tracks）                                                                             |
-| `users.<name>.listenbrainz.playlist`                    | ListenBrainz 推荐歌单同步                                                                                                                     |
+| `users.<name>.lastfm.playlist`                          | Last.fm 智能歌单同步（top_tracks / loved_tracks / recent_tracks / weekly_charts / library）                                                   |
+| `users.<name>.listenbrainz.playlist`                    | ListenBrainz 推荐/统计歌单同步                                                                                                                |
 | `users.<name>.listenbrainz.playlist.daily_jams`         | 每日推荐歌单，需在 ListenBrainz 关注 [troi-bot](https://listenbrainz.org/user/troi-bot/)                                                      |
 | `users.<name>.listenbrainz.playlist.weekly_jams`        | 每周推荐歌单                                                                                                                                  |
 | `users.<name>.listenbrainz.playlist.weekly_exploration` | 每周探索歌单（发现新音乐）                                                                                                                    |
 | `users.<name>.listenbrainz.playlist.year_discoveries`   | 年度发现歌单（{year} 自动替换）                                                                                                               |
 | `users.<name>.listenbrainz.playlist.year_missed`        | 年度遗珠歌单（{year} 自动替换）                                                                                                               |
+| `users.<name>.listenbrainz.playlist.top_recordings`     | 最常听录音歌单（基于 ListenBrainz 收听统计），可选 `range`：week/month/quarter/half_year/year/all_time/this_year，默认 all_time               |
+| `users.<name>.listenbrainz.playlist.loved_tracks`       | 喜欢的音乐歌单（ListenBrainz loved recordings）                                                                                               |
+| `users.<name>.listenbrainz.playlist.recently_played`    | 最近在听歌单（基于 ListenBrainz listens 收听记录）                                                                                            |
+| `users.<name>.lastfm.playlist.weekly_charts`            | 本周曲目榜单（Last.fm weeklytrackchart）                                                                                                      |
+| `users.<name>.lastfm.playlist.library`                  | 我的曲库歌单（Last.fm library.getTracks，基于 scrobble 历史）                                                                                 |
 | `logging`                                               | 日志级别与轮转策略（切割大小、保留份数、过期天数、是否压缩）。日志路径固定为 `/var/log/fnmusic-sync/fnmusic-sync.log`，**目录与文件名不可配** |
 
 ### Last.fm 授权
@@ -257,13 +263,16 @@ ListenBrainz 只需填 `token`，`username` 留空时自动获取并写回。
 
 支持将 ListenBrainz 的推荐歌单同步到飞牛音乐，按用户独立配置。
 
-| 歌单类型             | 说明                   | 特殊要求                                                                       |
-| -------------------- | ---------------------- | ------------------------------------------------------------------------------ |
-| `daily_jams`         | 每日推荐               | 需在 ListenBrainz 上关注 [`troi-bot`](https://listenbrainz.org/user/troi-bot/) |
-| `weekly_jams`        | 每周推荐               | 无                                                                             |
-| `weekly_exploration` | 每周探索（发现新音乐） | 无                                                                             |
-| `year_discoveries`   | 年度发现歌单           | 无（ListenBrainz 每年自动生成）                                                |
-| `year_missed`        | 年度遗珠歌单           | 无（ListenBrainz 每年自动生成）                                                |
+| 歌单类型             | 说明                                        | 特殊要求                                                                       |
+| -------------------- | ------------------------------------------- | ------------------------------------------------------------------------------ |
+| `daily_jams`         | 每日推荐                                    | 需在 ListenBrainz 上关注 [`troi-bot`](https://listenbrainz.org/user/troi-bot/) |
+| `weekly_jams`        | 每周推荐                                    | 无                                                                             |
+| `weekly_exploration` | 每周探索（发现新音乐）                      | 无                                                                             |
+| `year_discoveries`   | 年度发现歌单                                | 无（ListenBrainz 每年自动生成）                                                |
+| `year_missed`        | 年度遗珠歌单                                | 无（ListenBrainz 每年自动生成）                                                |
+| `top_recordings`     | 最常听录音（基于收听统计）                  | 可选 `range`（week/month/quarter/half_year/year/all_time/this_year）           |
+| `loved_tracks`       | 喜欢的音乐（ListenBrainz loved recordings） | 无                                                                             |
+| `recently_played`    | 最近在听（ListenBrainz listens 收听记录）   | 无                                                                             |
 
 **开启条件：**
 
@@ -372,6 +381,19 @@ configs/              配置示例
 scripts/              install.sh（安装/升级/卸载）+ postinstall.sh + preremove.sh
 fpkg/                 飞牛 fnOS 应用包（fpk）源码
 ```
+
+## 规划中（考虑开发的歌单源）
+
+以下功能仍在评估，尚未实现：
+
+- **B 类：返回的是专辑/艺人，需额外"展开为曲目"一步（实现成本高、收益一般）**
+  - ListenBrainz `top_releases`（最常听专辑）→ 展开为专辑下曲目
+  - ListenBrainz `top_artists`（最常听艺人）→ 取每位艺人代表曲
+  - Last.fm `top_albums` / `top_artists`（最常听专辑/艺人）→ 展开为曲目
+- **A 类：实现成本偏高或价值一般，暂搁置**
+  - ListenBrainz `recommendations`（相似用户推荐）—— 仅返回 recording MBID，需额外解析曲名，体验依赖 MBID 曲库
+  - Last.fm `friends` 最近在听 —— 需逐个好友拉取，N+1 调用
+  - Last.fm `neighbours` 热歌 —— 需逐个邻居拉取，N+1 调用
 
 ## 许可
 

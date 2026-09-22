@@ -7,6 +7,21 @@ server:
   socket_mode: 0 # 0 = 沿用官方 socket 权限（至少 0666）
   upstream_wait: 30s # 启动时等待官方后端就绪的超时
 
+# 本地音乐文件目录（解析音频标签中的 MBID，建立「MBID ↔ 飞牛 GUID」映射）。
+# 数组形式，可配置多个目录（音乐分布在不同位置时）。
+# 目录必须是 fnmusic-sync 能直接读到的路径：
+#   - 本工具运行在 fnOS(NAS) 本机：填飞牛曲库真实路径（如 /media/音乐）。
+#   - 运行在其他机器：需先挂载 NAS 的 SMB/NFS 共享，填挂载点路径。
+# 留空或注释掉则不解析文件标签，MBID 匹配退化为「艺人名+曲名」。
+library:
+  directories:
+    - /path/to/music
+    # - /mnt/nas/music2
+    # - /mnt/nas/music3
+  # MBID 本地扫描的去抖间隔（避免每次用户识别/定时同步都全量遍历音乐目录）。
+  # 支持 Go 时长格式：300s、10m、6h、24h。空或非法值回退到 6h，限制在 [1m, 24h]。
+  scan_interval: 6h
+
 # 每个用户各自配置自己的 Last.fm / ListenBrainz 账号（多用户隔离）。
 # key 必须与飞牛 /user/me 返回的用户名一致（从日志“识别到用户 用户名=xxx”确认）。
 users:
@@ -38,6 +53,14 @@ users:
           enabled: false
           name: 'LF 最近播放'
           limit: 50 # 0=不限制（上限 200）
+        weekly_charts:
+          enabled: false
+          name: 'LF 本周榜单' # Last.fm weeklytrackchart
+          limit: 50 # 0=不限制（上限 1000）
+        library:
+          enabled: false
+          name: 'LF 我的曲库' # Last.fm library.getTracks（基于 scrobble 历史）
+          limit: 50 # 0=不限制（上限 1000）
     listenbrainz:
       enabled: false
       token: '' # ListenBrainz 用户 Token（scrobble 只认这个）
@@ -71,6 +94,20 @@ users:
           enabled: false
           name: 'LB {year} 年度遗珠' # {year} 会自动替换为真实年份，如 "LB 2025 年度遗珠"
           limit: 50
+        # 统计类歌单（基于收听数据，非 troi-bot 推荐）
+        top_recordings:
+          enabled: false
+          name: 'LB 最常听' # 飞牛音乐中的歌单名称
+          limit: 50 # 0=不限制（使用 LB 全量）
+          range: all_time # 统计维度：week / month / quarter / half_year / year / all_time / this_year
+        loved_tracks:
+          enabled: false
+          name: 'LB 喜欢的音乐' # ListenBrainz loved recordings
+          limit: 50
+        recently_played:
+          enabled: false
+          name: 'LB 最近在听' # 基于 ListenBrainz listens 收听记录
+          limit: 50 # 0=不限制
   # 第二个用户示例（去掉注释即可）：
   # alice:
   #   lastfm:
@@ -148,3 +185,4 @@ logging:
 
 # 用户状态（是否启用各平台、累计推送次数、最近推送时间、用户列表与平台绑定）
 # 由程序自动维护在内置数据库 state.db 中（路径由运行模式自动决定），无需在此手写。
+# 曲目 MBID 映射等「数据」单独维护在 data.db（与 state.db 分离）。

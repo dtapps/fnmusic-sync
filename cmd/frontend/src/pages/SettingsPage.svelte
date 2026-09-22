@@ -11,9 +11,10 @@
     currentUser,
   } from '$lib/stores';
   import type { ThemeMode, LanguageMode } from '$lib/stores';
-  import { saveSettings, checkUpgrade, doUpgrade } from '$lib/api';
+  import { saveSettings, checkUpgrade, doUpgrade, getLibrary, saveLibrary } from '$lib/api';
   import { errMessage } from '$lib/utils';
   import { Card, Select, Switch, Input, Button, Badge } from '$lib/components';
+  import { pickDirectory, isHostEnvironment } from '$lib/trim';
 
   let scrobbleThreshold = $state('auto');
   let playlistEnabled = $state(true);
@@ -27,6 +28,15 @@
 
   let saving = $state(false);
   let saveTimer: ReturnType<typeof setTimeout> | null = null;
+
+  // ===== 音乐目录（library.directories）状态 =====
+  let directories = $state<string[]>([]);
+  let libraryScanInterval = $state('6h');
+  let libraryMbidOnlineLookup = $state(false);
+  let manualPath = $state('');
+  let libSaving = $state(false);
+  let libSaveTimer: ReturnType<typeof setTimeout> | null = null;
+  const canPick = isHostEnvironment();
 
   // ===== 升级相关状态 =====
   let upgradeChecking = $state(false);
@@ -46,6 +56,9 @@
     logMaxBackups = log.max_backups ?? 5;
     logMaxAge = log.max_age ?? 7;
     logCompress = log.compress ?? true;
+    directories = cfg.library?.directories || [];
+    libraryScanInterval = cfg.library?.scan_interval || '6h';
+    libraryMbidOnlineLookup = cfg.library?.mbid_online_lookup ?? false;
   });
 
   // 用户修改任意设置时触发防抖保存（通过 onchange/oninput 事件，不会因 config 同步而触发）
@@ -80,6 +93,58 @@
     } finally {
       saving = false;
     }
+  }
+
+  // ===== 音乐目录相关方法 =====
+  function scheduleLibSave() {
+    if (libSaveTimer) clearTimeout(libSaveTimer);
+    libSaveTimer = setTimeout(doLibSave, 800);
+  }
+
+  async function doLibSave() {
+    if (libSaving) return;
+    libSaving = true;
+    try {
+      const res = await saveLibrary(directories, libraryScanInterval.trim() || '6h', libraryMbidOnlineLookup);
+      directories = res.directories;
+      await reloadConfig();
+    } catch (e) {
+      showToast($_('library.save_failed', { values: { message: errMessage(e) } }), 'error');
+    } finally {
+      libSaving = false;
+    }
+  }
+
+  // 通过 fnOS 原生文件夹选择器选目录（宿主环境）
+  async function handlePick() {
+    const paths = await pickDirectory();
+    if (!paths || !paths.length) return;
+    let changed = false;
+    for (const p of paths) {
+      if (!directories.includes(p)) {
+        directories = [...directories, p];
+        changed = true;
+      }
+    }
+    if (changed) scheduleLibSave();
+  }
+
+  // 手动输入路径添加（非宿主环境 / 开发调试）
+  function handleAddManual() {
+    const p = manualPath.trim();
+    if (!p) return;
+    if (directories.includes(p)) {
+      manualPath = '';
+      return;
+    }
+    directories = [...directories, p];
+    manualPath = '';
+    scheduleLibSave();
+  }
+
+  function removeDir(idx: number) {
+    directories = directories.filter((_, i) => i !== idx);
+    scheduleLibSave();
   }
 
   // ===== 升级相关方法 =====
@@ -201,6 +266,55 @@
   </Card>
 
   {#if $currentUser.isAdmin}
+    <Card>
+      <div class="flex items-center justify-between gap-2 mb-4">
+        <h2 class="text-base font-semibold">{$_('library.title')}</h2>
+        {#if libSaving}<span class="text-xs text-muted-foreground">{$_('settings.auto_saving')}</span>{/if}
+      </div>
+      <p class="text-xs text-muted-foreground mb-4">{$_('library.desc')}</p>
+      {#if directories.length > 0}
+        <ul class="flex flex-col gap-2 mb-4">
+          {#each directories as dir, i (dir)}
+            <li class="flex items-center gap-2 rounded-md border border-border bg-muted/40 px-3 py-2">
+              <code class="text-xs flex-1 break-all">{dir}</code>
+              <Button variant="ghost" size="sm" onclick={() => removeDir(i)}>{$_('library.remove')}</Button>
+            </li>
+          {/each}
+        </ul>
+      {:else}
+        <p class="text-xs text-muted-foreground mb-4">{$_('library.empty')}</p>
+      {/if}
+      <div class="flex flex-col sm:flex-row gap-2">
+        {#if canPick}
+          <Button variant="primary" size="sm" onclick={handlePick}>{$_('library.pick')}</Button>
+        {/if}
+        <div class="flex flex-1 gap-2">
+          <Input
+            bind:value={manualPath}
+            onkeydown={(e: KeyboardEvent) => {
+              if (e.key === 'Enter') handleAddManual();
+            }}
+            placeholder={$_('library.placeholder')}
+          />
+          <Button variant="outline" size="sm" onclick={handleAddManual}>{$_('library.add')}</Button>
+        </div>
+      </div>
+      <div class="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 mt-4">
+        <label class="text-xs font-medium sm:min-w-[120px]">{$_('library.scan_interval')}</label>
+        <Input
+          bind:value={libraryScanInterval}
+          oninput={scheduleLibSave}
+          placeholder={$_('library.scan_interval_placeholder')}
+        />
+      </div>
+      <p class="text-xs text-muted-foreground mt-1">{$_('library.scan_interval_desc')}</p>
+      <div class="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 mt-4">
+        <label class="text-xs font-medium sm:min-w-[120px]">{$_('library.mbid_online_lookup')}</label>
+        <Switch bind:checked={libraryMbidOnlineLookup} onchange={scheduleLibSave} />
+        <span class="text-xs text-muted-foreground">{$_('library.mbid_online_lookup_desc')}</span>
+      </div>
+    </Card>
+
     <Card>
       <h2 class="text-base font-semibold mb-4">{$_('upgrade.title')}</h2>
       <div class="flex flex-col gap-3">

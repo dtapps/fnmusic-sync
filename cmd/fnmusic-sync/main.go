@@ -17,6 +17,7 @@ import (
 
 	"cnb.cool/dtapp/fnmusic-sync/internal/buildinfo"
 	"cnb.cool/dtapp/fnmusic-sync/internal/config"
+	"cnb.cool/dtapp/fnmusic-sync/internal/datadb"
 	"cnb.cool/dtapp/fnmusic-sync/internal/db"
 	"cnb.cool/dtapp/fnmusic-sync/internal/playback"
 	"cnb.cool/dtapp/fnmusic-sync/internal/playlist"
@@ -141,13 +142,21 @@ func run(doCheck, debug bool, wait time.Duration, logger *slog.Logger, levelVar 
 	}
 
 	// 打开持久化数据库（sqlite，modernc 纯 Go 驱动）。
-	// 复用 state 路径，仅把扩展名换成 .db。
+	// 复用 state 路径，仅把扩展名换成 .db。state.db 存运营状态（users / playback_log /
+	// sync_log / run_status），MBID 等「数据」单独放在同目录的 data.db。
 	dbPath := strings.TrimSuffix(rt.StatePath, filepath.Ext(rt.StatePath)) + ".db"
 	dbStore, err := db.Open(dbPath)
 	if err != nil {
 		return fmt.Errorf("打开数据库失败 (%s): %w", dbPath, err)
 	}
 	defer dbStore.Close()
+
+	dataPath := filepath.Join(filepath.Dir(dbPath), "data.db")
+	dataStore, err := datadb.Open(dataPath)
+	if err != nil {
+		return fmt.Errorf("打开数据库失败 (%s): %w", dataPath, err)
+	}
+	defer dataStore.Close()
 
 	store := playback.NewUserStore(dbStore, logger)
 
@@ -193,7 +202,7 @@ func run(doCheck, debug bool, wait time.Duration, logger *slog.Logger, levelVar 
 	p := proxy.New(cfg, manager, logger)
 
 	// 创建歌单同步服务（使用代理的 UserCache 获取活跃用户）
-	playlistSync := playlist.NewSyncService(appCfg, logger, p.UserCache(), dbStore, feiniuReqLog, lfReqLog, lbReqLog)
+	playlistSync := playlist.NewSyncService(appCfg, logger, p.UserCache(), dbStore, dataStore, feiniuReqLog, lfReqLog, lbReqLog)
 
 	// applyConfig 统一处理：重建各用户推送平台、更新日志级别、打印用户列表。
 	// 启动与配置热更新都走它，保证两处行为一致。
@@ -317,7 +326,7 @@ func run(doCheck, debug bool, wait time.Duration, logger *slog.Logger, levelVar 
 	defer playlistSync.Stop()
 
 	// fpk 模式：启动 Web UI（统一网关监听 app.sock）
-	webUI, webUIErr := startWebUI(logger, p.UserCache(), dbStore)
+	webUI, webUIErr := startWebUI(logger, p.UserCache(), dbStore, playlistSync)
 	if webUIErr != nil {
 		logger.Warn("Web UI 启动失败（不影响代理功能）", "错误", webUIErr)
 	} else if webUI != nil {
