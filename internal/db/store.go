@@ -85,13 +85,19 @@ func (s *Store) migrateUsersTokenKey(ctx context.Context) error {
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	// 步骤说明（顺序不可调换）：
+	//   1. 先丢弃旧 users 上挂着的具名索引，避免与新表索引重名。
+	//   2. 把新结构建在临时表 users_new 上，再回填数据、删除旧表，最后把 users_new
+	//      RENAME 为 users。不要先 `ALTER TABLE users RENAME TO users_old` 再建同名新表：
+	//      sqlite 的 RENAME 实现会按新表的列布局去解析被改名的旧表，当新表含
+	//      `token_prefix` 而旧表不含时，会把旧表的列引用错位到 token_prefix 上，
+	//      导致后续 `... FROM users_old WHERE token_prefix IS NOT NULL` 报
+	//      "no such column: token_prefix"（sqlite 3.25+ 的 known limitation）。
 	stmts := []string{
-		// 旧索引随表重命名保留原名，先删除以免与新表索引重名冲突。
 		`DROP INDEX IF EXISTS idx_users_last_seen`,
 		`DROP INDEX IF EXISTS idx_users_admin`,
 		`DROP INDEX IF EXISTS idx_users_username`,
-		`ALTER TABLE users RENAME TO users_old`,
-		`CREATE TABLE users (
+		`CREATE TABLE users_new (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			username TEXT NOT NULL,
 			platform_uid TEXT,
@@ -107,16 +113,17 @@ func (s *Store) migrateUsersTokenKey(ctx context.Context) error {
 			updated_at TEXT NOT NULL
 		)`,
 		// 仅迁移带 token 前缀的行（recordUserIdentity 始终写入 token_prefix）。
-		`INSERT INTO users (
+		`INSERT INTO users_new (
 			id, username, platform_uid, platform_username, is_admin, token_prefix,
 			ua_raw, ua_system, ua_client, first_seen_at, last_seen_at, created_at, updated_at
 		)
 		SELECT
 			id, username, platform_uid, platform_username, is_admin, token_prefix,
 			ua_raw, ua_system, ua_client, first_seen_at, last_seen_at, created_at, updated_at
-		FROM users_old
+		FROM users
 		WHERE token_prefix IS NOT NULL`,
-		`DROP TABLE users_old`,
+		`DROP TABLE users`,
+		`ALTER TABLE users_new RENAME TO users`,
 		`CREATE INDEX IF NOT EXISTS idx_users_last_seen ON users (last_seen_at DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_users_admin ON users (is_admin)`,
 		`CREATE INDEX IF NOT EXISTS idx_users_username ON users (username)`,
@@ -151,10 +158,23 @@ func (s *Store) hasUniqueIndexOn(ctx context.Context, table, column string) (boo
 
 // uniqueIndexNames 返回表上全部唯一索引名（含 sqlite_autoindex_*）。
 //
-// 经由 query-only 的表值函数 pragma_index_list 查询：它等价于 PRAGMA index_list，
-// 但参数支持 ? 占位符，无需把标识符拼进 SQL 文本。
+// 原实现用 fmt.Sprintf 把表名拼进 `PRAGMA index_list(<表名>)`，被静态扫描按
+// GO-SQLI-002 报「SQL 由格式化字符串构造」。PRAGMA 的括号参数不接受 ? 占位符，
+// 故改走等价的 query-only 表值函数 pragma_index_list，其参数可参数化绑定
+// （? 只是字符串字面量，不参与语法解析，无注入面），返回值与原 PRAGMA 一致。
+//
+// 注意：未具名的列 UNIQUE 约束会让 sqlite 生成 sqlite_autoindex_* 索引，
+// 其 name 列可能为 NULL（未具名时），直接 Scan 到 string 会报
+// "converting NULL to string is unsupported"，故用 COALESCE 归一成空串。
 func (s *Store) uniqueIndexNames(ctx context.Context, table string) ([]string, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT name FROM pragma_index_list(?) WHERE "unique" = 1`, table)
+	if !isSafeIdent(table) {
+		return nil, fmt.Errorf("非法表名: %q", table)
+	}
+	rows, err := s.db.QueryContext(
+		ctx,
+		`SELECT COALESCE(name, '') FROM pragma_index_list(?) WHERE "unique" = 1`,
+		table,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -162,12 +182,12 @@ func (s *Store) uniqueIndexNames(ctx context.Context, table string) ([]string, e
 
 	var names []string
 	for rows.Next() {
-		var name sql.NullString
+		var name string
 		if err := rows.Scan(&name); err != nil {
 			return nil, err
 		}
-		if name.String != "" {
-			names = append(names, name.String)
+		if name != "" && isSafeIdent(name) {
+			names = append(names, name)
 		}
 	}
 	return names, rows.Err()
@@ -175,25 +195,54 @@ func (s *Store) uniqueIndexNames(ctx context.Context, table string) ([]string, e
 
 // indexHasColumn 判断索引是否包含指定列。
 //
-// 同样走表值函数 pragma_index_info：入参为索引名（含 sqlite_autoindex_*），
-// 走 ? 占位符，不再拼接 SQL 文本。
+// 同样走表值函数 pragma_index_info，索引名由参数化绑定传入；相比
+// `PRAGMA index_info(<名字>)`，它能正确处理 sqlite_autoindex_* 这类
+// SQL 层无法直接书写的名字（旧库里 username 的 UNIQUE 约束就是这种）。
 func (s *Store) indexHasColumn(ctx context.Context, index, column string) (bool, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT name FROM pragma_index_info(?)`, index)
+	if !isSafeIdent(index) {
+		return false, fmt.Errorf("非法索引名: %q", index)
+	}
+	rows, err := s.db.QueryContext(
+		ctx,
+		`SELECT COALESCE(name, '') FROM pragma_index_info(?)`,
+		index,
+	)
 	if err != nil {
 		return false, err
 	}
 	defer rows.Close()
 
 	for rows.Next() {
-		var name sql.NullString
+		var name string
 		if err := rows.Scan(&name); err != nil {
 			return false, err
 		}
-		if name.String == column {
+		if name == column {
 			return true, nil
 		}
 	}
 	return false, rows.Err()
+}
+
+// isSafeIdent 校验 sqlite 标识符（表名 / 索引名）是否可安全内联进 PRAGMA 参数。
+//
+// 仅允许 ASCII 字母、数字、下划线且非空：本项目所有表名与索引名均满足该规则
+// （见 schema.sql），以白名单方式彻底排除引号闭合等注入构造。
+func isSafeIdent(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z':
+		case r >= 'A' && r <= 'Z':
+		case r >= '0' && r <= '9':
+		case r == '_':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // Close 关闭底层数据库连接。
