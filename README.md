@@ -394,6 +394,6 @@ fpkg/                 飞牛 fnOS 应用包（fpk）源码
 
 ## 许可
 
-本项目基于 [MIT License](LICENSE) 开源。
+Copyright (c) 2026 liguangchun. 本项目基于 [MIT License](LICENSE) 开源。
 
 Copyright (c) 2026 dtapp

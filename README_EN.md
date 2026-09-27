@@ -391,6 +391,6 @@ The following are still being evaluated and not yet implemented:
 
 ## License
 
-This project is open-sourced under the [MIT License](LICENSE).
+Copyright (c) 2026 liguangchun. This project is open-sourced under the [MIT License](LICENSE).
 
 Copyright (c) 2026 dtapp
