@@ -81,17 +81,17 @@
 
     # https://docs.cnb.cool/zh/plugin/public/cnbcool/codewiki.html
     # https://cnb.cool/cnb/plugins/cnbcool/codewiki
-    - stages:
-        - name: 生成 Code Wiki
-          image: cnbcool/codewiki:latest
-          settings:
-            # 必填。指定 codewiki 生成文档的保存位置。支持绝对路径，也支持相对路径（会与当前工作目录 PWD 相加得到绝对路径）
-            git_doc_dir: ./codewiki
-            # 是否启用知识库入库，默认 true
-            knowledge_enabled: true
-            # 嵌入模型名称，默认 hunyuan
-            knowledge_embedding_model: hunyuan
-            # 文本分块大小（token 数），默认 1500
-            knowledge_chunk_size: 1500
-            # 相邻分块重叠 token 数量，默认 0
-            knowledge_chunk_overlap: 0
+    # - stages:
+    #     - name: 生成 Code Wiki
+    #       image: cnbcool/codewiki:latest
+    #       settings:
+    #         # 必填。指定 codewiki 生成文档的保存位置。支持绝对路径，也支持相对路径（会与当前工作目录 PWD 相加得到绝对路径）
+    #         git_doc_dir: ./codewiki
+    #         # 是否启用知识库入库，默认 true
+    #         knowledge_enabled: true
+    #         # 嵌入模型名称，默认 hunyuan
+    #         knowledge_embedding_model: hunyuan
+    #         # 文本分块大小（token 数），默认 1500
+    #         knowledge_chunk_size: 1500
+    #         # 相邻分块重叠 token 数量，默认 0
+    #         knowledge_chunk_overlap: 0
