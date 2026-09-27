@@ -150,8 +150,11 @@ func (s *Store) hasUniqueIndexOn(ctx context.Context, table, column string) (boo
 }
 
 // uniqueIndexNames 返回表上全部唯一索引名（含 sqlite_autoindex_*）。
+//
+// 经由 query-only 的表值函数 pragma_index_list 查询：它等价于 PRAGMA index_list，
+// 但参数支持 ? 占位符，无需把标识符拼进 SQL 文本。
 func (s *Store) uniqueIndexNames(ctx context.Context, table string) ([]string, error) {
-	rows, err := s.db.QueryContext(ctx, fmt.Sprintf("PRAGMA index_list(%s)", quoteIdent(table)))
+	rows, err := s.db.QueryContext(ctx, `SELECT name FROM pragma_index_list(?) WHERE "unique" = 1`, table)
 	if err != nil {
 		return nil, err
 	}
@@ -159,85 +162,38 @@ func (s *Store) uniqueIndexNames(ctx context.Context, table string) ([]string, e
 
 	var names []string
 	for rows.Next() {
-		vals, err := scanRow(rows)
-		if err != nil {
+		var name sql.NullString
+		if err := rows.Scan(&name); err != nil {
 			return nil, err
 		}
-		// PRAGMA index_list 列：seq, name, unique, origin, partial（旧版本仅前 3 列）。
-		if len(vals) < 3 {
-			continue
+		if name.String != "" {
+			names = append(names, name.String)
 		}
-		name, _ := vals[1].(string)
-		if name == "" || !sqliteBool(vals[2]) {
-			continue
-		}
-		names = append(names, name)
 	}
 	return names, rows.Err()
 }
 
 // indexHasColumn 判断索引是否包含指定列。
+//
+// 同样走表值函数 pragma_index_info：入参为索引名（含 sqlite_autoindex_*），
+// 走 ? 占位符，不再拼接 SQL 文本。
 func (s *Store) indexHasColumn(ctx context.Context, index, column string) (bool, error) {
-	// 索引名来自 PRAGMA index_list（sqlite 自身元数据），经 quoteIdent 转义后作为
-	// PRAGMA 函数参数；PRAGMA 的括号参数不接受 ? 占位符，故此处只能内联转义值。
-	rows, err := s.db.QueryContext(ctx, fmt.Sprintf("PRAGMA index_info(%s)", quoteIdent(index)))
+	rows, err := s.db.QueryContext(ctx, `SELECT name FROM pragma_index_info(?)`, index)
 	if err != nil {
 		return false, err
 	}
 	defer rows.Close()
 
 	for rows.Next() {
-		vals, err := scanRow(rows)
-		if err != nil {
+		var name sql.NullString
+		if err := rows.Scan(&name); err != nil {
 			return false, err
 		}
-		// PRAGMA index_info 列：seqno, cid, name。
-		if len(vals) < 3 {
-			continue
-		}
-		if name, _ := vals[2].(string); name == column {
+		if name.String == column {
 			return true, nil
 		}
 	}
 	return false, rows.Err()
-}
-
-// scanRow 把当前行读成 []any（列数动态）。
-func scanRow(rows *sql.Rows) ([]any, error) {
-	cols, err := rows.Columns()
-	if err != nil {
-		return nil, err
-	}
-	vals := make([]any, len(cols))
-	ptrs := make([]any, len(cols))
-	for i := range vals {
-		ptrs[i] = &vals[i]
-	}
-	if err := rows.Scan(ptrs...); err != nil {
-		return nil, err
-	}
-	return vals, nil
-}
-
-// sqliteBool 把 sqlite 返回的 0/1 整数或布尔值统一成 bool。
-func sqliteBool(v any) bool {
-	switch t := v.(type) {
-	case int64:
-		return t != 0
-	case bool:
-		return t
-	default:
-		return false
-	}
-}
-
-// quoteIdent 用单引号包裹 SQL 标识符，供 PRAGMA 函数参数使用。
-//
-// 调用方传入的 table / index 均取自 sqlite 自身元数据（schema.sql 中的表名、
-// PRAGMA index_list 返回的索引名），且此处按 SQL 字面量规则转义单引号；
-// PRAGMA 的括号参数不支持 ? 占位符，故只能用转义后的字面量内联。
-func quoteIdent(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", "''") + "'"
 }
 
 // Close 关闭底层数据库连接。
