@@ -15,7 +15,7 @@
   },
   "packageManager": "pnpm@12.5.1",
   "devDependencies": {
-    "@sveltejs/vite-plugin-svelte": "^7.3.0",
+    "@sveltejs/vite-plugin-svelte": "^7.3.1",
     "@tailwindcss/postcss": "^4.3.3",
     "@trimjs/web-app": "^0.4.2",
     "@tsconfig/svelte": "^5.0.8",
