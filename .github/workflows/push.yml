@@ -32,15 +32,11 @@ jobs:
     # https://github.com/upx/upx/releases
     # https://github.com/goreleaser/nfpm/releases
     # https://developer.fnnas.com/docs/cli/fnpack/
-    # https://github.com/golangci/golangci-lint/releases
-    # https://github.com/sqlc-dev/sqlc/releases
     # ==========================================
     env:
       UPX_VERSION: '5.2.1'
       NFPM_VERSION: '2.47.0'
       FNPACK_VERSION: '1.2.3'
-      GOLANGCI_LINT_VERSION: 'v2.13.2'
-      SQLC_VERSION: '1.31.1'
 
     steps:
       - name: 检出代码
@@ -105,19 +101,14 @@ jobs:
           echo "--- fnpack installed ---" && \
           fnpack --help || true
 
-      - name: 安装 golangci-lint 工具
-        uses: golangci/golangci-lint-action@v9
-        with:
-          version: ${{ env.GOLANGCI_LINT_VERSION }}
-          install-only: true
-
-      - name: 安装 sqlc 工具
-        uses: sqlc-dev/setup-sqlc@v5
-        with:
-          sqlc-version: ${{ env.SQLC_VERSION }}
+      - name: 安装必要的工具
+        run: make tool-deps
 
       - name: 安装依赖
         run: make deps
+
+      - name: 生成 sqlc 代码
+        run: make sqlc
 
       - name: 格式化（Go + 前端 + 配置 + 文档 + 脚本）
         run: make format

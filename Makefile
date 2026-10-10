@@ -82,6 +82,49 @@ ZIP = $(shell command -v zip 2> /dev/null)
 
 # ==================== 开发 ====================
 
+tool-deps: ## 工具依赖
+	@echo "==> 安装必要的工具依赖..."
+
+	sqlc version || true
+	go install github.com/sqlc-dev/sqlc/cmd/sqlc@latest
+	-sqlc version
+	@echo "==> sqlc 工具安装或更新完成"
+
+	golangci-lint version || true
+	go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
+	-golangci-lint version
+	@echo "==> golangci-lint 工具安装或更新完成"
+
+	govulncheck version || true
+	go install golang.org/x/vuln/cmd/govulncheck@latest
+	-govulncheck version
+	@echo "==> govulncheck 工具安装或更新完成"
+
+	gojq --version || true
+	go install github.com/itchyny/gojq/cmd/gojq@latest
+	-gojq --version
+	@echo "==> gojq 工具安装或更新完成"
+
+	yamlfmt -version || true
+	go install github.com/google/yamlfmt/cmd/yamlfmt@latest
+	-yamlfmt -version
+	@echo "==> yamlfmt 工具安装或更新完成"
+
+	shfmt -version || true
+	go install mvdan.cc/sh/v3/cmd/shfmt@latest
+	-shfmt -version
+	@echo "==> shfmt 工具安装或更新完成"
+
+	sql-formatter -version || true
+	go install github.com/wasilibs/go-sql-formatter/v15/cmd/sql-formatter@latest
+	-sql-formatter -version
+	@echo "==> sql-formatter 工具安装或更新完成"
+
+	dockerfmt version || true
+	go install github.com/reteps/dockerfmt@latest
+	-dockerfmt version
+	@echo "==> dockerfmt 工具安装或更新完成"
+
 # 安装依赖
 .PHONY: deps
 deps: 
@@ -172,41 +215,42 @@ format-frontend:
 .PHONY: format-json
 format-json:
 	@echo "[Format] 格式化 JSON 文件..."
-	@npx --yes prettier@latest \
-		--write \
-		--tab-width 2 \
-		--trailing-comma all \
-		--print-width 120 \
-		"cmd/frontend/src/lib/i18n/*.json" \
-		"cmd/frontend/tsconfig.json" \
-		|| echo "⚠️  prettier 格式化失败，请确认 npx 可用"
-	@command -v jq >/dev/null 2>&1 && { \
-		for f in $(FPKG_DIR)/wizard/* $(FPKG_DIR)/app/ui/config $(FPKG_DIR)/config/privilege $(FPKG_DIR)/config/resource; do [ -f "$$f" ] && jq . "$$f" > "$$f.tmp" && mv "$$f.tmp" "$$f"; done; \
-		echo "[Format] fpk JSON（wizard / ui / config）格式化完成（jq）。" ; \
-	} || echo "⚠️  jq 未安装，跳过 fpk wizard JSON 格式化。"
-	@echo "[Format] JSON 格式化完成。"
+	@command -v gojq >/dev/null 2>&1 || { \
+		echo "⚠️  gojq 未安装，跳过 JSON 格式化。" ; \
+		echo "   提示: 可通过运行 'go install github.com/itchyny/gojq/cmd/gojq@latest' 安装" ; \
+		exit 0 ; \
+	}
+	@echo "[Format] 使用 gojq 格式化 JSON..."
+	@for f in $(FPKG_DIR)/wizard/* $(FPKG_DIR)/app/ui/config $(FPKG_DIR)/config/privilege $(FPKG_DIR)/config/resource; do \
+		[ -f "$$f" ] || continue; \
+		if gojq . "$$f" > "$$f.tmp" 2>/dev/null; then \
+			mv "$$f.tmp" "$$f"; \
+		else \
+			echo "❌ gojq 格式化失败: $$f"; rm -f "$$f.tmp"; exit 1; \
+		fi; \
+	done
+	@echo "[Format] JSON 格式化完成（gojq）。"
 
-# 格式化 YAML 文件（.yaml/.yml）
+# 格式化 YAML 文件
 .PHONY: format-yaml
 format-yaml:
 	@echo "[Format] 格式化配置文件 (YAML)…"
-	@npx --yes prettier@latest \
-		--write \
-		--tab-width 2 \
-		--single-quote true \
-		--trailing-comma all \
-		--print-width 120 \
-		"configs/**/*.{yaml,yml}" \
-		".cnb/**/*.{yaml,yml}" \
+	@command -v yamlfmt >/dev/null 2>&1 || { \
+		echo "⚠️  yamlfmt 未安装，跳过 YAML 格式化。" ; \
+		echo "   提示: 可通过运行 'go install github.com/google/yamlfmt/cmd/yamlfmt@latest' 安装" ; \
+		exit 0 ; \
+	}
+	@echo "[Format] 使用 yamlfmt 格式化 YAML..."
+	@yamlfmt -conf .yamlfmt \
+		".cnb" \
+		".github" \
 		".cnb.yml" \
-		".github/**/*.{yaml,yml}" \
 		".nfpm.yaml" \
-		".golangci.yml" \
-		"internal/db/**/*.{yaml,yml}" \
-		|| echo "⚠️  prettier 格式化失败，请确认 npx 可用"
-	@echo "[Format] YAML 格式化完成。"
+		"internal/db" \
+		".golangci.yml" || { echo "❌ yamlfmt 格式化失败"; exit 1; }
+	@echo "[Format] YAML 格式化完成（yamlfmt）。"
 
-# 格式化 Markdown 文件（.md）
+# 格式化 Markdown 文件
 .PHONY: format-markdown
 format-markdown:
 	@echo "[Format] 格式化文档 (Markdown)…"
@@ -219,43 +263,44 @@ format-markdown:
 		|| echo "⚠️  prettier 格式化失败，请确认 npx 可用"
 	@echo "[Format] Markdown 格式化完成。"
 
-# 格式化 Shell 脚本（.sh）
-# 使用 shfmt，需安装：go install mvdan.cc/sh/v3/cmd/shfmt@latest
-# 退化为 shellcheck 检查（仅警告，不自动修复）
+# 格式化 Shell 脚本
 .PHONY: format-shell
 format-shell:
 	@echo "[Format] 格式化脚本 (Shell)…"
-	@command -v shfmt >/dev/null 2>&1 && { \
-		find . -name "*.sh" -not -path "./.git/*" -not -path "./vendor/*" -not -path "./node_modules/*" -exec shfmt -w -i 2 -ci -bn -s {} + ; \
-		shfmt -w -i 2 -ci -bn -s -ln bash $(FPKG_DIR)/cmd/* 2>/dev/null || true ; \
-		echo "[Format] Shell 格式化完成（shfmt）。" ; \
-	} || { \
-		echo "⚠️  shfmt 未安装，跳过 Shell 格式化。"; \
-		echo "   提示: 可通过运行 'go install mvdan.cc/sh/v3/cmd/shfmt@latest' 安装"; \
+	@command -v shfmt >/dev/null 2>&1 || { \
+		echo "⚠️  shfmt 未安装，跳过 Shell 格式化。" ; \
+		echo "   提示: 可通过运行 'go install mvdan.cc/sh/v3/cmd/shfmt@latest' 安装" ; \
+		exit 0 ; \
 	}
+	@echo "[Format] 使用 shfmt 格式化 Shell..."
+	@shfmt -w -i 2 -ci -bn -s -ln bash $(FPKG_DIR)/cmd/* || { echo "❌ shfmt 格式化失败"; exit 1; }
+	@echo "[Format] Shell 格式化完成（shfmt）。"
 
-# 格式化 SQL 文件（internal/db/*.sql via prettier + prettier-plugin-sql）
+# 格式化 SQL 文件
 .PHONY: format-sql
 format-sql:
-	@echo "[Format] 格式化 SQL 文件 (prettier + prettier-plugin-sql)..."
-	@test -d $(FRONTEND_DIR)/node_modules/prettier-plugin-sql || { echo "⚠️  prettier-plugin-sql 未安装，请先运行: make deps"; exit 1; }
-	@cd $(FRONTEND_DIR) && npx prettier --plugin=prettier-plugin-sql --write \
-		--tab-width 2 --print-width 120 "$(CURDIR)/internal/db/*.sql" \
-		|| echo "⚠️  SQL 格式化失败，请确认 npx 可用"
-	@echo "[Format] SQL 格式化完成。"
+	@echo "[Format] 格式化 SQL 文件 (sql-formatter)..."
+	@if command -v sql-formatter >/dev/null 2>&1; then \
+		echo "[Format] 使用 sql-formatter 格式化 SQL..."; \
+		sql-formatter --fix -l sql internal/db/*.sql internal/datadb/*.sql || { echo "❌ sql-formatter 格式化失败"; exit 1; }; \
+	else \
+		echo "⚠️  sql-formatter 未安装，跳过 SQL 格式化。"; \
+		echo "   提示: 可通过运行 'go install github.com/wasilibs/go-sql-formatter/v15/cmd/sql-formatter@latest' 安装"; \
+	fi
+	@echo "[Format] SQL 格式化完成（sql-formatter）。"
 
-# 格式化 Dockerfile
-# 使用 dockerfmt，需安装：go install github.com/reteps/dockerfmt@latest
+# 格式化 Dockerfile 文件
 .PHONY: format-docker
 format-docker:
 	@echo "[Format] 格式化 Dockerfile..."
-	@command -v dockerfmt >/dev/null 2>&1 && { \
-		find .cnb -type f -name "Dockerfile*" -exec dockerfmt -w {} + 2>/dev/null || true; \
-		echo "[Format] Dockerfile 格式化完成（dockerfmt）。"; \
-	} || { \
-		echo "⚠️  dockerfmt 未安装，跳过 Dockerfile 格式化。"; \
-		echo "   提示: 可通过运行 'go install github.com/reteps/dockerfmt@latest' 安装"; \
+	@command -v dockerfmt >/dev/null 2>&1 || { \
+		echo "⚠️  dockerfmt 未安装，跳过 Dockerfile 格式化。" ; \
+		echo "   提示: 可通过运行 'go install github.com/reteps/dockerfmt@latest' 安装" ; \
+		exit 0 ; \
 	}
+	@echo "[Format] 使用 dockerfmt 格式化 Dockerfile..."
+	@find .cnb -type f -name "Dockerfile*" -exec dockerfmt -w {} + || { echo "❌ dockerfmt 格式化失败"; exit 1; }
+	@echo "[Format] Dockerfile 格式化完成（dockerfmt）。"
 
 # 检查（Go + HTML/CSS/JS/TS/Svelte + Linux 打包：含 fpk 与无 fpk 两种）
 .PHONY: check

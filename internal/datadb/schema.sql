@@ -2,7 +2,6 @@
 -- 本文件只放「数据」类表：由本地音乐标签 / MusicBrainz 解析得到、
 -- 关联飞牛曲目 GUID 的 MBID 映射。与 state.db（运营状态）分离，便于独立维护。
 -- 引擎：sqlite（运行时驱动用 modernc.org/sqlite，纯 Go、无 CGO，适配 fpk/fnOS 部署）
-
 CREATE TABLE IF NOT EXISTS track_mbid_map (
   feiniu_guid TEXT NOT NULL PRIMARY KEY, -- 飞牛曲目 GUID（关联主体）
   file_path TEXT, -- 来源文件绝对路径（路径匹配用，索引便于反查）

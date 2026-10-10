@@ -1,8 +1,29 @@
 # fnmusic-sync
 
+English | [中文](README.md)
+
 A **transparent proxy for Last.fm / ListenBrainz auto-scrobbling** on the fnOS (飞牛 OS) Feiniu Music (trim-music) app.
 
 It takes over Feiniu Music's (trim-music) communication link via a unix socket, parses playback events and pushes scrobbles per user. Neither the official service nor the client notices anything — the proxy automatically restores the socket on exit.
+
+<div align="center">
+
+[![Latest Release](https://img.shields.io/github/v/release/dtapps/fnmusic-sync?style=flat-square)](https://github.com/dtapps/fnmusic-sync/releases)
+[![Downloads](https://img.shields.io/github/downloads/dtapps/fnmusic-sync/total?style=flat-square)](https://github.com/dtapps/fnmusic-sync/releases)
+[![Stars](https://img.shields.io/github/stars/dtapps/fnmusic-sync?style=flat-square)](https://github.com/dtapps/fnmusic-sync/stargazers)
+[![Forks](https://img.shields.io/github/forks/dtapps/fnmusic-sync?style=flat-square)](https://github.com/dtapps/fnmusic-sync/network/members)
+[![License](https://img.shields.io/github/license/dtapps/fnmusic-sync?style=flat-square)](LICENSE)
+[![Platform](https://img.shields.io/badge/platform-Linux-007EC6?style=flat-square)](https://github.com/dtapps/fnmusic-sync)
+[![Build](https://img.shields.io/github/actions/workflow/status/dtapps/fnmusic-sync/push.yml?style=flat-square)](https://github.com/dtapps/fnmusic-sync/actions/workflows/push.yml)
+![Download Requests](https://img.shields.io/endpoint?label=Download%20Requests&url=https%3A%2F%2Fdl-stats.dtapp.top%2Fshields.json%3Fplatform%3Dgithub.com%26repository%3D%2Fdtapps%2Ffnmusic-sync)
+
+[![CNB Release](https://cnb.cool/dtapp/fnmusic-sync/-/badge/release)](https://cnb.cool/dtapp/fnmusic-sync/-/badge/release.link)
+[![CNB Stars](https://cnb.cool/dtapp/fnmusic-sync/-/badge/star)](https://cnb.cool/dtapp/fnmusic-sync)
+[![CNB Forks](https://cnb.cool/dtapp/fnmusic-sync/-/badge/fork)](https://cnb.cool/dtapp/fnmusic-sync)
+[![CNB Build](https://cnb.cool/dtapp/fnmusic-sync/-/badge/git/latest/ci/status/push)](https://cnb.cool/dtapp/fnmusic-sync)
+![Download Requests](https://img.shields.io/endpoint?label=Download%20Requests&url=https%3A%2F%2Fdl-stats.dtapp.net%2Fshields.json%3Fplatform%3Dcnb.cool%26repository%3D%2Fdtapp%2Ffnmusic-sync)
+
+</div>
 
 ## Features
 
@@ -389,8 +410,13 @@ The following are still being evaluated and not yet implemented:
   - Last.fm `friends` recent tracks — requires per-friend fetching (N+1 calls)
   - Last.fm `neighbours` hot tracks — requires per-neighbour fetching (N+1 calls)
 
+## Repositories
+
+| Platform | URL                                    |
+| -------- | -------------------------------------- |
+| CNB      | https://cnb.cool/dtapp/fnmusic-sync    |
+| GitHub   | https://github.com/dtapps/fnmusic-sync |
+
 ## License
 
-Copyright (c) 2026 liguangchun. This project is open-sourced under the [MIT License](LICENSE).
-
-Copyright (c) 2026 dtapp
+See the `LICENSE` file in the repository.

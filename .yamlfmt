@@ -1,0 +1,7 @@
+formatter:
+  type: basic
+  indent: 2
+  max_line_length: 120
+  force_quote_style: single
+  retain_line_breaks: true
+  retain_line_breaks_single: true

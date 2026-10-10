@@ -8,9 +8,9 @@
       docker:
         build: .cnb/Dockerfile # 使用自定义 Dockerfile
         volumes:
-          - /root/.cache/go-build:copy-on-write # 挂载 Go
-          - /go:copy-on-write # 挂载项目依赖目录（可选，根据需要）
-          - /root/.local/share/pnpm/store:copy-on-write # pnpm 全局存储
+          - /root/.cache/go-build:copy-on-write # Go 构建缓存 - 加速编译
+          - /root/.local/share/pnpm/store:copy-on-write # pnpm 全局存储 - 加速前端依赖安装
+          - /go/pkg/mod:copy-on-write # 仅缓存 Go 模块下载，避免覆盖镜像内预装的 /go/bin 工具
       imports: https://cnb.cool/dtapp/envs/-/blob/main/update.yml # 导入外部环境变量/配置
       stages:
         - name: 处理版本号与预发布选项

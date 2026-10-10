@@ -1,8 +1,29 @@
 # fnmusic-sync
 
+[English](README_EN.md) | 中文
+
 飞牛 OS（fnOS）飞牛音乐的 **Last.fm / ListenBrainz 自动 scrobble 透明代理**。
 
 以 unix socket 接管飞牛音乐（trim-music）的通信链路，解析播放事件并按用户推送 scrobble；官方服务与客户端完全无感，代理退出时自动还原 socket。
+
+<div align="center">
+
+[![Latest Release](https://img.shields.io/github/v/release/dtapps/fnmusic-sync?style=flat-square)](https://github.com/dtapps/fnmusic-sync/releases)
+[![Downloads](https://img.shields.io/github/downloads/dtapps/fnmusic-sync/total?style=flat-square)](https://github.com/dtapps/fnmusic-sync/releases)
+[![Stars](https://img.shields.io/github/stars/dtapps/fnmusic-sync?style=flat-square)](https://github.com/dtapps/fnmusic-sync/stargazers)
+[![Forks](https://img.shields.io/github/forks/dtapps/fnmusic-sync?style=flat-square)](https://github.com/dtapps/fnmusic-sync/network/members)
+[![License](https://img.shields.io/github/license/dtapps/fnmusic-sync?style=flat-square)](LICENSE)
+[![Platform](https://img.shields.io/badge/platform-Linux-007EC6?style=flat-square)](https://github.com/dtapps/fnmusic-sync)
+[![Build](https://img.shields.io/github/actions/workflow/status/dtapps/fnmusic-sync/push.yml?style=flat-square)](https://github.com/dtapps/fnmusic-sync/actions/workflows/push.yml)
+![下载请求数](https://img.shields.io/endpoint?label=下载请求数&url=https%3A%2F%2Fdl-stats.dtapp.top%2Fshields.json%3Fplatform%3Dgithub.com%26repository%3D%2Fdtapps%2Ffnmusic-sync)
+
+[![CNB Release](https://cnb.cool/dtapp/fnmusic-sync/-/badge/release)](https://cnb.cool/dtapp/fnmusic-sync/-/badge/release.link)
+[![CNB Stars](https://cnb.cool/dtapp/fnmusic-sync/-/badge/star)](https://cnb.cool/dtapp/fnmusic-sync)
+[![CNB Forks](https://cnb.cool/dtapp/fnmusic-sync/-/badge/fork)](https://cnb.cool/dtapp/fnmusic-sync)
+[![CNB Build](https://cnb.cool/dtapp/fnmusic-sync/-/badge/git/latest/ci/status/push)](https://cnb.cool/dtapp/fnmusic-sync)
+![下载请求数](https://img.shields.io/endpoint?label=下载请求数&url=https%3A%2F%2Fdl-stats.dtapp.net%2Fshields.json%3Fplatform%3Dcnb.cool%26repository%3D%2Fdtapp%2Ffnmusic-sync)
+
+</div>
 
 ## 特性
 
@@ -392,8 +413,13 @@ fpkg/                 飞牛 fnOS 应用包（fpk）源码
   - Last.fm `friends` 最近在听 —— 需逐个好友拉取，N+1 调用
   - Last.fm `neighbours` 热歌 —— 需逐个邻居拉取，N+1 调用
 
+## 仓库
+
+| 平台   | 地址                                   |
+| ------ | -------------------------------------- |
+| CNB    | https://cnb.cool/dtapp/fnmusic-sync    |
+| GitHub | https://github.com/dtapps/fnmusic-sync |
+
 ## 许可
 
-Copyright (c) 2026 liguangchun. 本项目基于 [MIT License](LICENSE) 开源。
-
-Copyright (c) 2026 dtapp
+详见仓库 `LICENSE` 文件。

@@ -1,17 +1,17 @@
 {
   ".url": {
     "fnmusic-sync.config": {
-      "title": "飞牛音乐 Scrobble 代理",
-      "icon": "images/icon_{0}.png",
-      "type": "iframe",
-      "protocol": "",
-      "gatewayPrefix": "/app/fnmusic-sync",
-      "gatewaySocket": "app.sock",
-      "url": "/app/fnmusic-sync",
       "allUsers": true,
       "control": {
         "accessPerm": "editable"
-      }
+      },
+      "gatewayPrefix": "/app/fnmusic-sync",
+      "gatewaySocket": "app.sock",
+      "icon": "images/icon_{0}.png",
+      "protocol": "",
+      "title": "飞牛音乐 Scrobble 代理",
+      "type": "iframe",
+      "url": "/app/fnmusic-sync"
     }
   }
 }
