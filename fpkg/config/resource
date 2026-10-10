@@ -1,6 +1,8 @@
 {
   "api-scope": [
-    "trim.system.getPlatformConfig"
+    "trim.system.getPlatformConfig",
+    "trim.file.path",
+    "trim.file.userAccess"
   ],
   "data-share": {
     "shares": [
