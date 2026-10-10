@@ -82,8 +82,9 @@
     directories = cfg.library?.directories || [];
     libraryScanInterval = cfg.library?.scan_interval || '6h';
     libraryMbidOnlineLookup = cfg.library?.mbid_online_lookup ?? false;
-    // 目录来自后端内部路径，拉取后转换为语义化展示路径
-    refreshDirDisplay();
+    // 注意：不要在本 effect 内调用 refreshDirDisplay()，否则会同步读 directories
+    // （refreshDirDisplay 内部读 directories），与本 effect 写 directories 形成自依赖死循环。
+    // 目录展示路径转换统一由下方依赖 directories / languageMode 的 $effect 负责。
   });
 
   // 用户修改任意设置时触发防抖保存（通过 onchange/oninput 事件，不会因 config 同步而触发）

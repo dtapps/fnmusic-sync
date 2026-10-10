@@ -132,6 +132,11 @@ export async function pickDirectory(): Promise<string[] | null> {
     trimLog.debug('pickDirectory: 无 SDK，返回 null');
     return null;
   }
+  // 已确认未授权：直接返回，不再弹选择器、不再刷屏
+  if (pickFileBlocked) {
+    trimLog.debug('pickDirectory: 已因未授权禁用，跳过');
+    return null;
+  }
   try {
     const params = { directory: true } as unknown as Parameters<TrimApp['pickFile']>[0];
     trimLog.debug('pickDirectory 请求打开文件夹选择器');
@@ -140,7 +145,16 @@ export async function pickDirectory(): Promise<string[] | null> {
     if (paths && paths.length > 0) return paths;
     return null;
   } catch (e) {
-    trimLog.warn('pickDirectory 失败:', e);
+    const err = e as { errno?: number; result?: string };
+    if (err?.errno === 10000002 || err?.result === 'fail') {
+      pickFileBlocked = true;
+      trimLog.warn(
+        'pickDirectory 未授权（缺少 trim.file.userAccess 作用域），已停用；请重新打包 fpk 并在安装时授予文件权限后恢复。',
+        e,
+      );
+    } else {
+      trimLog.warn('pickDirectory 失败:', e);
+    }
     return null;
   }
 }
@@ -166,6 +180,15 @@ interface ConvertPathResponse {
   payload?: { result?: unknown };
 }
 
+// convertPaths 调用保护：
+// - convertPathBlocked: 探测到未授权（errno 10000002）后永久禁用，避免反复请求刷屏
+// - convertPathInflight: 同一时刻合并重复调用，只发一次请求
+let convertPathBlocked = false;
+let convertPathInflight: Promise<Record<string, string>> | null = null;
+
+// pickDirectory 调用保护：未授权（缺 trim.file.userAccess）后禁用，避免每次点击刷屏
+let pickFileBlocked = false;
+
 export async function convertPaths(paths: string[], language?: string): Promise<Record<string, string>> {
   const app = getTrimApp();
   const valid = (paths || []).filter((p) => !!p);
@@ -177,40 +200,62 @@ export async function convertPaths(paths: string[], language?: string): Promise<
     trimLog.debug('convertPaths: 空路径列表，跳过');
     return {};
   }
-  const lang = language && language.trim() ? language.trim() : (await getPlatformConfig()).language || 'zh-CN';
-  trimLog.debug('convertPaths 请求:', { path: valid, language: lang });
-  try {
-    const res = (await app.query({
-      req: 'trim.file.convertPath',
-      data: { path: valid, language: lang },
-    })) as ConvertPathResponse;
-    const map: Record<string, string> = {};
-    // 兼容多种返回信封：data.result / result(数组) / data.data.result / data(数组) / payload.result
-    const candidates = [
-      res?.data?.result,
-      Array.isArray(res?.result) ? res.result : null,
-      res?.data?.data?.result,
-      res?.payload?.result,
-      res?.data,
-    ];
-    let items: unknown[] = [];
-    for (const c of candidates) {
-      if (Array.isArray(c)) {
-        items = c;
-        break;
-      }
-    }
-    for (const item of items) {
-      const it = item as ConvertPathItem;
-      if (it && it.path) map[it.path] = it.semanticPath || it.path;
-    }
-    trimLog.debug('convertPaths 解析到', items.length, '条，映射:', map);
-    return map;
-  } catch (e) {
-    // 调用失败（如未授权 trim.file.path 作用域）时降级为原始路径展示
-    trimLog.warn('convertPaths 失败（是否缺少 trim.file.path 作用域？）:', e);
+  // 已确认未授权：直接降级返回，不再打 SDK、不再刷屏
+  if (convertPathBlocked) {
+    trimLog.debug('convertPaths: 已因未授权禁用，跳过');
     return {};
   }
+  // 去重：同一时刻多个 effect 并发调用时只发一次请求
+  if (convertPathInflight) return convertPathInflight;
+
+  const lang = language && language.trim() ? language.trim() : (await getPlatformConfig()).language || 'zh-CN';
+  trimLog.debug('convertPaths 请求:', { path: valid, language: lang });
+  convertPathInflight = (async () => {
+    try {
+      const res = (await app.query({
+        req: 'trim.file.convertPath',
+        data: { path: valid, language: lang },
+      })) as ConvertPathResponse;
+      const map: Record<string, string> = {};
+      // 兼容多种返回信封：data.result / result(数组) / data.data.result / data(数组) / payload.result
+      const candidates = [
+        res?.data?.result,
+        Array.isArray(res?.result) ? res.result : null,
+        res?.data?.data?.result,
+        res?.payload?.result,
+        res?.data,
+      ];
+      let items: unknown[] = [];
+      for (const c of candidates) {
+        if (Array.isArray(c)) {
+          items = c;
+          break;
+        }
+      }
+      for (const item of items) {
+        const it = item as ConvertPathItem;
+        if (it && it.path) map[it.path] = it.semanticPath || it.path;
+      }
+      trimLog.debug('convertPaths 解析到', items.length, '条，映射:', map);
+      return map;
+    } catch (e) {
+      const err = e as { errno?: number; result?: string };
+      // 未授权（10000002）/ 持续失败时永久禁用，后续调用直接跳过，不再刷屏
+      if (err?.errno === 10000002 || err?.result === 'fail') {
+        convertPathBlocked = true;
+        trimLog.warn(
+          'convertPaths 未授权（缺少 trim.file.path 作用域），已停用；请重新打包 fpk 并在安装时授予文件权限后恢复。',
+          e,
+        );
+      } else {
+        trimLog.warn('convertPaths 失败:', e);
+      }
+      return {};
+    } finally {
+      convertPathInflight = null;
+    }
+  })();
+  return convertPathInflight;
 }
 
 /**
