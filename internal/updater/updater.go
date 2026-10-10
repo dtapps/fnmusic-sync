@@ -24,7 +24,20 @@ const (
 	githubRepoPath     = "dtapps/fnmusic-sync"
 	cnbReleaseListURL  = "https://api.cnb.cool/" + cnbRepoPath + "/-/releases?page=1&page_size=20"
 	ghReleaseLatestURL = "https://api.github.com/repos/" + githubRepoPath + "/releases/latest"
+
+	// 下载中转服务：在原始下载链接前拼接，GET 计数并跳转源站。
+	// GitHub 源走 dl-stats.dtapp.top，CNB 源走 dl-stats.dtapp.net。
+	relayBaseGitHub = "https://dl-stats.dtapp.top"
+	relayBaseCNB    = "https://dl-stats.dtapp.net"
 )
+
+// noRelayFiles 这些发布附件不走下载中转，直接连接源站：
+// SHA256SUMS / GIT_COMMIT / BUILD_TIME 为元数据文件，无需计入中转统计。
+var noRelayFiles = map[string]bool{
+	"SHA256SUMS": true,
+	"GIT_COMMIT": true,
+	"BUILD_TIME": true,
+}
 
 // cnbReleaseItem CNB API releases 列表项。
 type cnbReleaseItem struct {
@@ -146,9 +159,38 @@ func BuildDownloadURL(tag, fileName string) string {
 	return fmt.Sprintf("%s/-/releases/download/%s/%s", base, tag, fileName)
 }
 
+// relayDownloadURL 在原始下载链接前拼接下载中转服务地址。
+// 格式：<中转域名>/<原始完整 URL>，例如
+//
+//	https://dl-stats.dtapp.top/https://github.com/owner/repo/releases/download/v1.0.0/file.zip
+//
+// GitHub 源用 dl-stats.dtapp.top，CNB 源用 dl-stats.dtapp.net。
+func relayDownloadURL(original string) string {
+	base := relayBaseCNB
+	if buildinfo.IsGitHub() {
+		base = relayBaseGitHub
+	}
+	return base + "/" + original
+}
+
 // DownloadFile 下载指定 URL 的文件到临时目录，返回本地文件路径。
-// 调用方负责在安装完成后清理临时文件（defer os.Remove）。
+// 优先走下载中转服务（dl-stats）；若中转下载失败（网络错误或源站返回非 200），
+// 立即回退到未拼接前缀的原始地址重新下载。调用方负责清理临时文件。
+// 注意：SHA256SUMS / GIT_COMMIT / BUILD_TIME 三类元数据文件不走中转，直连源站。
 func DownloadFile(client *http.Client, url, fileName string) (string, error) {
+	if noRelayFiles[fileName] {
+		// 元数据文件直连源站，不走中转、也不回退
+		return downloadTo(client, url, fileName)
+	}
+	if tmp, err := downloadTo(client, relayDownloadURL(url), fileName); err == nil {
+		return tmp, nil
+	}
+	// 中转失败，回退到原始地址
+	return downloadTo(client, url, fileName)
+}
+
+// downloadTo 实际执行一次下载（不含中转回退）；失败时返回错误。
+func downloadTo(client *http.Client, url, fileName string) (string, error) {
 	resp, err := client.Get(url)
 	if err != nil {
 		return "", fmt.Errorf("下载失败: %w", err)
