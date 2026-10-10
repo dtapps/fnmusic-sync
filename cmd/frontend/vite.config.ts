@@ -5,7 +5,7 @@ import path from 'path';
 export default defineConfig({
   // 静态资源引用前缀，与飞牛网关路径一致
   base: '/app/fnmusic-sync/',
-  publicDir: path.resolve(__dirname, 'static'),
+  publicDir: path.resolve(import.meta.dirname, 'static'),
   plugins: [svelte()],
   build: {
     // 输出到 Go embed 目录

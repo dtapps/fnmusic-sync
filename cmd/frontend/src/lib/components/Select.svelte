@@ -27,8 +27,9 @@
     padding-right: 28px;
   }
 
-  /* option 下拉菜单背景适配（Webkit / Blink 浏览器） */
-  .form-select option {
+  /* option 下拉菜单背景适配（Webkit / Blink 浏览器）
+     注：option 渲染在组件 DOM 树之外，需用 :global() 才能命中，否则被 Svelte 判定为未使用选择器 */
+  .form-select :global(option) {
     background-color: hsl(var(--card));
     color: hsl(var(--foreground));
   }
@@ -38,8 +39,8 @@
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%2364748b' d='M6 8L2 4h8z'/%3E%3C/svg%3E");
   }
 
-  /* 深色模式箭头 */
-  [data-theme='dark'] .form-select {
+  /* 深色模式箭头：data-theme 挂在 <html> 上、位于组件作用域之外，选择器需用 :global() 才能命中 */
+  :global([data-theme='dark']) .form-select {
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%2394a3b8' d='M6 8L2 4h8z'/%3E%3C/svg%3E");
   }
 </style>
