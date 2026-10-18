@@ -173,8 +173,8 @@ importers:
         specifier: ^4.3.3
         version: 4.3.3
       '@trimjs/web-app':
-        specifier: ^0.4.2
-        version: 0.4.2
+        specifier: ^0.5.0
+        version: 0.5.0
       '@tsconfig/svelte':
         specifier: ^5.0.8
         version: 5.0.8
@@ -733,8 +733,8 @@ packages:
   '@tailwindcss/postcss@4.3.3':
     resolution: {integrity: sha512-JTSZZGQi1AyKirbLN3azmjVzef92tcX7h+iSqPdaeStyFpGpDlKvvpxeOE8njhbUanbRwr3z8DyzhICWnMtQeg==}
 
-  '@trimjs/web-app@0.4.2':
-    resolution: {integrity: sha512-apVkaOCIPjC/8hOBcr2FiaYhGGQwnf8wxZTrGDnA8o64t+nlfLpyC8Tv1zyTvx9ZbAns8RnkSJ0kZcHRITTOkA==}
+  '@trimjs/web-app@0.5.0':
+    resolution: {integrity: sha512-YHDVSUDP4CYoMAkplNyv+IxB0bTTH8IYPikQEx4RrSoOe3/oQC8wCa8OrXTc57EcYJW1gYC7EC+Z1q5vGEvipA==}
 
   '@tsconfig/svelte@5.0.8':
     resolution: {integrity: sha512-UkNnw1/oFEfecR8ypyHIQuWYdkPvHiwcQ78sh+ymIiYoF+uc5H1UBetbjyqT+vgGJ3qQN6nhucJviX6HesWtKQ==}
@@ -1735,7 +1735,7 @@ snapshots:
       postcss: 8.5.29
       tailwindcss: 4.3.3
 
-  '@trimjs/web-app@0.4.2': {}
+  '@trimjs/web-app@0.5.0': {}
 
   '@tsconfig/svelte@5.0.8': {}
 
