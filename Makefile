@@ -630,9 +630,13 @@ package-linux: package-linux-all
 
 # ==================== 更新 / 拉取 ====================
 
-# 拉取 CNB 最新并以 fast-forward 合并（保留本地未提交改动）
+# 拉取所有远程最新（先 CNB，后 GitHub 镜像）然后强制推送
 .PHONY: sync
-sync:
+sync: sync-cnb sync-github push-force 
+
+# 拉取 CNB 最新并以 fast-forward 合并（保留本地未提交改动）
+.PHONY: sync-cnb
+sync-cnb:
 	git fetch origin
 	git merge --ff-only origin/main
 	@echo "已同步 origin/main 最新代码，本地未提交改动已保留"

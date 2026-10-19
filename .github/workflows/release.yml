@@ -29,6 +29,11 @@ on:
 permissions:
   contents: write
 
+# 同一分支的多次运行取消旧的运行，避免排队浪费。
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   prepare:
     runs-on: ubuntu-latest

@@ -13,7 +13,7 @@
     "format": "prettier --write --tab-width 2 --semi true --single-quote true --trailing-comma all --print-width 120 --html-whitespace-sensitivity css --plugin=prettier-plugin-svelte \"../../internal/webui/www/**/*.{html,css,js}\" \"!../../internal/webui/www/app.css\" \"!../../internal/webui/www/app.js\" \"src/**/*.{html,css,js,ts,svelte}\"",
     "format:check": "prettier --check --tab-width 2 --semi true --single-quote true --trailing-comma all --print-width 120 --html-whitespace-sensitivity css --plugin=prettier-plugin-svelte \"../../internal/webui/www/**/*.{html,css,js}\" \"!../../internal/webui/www/app.css\" \"!../../internal/webui/www/app.js\" \"src/**/*.{html,css,js,ts,svelte}\""
   },
-  "packageManager": "pnpm@12.10.1",
+  "packageManager": "pnpm@12.14.0",
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^7.3.1",
     "@tailwindcss/postcss": "^4.3.3",
@@ -23,8 +23,8 @@
     "autoprefixer": "^10.6.1",
     "clsx": "^2.1.1",
     "lucide-svelte": "^1.0.1",
-    "oxlint": "^1.87.0",
-    "postcss": "^8.5.30",
+    "oxlint": "^1.88.0",
+    "postcss": "^8.5.31",
     "prettier": "^3.9.10",
     "prettier-plugin-sql": "^0.20.0",
     "prettier-plugin-svelte": "^4.1.1",
