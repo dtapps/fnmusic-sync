@@ -12,7 +12,7 @@
 /cmd/dev*
 
 # 测试相关
-*_test.go
+/internal/reqlog/*_test.go
 /tests
 
 # 编译文件
