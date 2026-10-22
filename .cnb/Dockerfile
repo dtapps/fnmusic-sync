@@ -1,5 +1,5 @@
 # 使用 golang 镜像作为基础
-FROM golang:1.27.2-trixie
+FROM golang:1.27.3-trixie
 
 ARG GITHUB_MIRROR="https://files.m.daocloud.io"
 # ==========================================
@@ -18,12 +18,12 @@ ARG GITHUB_MIRROR="https://files.m.daocloud.io"
 # https://github.com/wasilibs/go-sql-formatter/releases
 # ==========================================
 ARG UPX_VERSION=5.2.1
-ARG NFPM_VERSION=2.47.0
+ARG NFPM_VERSION=2.48.0
 ARG FNPACK_VERSION=1.2.3
-ARG NODE_VERSION=26.11.1
+ARG NODE_VERSION=26.12.1
 ARG SQLC_VERSION=v1.31.1
-ARG GOLANGCI_LINT_VERSION=v2.14.0
-ARG GOVULNCHECK_VERSION=v1.8.0
+ARG GOLANGCI_LINT_VERSION=v2.15.0
+ARG GOVULNCHECK_VERSION=v1.9.0
 ARG SHFMT_VERSION=v3.14.1
 ARG DOCKERFMT_VERSION=v0.5.4
 ARG YAMLFMT_VERSION=v0.21.0
