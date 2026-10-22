@@ -18,3 +18,13 @@ updates:
     labels:
       - 'dependencies'
       - 'frontend'
+
+  # GitHub Actions 依赖（扫描 .github/workflows 下的第三方 action 版本）
+  - package-ecosystem: 'github-actions'
+    directory: '/'
+    schedule:
+      interval: 'daily'
+    labels:
+      - 'dependencies'
+      - 'github-actions'
+

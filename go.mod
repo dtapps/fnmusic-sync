@@ -1,6 +1,6 @@
 module cnb.cool/dtapp/fnmusic-sync
 
-go 1.27.2
+go 1.27.3
 
 ignore ./cmd/frontend
 
@@ -11,7 +11,7 @@ require (
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/viper v1.21.0
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
-	modernc.org/sqlite v1.60.1
+	modernc.org/sqlite v1.61.0
 )
 
 require (
