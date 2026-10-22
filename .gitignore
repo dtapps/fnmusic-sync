@@ -54,3 +54,6 @@ dist/
 # /internal/webui/www/images/
 /internal/webui/www/*
 !/internal/webui/www/index.html
+
+coverage.out
+coverage.html

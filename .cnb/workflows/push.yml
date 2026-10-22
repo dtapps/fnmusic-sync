@@ -27,3 +27,35 @@
           image: cnbcool/knowledge-base
           settings:
             include: 'docs/**.md'
+
+    # 流水线 3：Go 单元测试覆盖率（全量红线）。与流水线 1/2 并行执行。
+    # 复用同一 Dockerfile 构建环境与 Go 模块/构建缓存（不需要 pnpm 缓存，不构建前端）。
+    # 参考 CNB 官方示例 examples/ecosystem/testing-go-demo 的 testing:coverage 内置任务。
+    - runner:
+        tags: cnb:arch:amd64
+      docker:
+        build: .cnb/Dockerfile # 使用自定义 Dockerfile
+        volumes:
+          - /root/.cache/go-build:copy-on-write # Go 构建缓存 - 加速编译
+          - /go/pkg/mod:copy-on-write # 仅缓存 Go 模块下载，避免覆盖镜像内预装的 /go/bin 工具
+      stages:
+        - name: 生成测试覆盖率
+          script:
+            - go mod download
+            - make coverage # 产出 coverage.out（已排除 ent 生成代码）
+
+        - name: 上报覆盖率（全量红线）
+          # https://docs.cnb.cool/zh/build/internal-steps/testing/coverage.html
+          type: testing:coverage
+          options:
+            lines: 20 # 全量覆盖率红线（%），低于此值阻断流水线；当前基线约 27%，留余量后逐步上调
+            lang: go # golang 格式的覆盖率报告必须指定，否则计算有误差
+            pattern: 'coverage.out'
+            breakIfNoCoverage: true # 找不到覆盖率报告则报错终止，避免静默通过
+          exports:
+            lines: COVERAGE_LINES
+            diff_pct: COVERAGE_DIFF_PCT
+
+        - name: 输出覆盖率
+          script: 'echo "coverage: lines=$COVERAGE_LINES diff=$COVERAGE_DIFF_PCT"'
+

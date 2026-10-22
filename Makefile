@@ -457,6 +457,7 @@ clean:
 	@echo "[Clean] 清理构建目录..."
 	@rm -rf $(BUILD_DIR)
 	@mkdir -p $(BUILD_DIR)
+	rm -f coverage.out coverage.html
 
 # 定义构建单个二进制文件的通用逻辑（编译 + UPX + .tar.gz）
 # 参数: $(1)=GOOS, $(2)=GOARCH, $(3)=描述信息, $(4)=扩展名(.exe 或空), $(5)=额外 env (如 GOARM=7 GOMIPS=softfloat), $(6)=build tags (为空则无)
@@ -663,3 +664,21 @@ push-force:
 	git push --force origin HEAD
 	git push --force github HEAD
 	@echo "强制推送完成！"
+
+# ==================== 测试覆盖率 ====================
+# 本区块自包含，可整段复制到其他 Go 项目使用。复制到其他项目时按需调整两处：
+#   1. -coverpkg 的包路径与排除项（下方排除了本项目的 ent 生成代码目录）；
+#      无生成代码目录的项目可去掉 `grep -v` 过滤，或把 ./internal/... 换成业务包路径。
+#   2. 如目标项目有 clean 目标，建议加一行：rm -f coverage.out coverage.html
+#      （本项目已在 clean 中集成）。
+# CI 接入：生成 coverage.out 后，用 CNB testing:coverage 内置任务上报
+# （options: lang=go, pattern=coverage.out, lines=全量红线, diffLines=增量红线）。
+
+.PHONY: coverage
+# 生成测试覆盖率报告（coverage.out + 终端按函数摘要）。
+# -vet=off 与 test-go 一致：i18n.T() 作 printf 参数会触发 vet non-constant format 报错。
+# -coverpkg 排除 internal/ent：ent 为生成代码，占全树语句块约 73%，
+# 计入会把总覆盖率从约 27% 稀释到约 5%，指标失去意义（与排除 vendor 同理）。
+coverage: ## 生成 Go 测试覆盖率报告（排除 ent 生成代码）
+	go test -vet=off -coverpkg=$$(go list ./internal/... | grep -v '/internal/ent' | paste -sd, -) -coverprofile=coverage.out ./internal/...
+	go tool cover -func=coverage.out
