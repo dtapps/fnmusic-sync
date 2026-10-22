@@ -7,6 +7,8 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
     "lint": "pnpm run lint:types && pnpm run lint:eslint",
     "lint:types": "tsc --noEmit",
     "lint:eslint": "oxlint",
@@ -20,6 +22,7 @@
     "@trimjs/web-app": "^0.5.0",
     "@tsconfig/svelte": "^5.0.8",
     "@types/node": "^26.6.5",
+    "@vitest/coverage-v8": "^5.0.5",
     "autoprefixer": "^10.6.1",
     "clsx": "^2.1.1",
     "lucide-svelte": "^1.0.1",
@@ -35,6 +38,7 @@
     "tailwindcss": "^4.3.3",
     "tslib": "^2.8.1",
     "typescript": "^7.0.2",
-    "vite": "^8.3.5"
+    "vite": "^8.3.5",
+    "vitest": "^5.0.5"
   }
 }

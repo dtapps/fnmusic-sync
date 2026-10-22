@@ -682,3 +682,21 @@ push-force:
 coverage: ## 生成 Go 测试覆盖率报告（排除 ent 生成代码）
 	go test -vet=off -coverpkg=$$(go list ./internal/... | grep -v '/internal/ent' | paste -sd, -) -coverprofile=coverage.out ./internal/...
 	go tool cover -func=coverage.out
+
+# 前端单元测试（vitest，node 环境 + 环境桩，无需浏览器）
+.PHONY: test-frontend
+test-frontend:
+	@echo "[Test] 前端单元测试 (vitest)..."
+	@test -d $(FRONTEND_DIR)/node_modules || { echo "⚠️  前端依赖未安装，请先运行: make deps"; exit 1; }
+	@cd $(FRONTEND_DIR) && pnpm run test
+	@echo "✓ 前端单元测试通过。"
+
+# 前端测试覆盖率报告（vitest + v8，产出 cmd/frontend/coverage/lcov.info）
+# CI 接入：生成 lcov.info 后，用 CNB testing:coverage 内置任务上报
+# （options: pattern=cmd/frontend/coverage/lcov.info, lines=全量红线, diffLines=增量红线）。
+.PHONY: coverage-frontend
+coverage-frontend:
+	@echo "[Coverage] 前端测试覆盖率 (vitest + v8)..."
+	@test -d $(FRONTEND_DIR)/node_modules || { echo "⚠️  前端依赖未安装，请先运行: make deps"; exit 1; }
+	@cd $(FRONTEND_DIR) && pnpm run test:coverage
+	@echo "✓ 覆盖率报告已生成: $(FRONTEND_DIR)/coverage/lcov.info"

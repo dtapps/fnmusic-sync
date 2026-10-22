@@ -37,7 +37,7 @@
 /configs/state.yaml
 
 # 文档
-/docs
+/docs/*.png
 
 # 前端相关
 node_modules/
@@ -57,3 +57,4 @@ dist/
 
 coverage.out
 coverage.html
+/cmd/frontend/coverage/

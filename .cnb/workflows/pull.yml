@@ -111,6 +111,37 @@
         - name: 输出覆盖率
           script: 'echo "coverage: lines=$COVERAGE_LINES diff=$COVERAGE_DIFF_PCT"'
 
+    # Node 单元测试覆盖率（增量红线）。与上方安全扫描/sechook 流水线并行执行。
+    # pull_request 事件下 testing:coverage 额外计算增量覆盖率（diffLines 门禁）；
+    # 前端为 Svelte 5 + vitest（node 环境 + 环境桩），产出 cmd/frontend/coverage/lcov.info。
+    - runner:
+        tags: cnb:arch:amd64
+      docker:
+        build: .cnb/Dockerfile # 使用自定义 Dockerfile（预装 Node + pnpm）
+        volumes:
+          - /root/.local/share/pnpm/store:copy-on-write # pnpm 全局存储 - 加速前端依赖安装
+      stages:
+        - name: 安装前端依赖
+          script: pnpm --dir cmd/frontend install --frozen-lockfile
+
+        - name: 生成前端测试覆盖率
+          script: pnpm --dir cmd/frontend test:coverage # 产出 cmd/frontend/coverage/lcov.info
+
+        - name: 上报覆盖率（增量红线）
+          # https://docs.cnb.cool/zh/build/internal-steps/testing/coverage.html
+          type: testing:coverage
+          options:
+            diffLines: 50 # 增量覆盖率红线（%）：本次 PR 变更代码的覆盖率，低于此值阻断流水线
+            lines: 40 # 全量覆盖率底线，与 push 流水线一致，防止总量被单个 PR 拉低
+            pattern: 'cmd/frontend/coverage/lcov.info'
+            breakIfNoCoverage: true # 找不到覆盖率报告则报错终止，避免静默通过
+          exports:
+            lines: NODE_COVERAGE_LINES
+            diff_pct: NODE_COVERAGE_DIFF_PCT
+
+        - name: 输出覆盖率
+          script: 'echo "node coverage: lines=$NODE_COVERAGE_LINES diff=$NODE_COVERAGE_DIFF_PCT"'
+
   # https://docs.cnb.cool/zh/plugin/public/cnbcool/codewiki.html
   # https://cnb.cool/cnb/plugins/cnbcool/codewiki
   # - stages:
