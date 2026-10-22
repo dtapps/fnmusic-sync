@@ -19,3 +19,11 @@
 
         - name: 检查（Go + HTML/CSS/JS/TS/Svelte）
           script: make check
+
+    # 流水线 2：知识库构建。与上方流水线 1 相互独立、并行执行——
+    # push 事件的值是 Pipeline 数组，CNB 对同一事件触发的多条 Pipeline 并行运行。
+    - stages:
+        - name: 知识库构建
+          image: cnbcool/knowledge-base
+          settings:
+            include: 'docs/**.md'

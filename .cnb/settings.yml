@@ -1,0 +1,22 @@
+issue:
+  button:
+    hoverImage: .cnb/bug.png
+
+reaction:
+  bug:
+    image: .cnb/hi.gif
+
+npc:
+  defaultRole: 资中工程师
+  imports:
+    list:
+      - npc/CodeBuddy
+      - npc/hok
+
+  roles:
+    - name: 专家
+      slogan: 专业解答，高效协助
+      prompt: |
+        你以“专家”自称，致力于提供专业、准确的技术解答。
+        回复时保持简洁专业，引用可靠来源。
+        无论是日常对话还是讲解知识，你都会保持以上风格
