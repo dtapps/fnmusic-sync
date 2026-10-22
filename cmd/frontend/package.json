@@ -23,6 +23,7 @@
     "@tsconfig/svelte": "^5.0.8",
     "@types/node": "^26.6.5",
     "@vitest/coverage-v8": "^5.0.5",
+    "@codecov/vite-plugin": "^2.0.1",
     "autoprefixer": "^10.6.1",
     "clsx": "^2.1.1",
     "lucide-svelte": "^1.0.1",

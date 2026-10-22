@@ -1,0 +1,76 @@
+# Codecov 配置（放在 .github/ 下，Codecov 自动读取）
+# 官方文档：https://docs.codecov.com/docs/codecov-yaml
+#
+# 本仓库 Go 后端 + Node(Svelte) 前端两套覆盖率，用 flags 区分（go / node）。
+# 数据由 GitHub Actions 的覆盖率工作流（.github/workflows/coverage.yml，
+# 使用 codecov/codecov-action@v5）生成并上传：
+#   - Go 后端    → coverage.out                    （flag: go）
+#   - 前端 Svelte → cmd/frontend/coverage/lcov.info（flag: node）
+# 两份报告用不同 flag 区分，各自独立统计、互不覆盖。
+#
+# 职责分离：CNB 流水线（.cnb/workflows）的 testing:coverage 负责硬性红线门禁
+# （lines / diffLines），Codecov 仅做趋势 / PR 评论 / 徽章。状态检查默认
+# informational 不阻塞；若想在 GitHub 侧也强约束，把对应 status 块的
+# `informational: true` 去掉即可。
+
+coverage:
+  range: '0...100'
+  round: down
+  precision: 2
+
+  status:
+    project:
+      default:
+        informational: true
+        target: auto # 以每次提交前的覆盖率为基线，自动对比
+        threshold: 5% # 允许相对基线下降 5%，超过则状态变红
+      go:
+        informational: true
+        flags: go # 只看 Go 后端报告
+        target: auto
+        threshold: 5%
+      node:
+        informational: true
+        flags: node # 只看前端报告
+        target: auto
+        threshold: 5%
+    patch:
+      default:
+        informational: true
+        target: auto # PR 增量代码覆盖率门槛
+        threshold: 5%
+
+  # 标志（flag）：按语言拆分，便于分别看趋势、分别设门槛
+  flags:
+    go:
+      paths:
+        - internal/
+        - cmd/fnmusic-sync/
+      carryforward: true # PR 只跑部分测试时，沿用历史 flag 覆盖率算总项目覆盖
+    node:
+      paths:
+        - cmd/frontend/src/
+      carryforward: true
+
+  # 忽略不参与覆盖率统计的文件
+  ignore:
+    # Go：sqlc 生成代码（internal/db、internal/datadb，约占 11% 语句块，计入稀释指标）、测试、入口、mock
+    - 'internal/db/**'
+    - 'internal/datadb/**'
+    - '**/*_test.go'
+    - 'cmd/fnmusic-sync/main.go'
+    - '**/mock_*.go'
+    # 前端：覆盖率产物、embed 进 Go 二进制的构建产物、测试与入口、配置
+    - 'cmd/frontend/coverage/**'
+    - 'cmd/frontend/dist/**'
+    - 'cmd/frontend/src/test/**'
+    - 'cmd/frontend/src/main.ts'
+    - 'cmd/frontend/vitest.config.ts'
+    - '**/node_modules/**'
+
+  # PR 评论：展示总体覆盖、增量、各 flag 与文件明细
+  comment:
+    layout: 'reach,diff,flags,files'
+    behavior: default
+    require_changes: false
+    hide_project_coverage: false

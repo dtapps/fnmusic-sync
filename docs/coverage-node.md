@@ -288,6 +288,7 @@ CNB 语义：事件键下的值是 Pipeline 数组，同事件多个条目 = 多
 8. **测试从纯函数/store 开始**：组件测试需要 `@testing-library/svelte` + jsdom/happy-dom，作为第二步。
 9. **YAML 细节**：script 含 `": "` 等特殊字符时整体用单引号包裹；独立并行流水线，勿并入既有 stages。
 10. **CI 直接调 pnpm，不引入 make coverage 包装**：与 Go 侧策略一致，仅 CI 使用的命令不进 Makefile；本地跑测试用 `make test-frontend` 或 `pnpm test`，本地复现覆盖率直接 `pnpm test:coverage`。
+11. **Codecov 并存**：本仓库在 GitHub Actions（`.github/workflows/coverage.yml` + `.github/codecov.yml`）另设 Codecov 上报（Node flag: node），与 CNB `testing:coverage` 的硬性红线门禁相互独立——Codecov 仅做趋势/PR 评论/徽章，其状态检查默认 `informational` 不阻塞。
 
 ## 验收标准
 

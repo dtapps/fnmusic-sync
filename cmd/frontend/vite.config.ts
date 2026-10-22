@@ -1,12 +1,26 @@
 import { defineConfig } from 'vite';
 import { svelte } from '@sveltejs/vite-plugin-svelte';
 import path from 'path';
+import { codecovVitePlugin } from '@codecov/vite-plugin';
 
 export default defineConfig({
   // 静态资源引用前缀，与飞牛网关路径一致
   base: '/app/fnmusic-sync/',
   publicDir: path.resolve(import.meta.dirname, 'static'),
-  plugins: [svelte()],
+  plugins: [
+    svelte(),
+    // Codecov Bundle Analysis：仅在 CI 提供 CODECOV_TOKEN 时才实例化插件，
+    // 本地 / CNB 生产构建（无 token）完全不加载，避免 Vite 8 与插件 peer(4/5/6) 不兼容影响主构建。
+    ...(process.env.CODECOV_TOKEN
+      ? [
+          codecovVitePlugin({
+            enableBundleAnalysis: true,
+            bundleName: 'fnmusic-sync-frontend',
+            uploadToken: process.env.CODECOV_TOKEN,
+          }),
+        ]
+      : []),
+  ],
   build: {
     // 输出到 Go embed 目录
     outDir: '../../internal/webui/www',

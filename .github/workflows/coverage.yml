@@ -1,0 +1,108 @@
+# 覆盖率上报到 Codecov（GitHub 侧，与 CNB 的 testing:coverage 门禁相互独立）
+# 职责分离：
+#   - CNB 流水线负责硬性红线门禁（lines / diffLines），阻断低覆盖率合并；
+#   - 本工作流负责把覆盖率上传到 Codecov（PR 评论 + 徽章 + patch 状态）。
+# 因覆盖率产物需在 GitHub Actions 环境内生成，这里自行跑一遍测试（与 CNB 重复，
+# 但各自独立，互不依赖）。配置见 .github/codecov.yml。
+# https://github.com/codecov/codecov-action
+name: Coverage
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+# 同一分支的多次 push 取消旧的运行，避免排队浪费。
+concurrency:
+  group: push-coverage-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v7
+
+      - name: 安装 Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: 安装 pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          package_json_file: cmd/frontend/package.json
+
+      - name: 安装 Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: cmd/frontend/.nvmrc
+          cache: pnpm
+          cache-dependency-path: cmd/frontend/pnpm-lock.yaml
+
+      - name: 安装 Go 依赖
+        run: go mod download
+
+      # gotestsum 用于把 Go 测试转成 JUnit（供 Codecov Test Analytics）。
+      # 必须固定 v1.13.0：v1.12.0 依赖的旧版 x/tools 无法在 Go 1.27 编译（invalid array length）。
+      - name: 安装 gotestsum
+        run: |
+          go install gotest.tools/gotestsum@v1.13.0
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      # 范围同 CNB 一致：./... 排除 sqlc 生成目录 internal/db、internal/datadb
+      # gotestsum 包裹 go test：coverage.out 照常产出，额外生成 go-test-report.xml（JUnit）
+      - name: 生成 Go 测试覆盖率与测试结果
+        run: gotestsum --junitfile go-test-report.xml -- -vet=off -coverpkg=$(go list ./... | grep -vE '/(db|datadb)$' | paste
+          -sd, -) -coverprofile=coverage.out ./...
+
+      - name: 安装前端依赖
+        run: pnpm install --frozen-lockfile
+        working-directory: cmd/frontend
+
+      # 额外挂 json reporter（产出 test-results.json），供后续转 JUnit 上传测试结果；
+      # coverage/lcov.info 仍正常产出。
+      - name: 生成前端测试覆盖率
+        run: pnpm test:coverage --reporter=default --reporter=json --outputFile=test-results.json
+        working-directory: cmd/frontend
+
+      - name: 上传 Go 覆盖率到 Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./coverage.out
+          flags: go
+          fail_ci_if_error: false
+
+      - name: 上传前端覆盖率到 Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./cmd/frontend/coverage/lcov.info
+          flags: node
+          fail_ci_if_error: false
+
+      - name: 构建前端（触发 Bundle Analysis 上传）
+        # 仅作体积分析上报；失败（如插件与 Vite 8 不兼容）不应阻断上面的覆盖率上传，故 continue-on-error。
+        # 仅当 CI 提供 CODECOV_TOKEN 时 vite.config.ts 才会实例化 @codecov/vite-plugin 并上传 chunk 体积。
+        continue-on-error: true
+        working-directory: cmd/frontend
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+        run: pnpm build # = vite build，构建时插件自动上传（产物写入 internal/webui/www 这个 Go embed 目录）
+
+      - name: 转换 Vitest JSON 为 JUnit XML
+        # Vitest 5.0.5 无内置 junit reporter，用内置 json reporter 产出 test-results.json 后再转 JUnit（零依赖脚本）。
+        working-directory: cmd/frontend
+        run: node scripts/vitest-json-to-junit.mjs
+
+      - name: 上传测试结果到 Codecov
+        uses: codecov/test-results-action@v1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          # 合并前端（Svelte）与 Go 两份 JUnit 报告，Tests 面板同时展示
+          files: ./cmd/frontend/test-report.xml,./go-test-report.xml
+          fail_ci_if_error: false

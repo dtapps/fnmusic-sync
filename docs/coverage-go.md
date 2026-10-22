@@ -144,6 +144,7 @@ CNB 语义：事件键（如 `'**'`）下的值是 **Pipeline 数组，同事件
 7. **YAML 细节**：script 值含 `": "` 等特殊字符时整体用单引号包裹；`go mod download` 前置覆盖冷缓存场景；长命令行超过 yamlfmt `max_line_length: 120` 会被自动折行（折叠标量，语义不变，本地复现时复制解析后的一条命令即可）。
 8. **覆盖率命令内联 CI、不进 Makefile**：仅 CI 使用的命令不走 make 间接层，流水线 script 自解释，本地复现直接复制 CI 里的命令（注意 shell 里是单 `$`，Makefile 里才是 `$$`）。
 9. **测试文件必须纳入版本库才能真正门禁**：本项目 `.gitignore` 忽略 `*_test.go`，3 个测试文件均未被 git 跟踪，CI 覆盖率恒 0%。要启用红线，先把测试文件纳入版本库（从 .gitignore 移除 `*_test.go` 或按需 `git add -f`）。
+10. **Codecov 并存**：本仓库在 GitHub Actions（`.github/workflows/coverage.yml` + `.github/codecov.yml`）另设 Codecov 上报（Go flag: go），与 CNB `testing:coverage` 的硬性红线门禁相互独立——Codecov 仅做趋势/PR 评论/徽章，其状态检查默认 `informational` 不阻塞。
 
 ## 验收标准
 

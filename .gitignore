@@ -37,7 +37,10 @@
 /configs/state.yaml
 
 # 文档
+/docs/*-*-*.md
 /docs/*.png
+/docs/*.jpg
+/docs/*.gif
 
 # 前端相关
 node_modules/
