@@ -98,3 +98,26 @@
 
         - name: 输出覆盖率
           script: 'echo "node coverage: lines=$NODE_COVERAGE_LINES diff=$NODE_COVERAGE_DIFF_PCT"'
+
+  # Tag 推送（git push --tags）时生成 Code Wiki 并入库知识库。
+  # tag_push 是独立的触发键，与上方 push 同层级（都嵌套在 '**': 下），
+  # 直接列出流水线数组（不要嵌套 push:），只在打 tag 时触发，与 push 各流水线相互独立。
+  # https://docs.cnb.cool/zh/build/pipeline/trigger.html
+  # https://docs.cnb.cool/zh/plugin/public/cnbcool/codewiki.html
+  # https://cnb.cool/cnb/plugins/cnbcool/codewiki
+  tag_push:
+    - stages:
+        - name: 生成 Code Wiki
+          image: cnbcool/codewiki:latest
+          settings:
+            # 必填。指定 codewiki 生成文档的保存位置。支持绝对路径，也支持相对路径（会与当前工作目录 PWD 相加得到绝对路径）
+            git_doc_dir: ./codewiki
+            # 是否启用知识库入库，默认 true
+            knowledge_enabled: true
+            # 嵌入模型名称，默认 hunyuan
+            knowledge_embedding_model: hunyuan
+            # 文本分块大小（token 数），默认 1500
+            knowledge_chunk_size: 1500
+            # 相邻分块重叠 token 数量，默认 0
+            knowledge_chunk_overlap: 0
+
