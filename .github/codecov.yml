@@ -74,3 +74,48 @@ coverage:
     behavior: default
     require_changes: false
     hide_project_coverage: false
+
+# Codecov Components 面板（与 coverage.flags 不同：flags 是按语言「分开上传」，
+# components 是在同一份覆盖率数据里按目录「再切块」，面板名就叫 Components）。
+# 组件覆盖率同样受上面 coverage.ignore 影响——db/datadb、*_test.go、入口等不计入。
+# 状态沿用「只展示不阻塞」策略（informational），硬门禁仍由 CNB 负责。
+component_management:
+  default_rules:
+    statuses:
+      - type: project
+        informational: true
+        target: auto # 以组件自身历史覆盖率为基线
+        threshold: 5%
+  individual_components:
+    # 播放核心：队列与播放控制
+    - component_id: go-playback
+      name: Go · 播放与队列
+      paths:
+        - internal/playback/**
+        - internal/playlist/**
+    # 打点与元数据：scrobble 上报、外部音乐服务、MusicBrainz ID
+    - component_id: go-scrobble
+      name: Go · 打点与元数据
+      paths:
+        - internal/scrobbler/**
+        - internal/lastfm/**
+        - internal/listenbrainz/**
+        - internal/mbid/**
+    # 平台与基础设施：配置、模型、代理、日志、更新器等
+    - component_id: go-platform
+      name: Go · 平台与基础设施
+      paths:
+        - internal/config/**
+        - internal/model/**
+        - internal/proxy/**
+        - internal/feiniu/**
+        - internal/reqlog/**
+        - internal/safego/**
+        - internal/strutil/**
+        - internal/updater/**
+        - internal/buildinfo/**
+    # 前端：Svelte 组件与页面
+    - component_id: frontend
+      name: Svelte 前端
+      paths:
+        - cmd/frontend/src/**

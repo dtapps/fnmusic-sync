@@ -75,6 +75,20 @@ Go 与前端(Svelte) 都不原生产出 JUnit，分别用不同方式转换后**
 - 上传步骤的 `files` 已合并两份报告：`cmd/frontend/test-report.xml,./go-test-report.xml`。
 - 最终 Codecov 的 **Tests** 面板同时包含 Go 与前端(Svelte) 的测试结果。
 
+### 3.4 Components 面板
+
+在 `.github/codecov.yml` 的顶层 `component_management` 里按业务模块把覆盖率切块，Codecov 会多出一个 **Components** 面板，分别看各模块的趋势与回归。它和 `coverage.flags` 不同：flags 是「按语言分开上传」，components 是「同一份覆盖率数据按目录再切块」。
+
+| component_id | 名称                | 路径                                                                                                                                                                                                    |
+| ------------ | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| go-playback  | Go · 播放与队列     | `internal/playback/**`、`internal/playlist/**`                                                                                                                                                          |
+| go-scrobble  | Go · 打点与元数据   | `internal/scrobbler/**`、`internal/lastfm/**`、`internal/listenbrainz/**`、`internal/mbid/**`                                                                                                           |
+| go-platform  | Go · 平台与基础设施 | `internal/config/**`、`internal/model/**`、`internal/proxy/**`、`internal/feiniu/**`、`internal/reqlog/**`、`internal/safego/**`、`internal/strutil/**`、`internal/updater/**`、`internal/buildinfo/**` |
+| frontend     | Svelte 前端         | `cmd/frontend/src/**`                                                                                                                                                                                   |
+
+- 组件状态同样为 `informational`（只展示不阻塞），硬门禁仍由 CNB 负责。
+- **无需改 workflow**：组件覆盖率由已上传的 Go / 前端报告按路径自动计算；`coverage.ignore` 里的 `internal/db`、`internal/datadb`、`*_test.go`、入口等不计入组件。
+
 ## 4. 必需的密钥
 
 - `CODECOV_TOKEN`：在 GitHub 仓库 **Settings → Secrets → Actions** 中配置（Codecov 项目页获取）。覆盖率、Bundle、测试结果三个动作共用此 token。
