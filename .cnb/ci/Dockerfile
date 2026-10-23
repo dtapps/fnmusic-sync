@@ -8,6 +8,7 @@ ARG GITHUB_MIRROR="https://files.m.daocloud.io"
 # https://github.com/goreleaser/nfpm/releases
 # https://developer.fnnas.com/docs/cli/fnpack/
 # https://github.com/nodejs/node/releases
+# https://github.com/pnpm/pnpm/releases
 # https://github.com/sqlc-dev/sqlc/releases
 # https://github.com/golangci/golangci-lint/releases
 # https://go.googlesource.com/vuln
@@ -16,11 +17,13 @@ ARG GITHUB_MIRROR="https://files.m.daocloud.io"
 # https://github.com/google/yamlfmt/releases
 # https://github.com/itchyny/gojq/releases
 # https://github.com/wasilibs/go-sql-formatter/releases
+# https://github.com/gotestyourself/gotestsum/releases
 # ==========================================
 ARG UPX_VERSION=5.2.1
 ARG NFPM_VERSION=2.48.0
 ARG FNPACK_VERSION=1.2.3
 ARG NODE_VERSION=26.12.1
+ARG PNPM_VERSION=12.15.0
 ARG SQLC_VERSION=v1.31.1
 ARG GOLANGCI_LINT_VERSION=v2.15.0
 ARG GOVULNCHECK_VERSION=v1.9.0
@@ -29,6 +32,7 @@ ARG DOCKERFMT_VERSION=v0.5.4
 ARG YAMLFMT_VERSION=v0.21.0
 ARG GOJQ_VERSION=v0.12.19
 ARG GOSQLFORMATTER_VERSION=v15.8.2
+ARG GOTESTSUM_VERSION=v1.13.0
 
 # 1. 设置 Go 环境变量
 ENV GO111MODULE=on
@@ -47,6 +51,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     curl \
     gnupg \
+    git \
+    make \
     jq
 
 # 4. 安装 UPX 压缩工具
@@ -115,7 +121,7 @@ RUN ARCH=$(uname -m) && \
     \
     # 配置 npm/pnpm 使用腾讯云源
     npm config set registry https://mirrors.cloud.tencent.com/npm/ && \
-    npm install -g pnpm && \
+    npm install -g pnpm@${PNPM_VERSION} && \
     pnpm config set registry https://mirrors.cloud.tencent.com/npm/ && \
     pnpm config set ignore-scripts false && \
     \
@@ -142,6 +148,8 @@ RUN echo "==> 预安装 Go 工具链（版本已锁定）..." \
     && echo "==> gojq 安装完成 (${GOJQ_VERSION})" \
     && go install github.com/wasilibs/go-sql-formatter/v15/cmd/sql-formatter@${GOSQLFORMATTER_VERSION} \
     && echo "==> go-sql-formatter 安装完成 (${GOSQLFORMATTER_VERSION})" \
+    && go install gotest.tools/gotestsum@${GOTESTSUM_VERSION} \
+    && echo "==> gotestsum 安装完成 (${GOTESTSUM_VERSION})" \
     && echo "--- Go 工具链安装完成 ---" \
     && ls -l $GOPATH/bin
 

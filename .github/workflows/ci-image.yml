@@ -1,0 +1,105 @@
+# 构建并发布 CI 基础镜像
+#
+# 用途：把 .github/ci/Dockerfile 里预装好的「系统库 + Node + Go 工具链」
+# 打成镜像推到 GitHub Container Registry（GHCR），供 push.yml 的 check 任务
+# 以容器方式直接复用，省去每次 CI 重装 GTK/WebKit、go install 一堆工具、下载 Node。
+#
+# 触发：
+#   - 推送 / PR 改动 .github/ci/Dockerfile（工具版本都是 Dockerfile 里的 ARG 写死的，
+#     改版本=改 Dockerfile，自然触发重建）
+#   - 每周一 UTC 0 点定时重建，拉取基础镜像 golang:*-trixie 的 apt 安全更新
+#   - 也可手动 workflow_dispatch 触发
+#
+# 注意：首次使用前必须先跑一次本工作流把镜像推上去，push.yml 才能 pull 到。
+# 注意：每次构建推新 sha 标签，旧版本由末尾「清理旧镜像版本」只保留最近 5 个，避免撑爆 GHCR 存储配额。
+# https://github.com/actions/checkout
+# https://github.com/docker/setup-qemu-action
+# https://github.com/docker/setup-buildx-action
+# https://github.com/docker/login-action
+# https://github.com/docker/metadata-action
+# https://github.com/docker/build-push-action
+# https://github.com/actions/delete-package-versions
+name: Build CI Image
+
+on:
+  push:
+    branches: ['**']
+    paths:
+      - '.github/ci/Dockerfile'
+  pull_request:
+    paths:
+      - '.github/ci/Dockerfile'
+  schedule:
+    - cron: '0 0 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+# 同一分支多次触发取消旧运行
+concurrency:
+  group: ci-image-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v7
+
+      - name: 设置 QEMU（多架构构建：amd64 原生，arm64 用 QEMU 模拟）
+        uses: docker/setup-qemu-action@v4
+
+      - name: 设置 Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: 登录 GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 提取镜像元数据
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ghcr.io/${{ github.repository }}/ci
+          tags: |
+            # 仅默认分支推送 latest 标签
+            type=raw,value=latest,enable={{is_default_branch}}
+            # 每个构建附带 sha 短标签，便于回滚
+            type=sha,prefix=sha-,format=short
+
+      - name: 构建并推送镜像
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: .github/ci/Dockerfile
+          # 同时构建 amd64 与 arm64，推到 GHCR 形成多架构 manifest；
+          # push.yml 的 container 会按运行器架构自动拉取对应层。
+          platforms: linux/amd64,linux/arm64
+          # PR（含 fork）无推送权限，仅构建校验；其余事件推送
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # 复用 GitHub Actions 缓存加速层重建
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # 清理旧镜像版本：每次构建都会推一个新 sha 标签并更新 latest，旧的 sha 版本会无限堆积、
+      # 撑爆 GHCR 存储配额（本镜像多架构 + 含 GTK/WebKit 开发库，单版本就有好几 GB）。
+      # 这里只保留 latest + 最近 5 个版本（多架构 manifest 整体计为一个版本）。
+      # 注意：镜像名是 ghcr.io/<owner>/<repo>/ci，GHCR 包名是 <repo>/ci（含仓库名那段），
+      # 不是末尾的 ci，否则 delete-package-versions 会找不到包。
+      - name: 清理旧镜像版本
+        if: github.event_name != 'pull_request'
+        uses: actions/delete-package-versions@v5
+        with:
+          package-name: '${{ github.event.repository.name }}/ci'
+          package-type: 'container'
+          min-versions-to-keep: 5
+          delete-only-untagged-versions: false
+          token: ${{ secrets.GITHUB_TOKEN }}

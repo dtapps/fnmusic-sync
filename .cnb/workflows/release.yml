@@ -6,7 +6,7 @@
       services:
         - docker # 启用 Docker 服务（用于 docker build/push）
       docker:
-        build: .cnb/Dockerfile # 使用自定义 Dockerfile
+        build: .cnb/ci/Dockerfile # 使用自定义 Dockerfile
         volumes:
           - /root/.cache/go-build:copy-on-write # Go 构建缓存 - 加速编译
           - /root/.local/share/pnpm/store:copy-on-write # pnpm 全局存储 - 加速前端依赖安装
@@ -41,7 +41,7 @@
             interior_version: INTERIOR_VERSION
             pre_release: PRE_RELEASE
 
-        - name: 安装依赖
+        - name: 安装所有依赖
           script: make deps
 
         - name: 打包 Linux 安装包（deb/fpk）
