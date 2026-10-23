@@ -63,9 +63,12 @@ LDFLAGS = -s -w \
 # CGO_ENABLED=0: 禁用 CGO，实现完全静态链接
 # CGO_ENABLED=1: 启用 CGO，实现动态链接
 # -trimpath: 移除本地路径，保护隐私
+# -buildvcs=false: 不向二进制 stamp git 版本信息——CI 容器内 workspace 属宿主 uid，
+#   git 报 dubious ownership（exit 128）导致构建失败；且版本信息已全部由
+#   -ldflags 注入 buildinfo 包，buildvcs 的 vcs.* 元数据无人读取，砍掉零损失。
 # -ldflags: 注入版本信息并移除符号表
 # 注意：-tags 由 build_binary 的 $(6) 参数动态拼接，此处不含
-BUILD_CMD = CGO_ENABLED=0 go build -trimpath -ldflags="$(LDFLAGS)"
+BUILD_CMD = CGO_ENABLED=0 go build -trimpath -buildvcs=false -ldflags="$(LDFLAGS)"
 
 # 构建 tag 名
 BUILD_TAG = fpk

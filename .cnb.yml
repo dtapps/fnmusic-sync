@@ -1,4 +1,12 @@
 include:
-  - .cnb/workflows/release.yml
-  - .cnb/workflows/pull.yml
+  - .cnb/workflows/cnb-sechook.yml
+  - .cnb/workflows/code-review.yml
+  - .cnb/workflows/codewiki.yml
+  - .cnb/workflows/knowledge-base.yml
+  - .cnb/workflows/pull-coverage.yml
+  - .cnb/workflows/push-coverage.yml
   - .cnb/workflows/push.yml
+  - .cnb/workflows/release.yml
+  - .cnb/workflows/sca-license.yml
+  - .cnb/workflows/sca-sbom.yml
+  - .cnb/workflows/sca-vulnerability.yml

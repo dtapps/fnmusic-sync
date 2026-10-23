@@ -1,0 +1,15 @@
+'**':
+  pull_request:
+    - stages:
+    # https://docs.cnb.cool/zh/plugin/public/cnbcool/cnb-sechook.html
+    # https://cnb.cool/cnb/plugins/cnbcool/cnb-sechook
+    - stages:
+        - name: 获取扫描结果
+          image: cnbcool/cnb-sechook
+          settings:
+            # 最多显示的作者数量（可选，默认为 5，必须为正整数）
+            max_display_authors: 5
+            # 禁用敏感信息统计（可选，设置为 true/TRUE/1 时禁用）
+            sensitive_disabled: false
+            # 禁用代码扫描统计（可选，设置为 true/TRUE/1 时禁用）
+            scanning_disabled: false

@@ -1,0 +1,9 @@
+'**':
+  pull_request:
+    - stages:
+        # https://docs.cnb.cool/zh/security/sca-sbom.html
+        - name: 生成 SBOM Delta
+          image: cnbcool/sca-sbom:latest
+          settings:
+            # 输出文件路径
+            output: ${CNB_BUILD_WORKSPACE}/.cnb-sca/sbom-delta.json

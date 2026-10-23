@@ -1,0 +1,77 @@
+'**':
+  push:
+    # Go 单元测试覆盖率（全量红线）。
+    # 复用同一 Dockerfile 构建环境与 Go 模块/构建缓存（不需要 pnpm 缓存，不构建前端）。
+    # 参考 CNB 官方示例 examples/ecosystem/testing-go-demo 的 testing:coverage 内置任务。
+    - runner:
+        tags: cnb:arch:amd64
+      docker:
+        build: .cnb/ci/Dockerfile # 使用自定义 Dockerfile
+        volumes:
+          - /root/.cache/go-build:copy-on-write # Go 构建缓存 - 加速编译
+          - /root/.local/share/pnpm/store:copy-on-write # pnpm 全局存储 - 加速前端依赖安装
+          - /go/pkg/mod:copy-on-write # 仅缓存 Go 模块下载，避免覆盖镜像内预装的 /go/bin 工具
+      stages:
+        - name: 安装所有依赖
+          script: make deps
+
+        - name: 生成测试覆盖率
+          # 命令按本项目实际编写（非从其他项目照抄）：
+          # - 本项目无 internal/ent；生成代码是 sqlc 的 internal/db、internal/datadb
+          #   （占约 11% 语句，计入分母会稀释指标，故排除）。
+          # - webui 包带 //go:build fpk 标签，默认构建不参与测试。
+          # -vet=off：i18n.T() 作 printf 参数会触发 vet non-constant format 报错。
+          script:
+            - go test -vet=off -coverpkg=$(go list ./... | grep -vE '/(db|datadb)$' | paste -sd, -) -coverprofile=coverage.out
+              ./...
+            - go tool cover -func=coverage.out
+
+        - name: 上报覆盖率（全量红线）
+          # https://docs.cnb.cool/zh/build/internal-steps/testing/coverage.html
+          type: testing:coverage
+          options:
+            key: go # 多报告数据键：与 Node 侧（key: node）区分，各自写入 meta map 互不覆盖
+            name: Go Coverage # 徽章显示名，与 key 一对一对应
+            lines: 10 # 全量覆盖率红线（%），低于此值阻断流水线；低位兜底，待测试提交测得真实基线后按 基线-10 上调
+            lang: go # golang 格式的覆盖率报告必须指定，否则计算有误差
+            pattern: 'coverage.out'
+            breakIfNoCoverage: false # 找不到覆盖率报告时仅缺失数据、不阻断流水线；低于 lines/diffLines 红线仍会拦截
+          exports:
+            lines: COVERAGE_LINES
+            diff_pct: COVERAGE_DIFF_PCT
+
+        - name: 输出覆盖率
+          script: 'echo "coverage: lines=$COVERAGE_LINES diff=$COVERAGE_DIFF_PCT"'
+
+    # Node 单元测试覆盖率（全量红线）。
+    # 前端为 Svelte 5 + vitest（node 环境 + 环境桩），产出 cmd/frontend/coverage/lcov.info。
+    - runner:
+        tags: cnb:arch:amd64
+      docker:
+        build: .cnb/ci/Dockerfile # 使用自定义 Dockerfile
+        volumes:
+          - /root/.cache/go-build:copy-on-write # Go 构建缓存 - 加速编译
+          - /root/.local/share/pnpm/store:copy-on-write # pnpm 全局存储 - 加速前端依赖安装
+          - /go/pkg/mod:copy-on-write # 仅缓存 Go 模块下载，避免覆盖镜像内预装的 /go/bin 工具
+      stages:
+        - name: 安装所有依赖
+          script: make deps
+
+        - name: 生成前端测试覆盖率
+          script: pnpm --dir cmd/frontend test:coverage # 产出 cmd/frontend/coverage/lcov.info
+
+        - name: 上报覆盖率（全量红线）
+          # https://docs.cnb.cool/zh/build/internal-steps/testing/coverage.html
+          type: testing:coverage
+          options:
+            key: node # 多报告数据键：与 Go 侧（key: go）区分，各自写入 meta map 互不覆盖
+            name: Node Coverage # 徽章显示名，与 key 一对一对应
+            lines: 90 # 全量覆盖率红线（%），低于此值阻断流水线；当前基线 97.43%，留约 7 个点缓冲
+            pattern: 'cmd/frontend/coverage/lcov.info'
+            breakIfNoCoverage: true # 找不到覆盖率报告则报错终止，避免静默通过
+          exports:
+            lines: NODE_COVERAGE_LINES
+            diff_pct: NODE_COVERAGE_DIFF_PCT
+
+        - name: 输出覆盖率
+          script: 'echo "node coverage: lines=$NODE_COVERAGE_LINES diff=$NODE_COVERAGE_DIFF_PCT"'

@@ -1,0 +1,9 @@
+'**':
+  pull_request:
+    - stages:
+        # https://docs.cnb.cool/zh/security/sca-license.html
+        - name: License 扫描
+          image: cnbcool/sca-license:latest
+          settings:
+            # 触发门禁的最低 License 风险等级，可选 low、medium、high；未配置时仅输出扫描结果，不启用门禁
+            failOnSeverity: high
