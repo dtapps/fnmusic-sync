@@ -290,28 +290,43 @@ func normalizeRawEntry(k string, v any) (string, string) {
 // classifyMBID 把 MusicBrainz 标签字段名归并为五类之一（返回空串表示非 MBID 字段）。
 // 顺序很重要：先匹配更具体的词（releasegroup 先于 release，albumartist 先于 artist）。
 func classifyMBID(name string) string {
-	if !strings.Contains(name, "musicbrainz") && !strings.Contains(name, "mbid") {
+	// 先去掉空格 / 下划线 / 连字符再比对：同一字段在不同标签格式里写法差异很大，
+	// 例如 ID3v2 TXXX 是 "MusicBrainz Release Group Id"，
+	// 而 Vorbis/FLAC 是 "MUSICBRAINZ_RELEASEGROUPID"。
+	// 不归一化会导致 "release group"（带空格）被误判成 release。
+	n := mbidNameReplacer.Replace(strings.ToLower(name))
+
+	if !strings.Contains(n, "musicbrainz") && !strings.Contains(n, "mbid") {
 		return ""
 	}
+
+	// 顺序很重要：更具体的词必须先匹配
+	// （releasegroup 先于 release，albumartist 先于 album）。
 	switch {
-	case strings.Contains(name, "releasegroup"):
+	case strings.Contains(n, "releasegroup"):
 		return "releasegroup"
-	case strings.Contains(name, "release"):
+	case strings.Contains(n, "albumartist"):
+		return "artist"
+	// Picard 给专辑 MBID 写的字段名是 "MusicBrainz Album Id"（不是 Release），
+	// 两者都要归到 release，否则专辑 MBID 会被整条丢掉。
+	case strings.Contains(n, "release"), strings.Contains(n, "album"):
 		return "release"
-	case strings.Contains(name, "recording"):
+	case strings.Contains(n, "recording"):
 		return "recording"
-	case strings.Contains(name, "track"):
+	case strings.Contains(n, "track"):
 		// MusicBrainz Track Id 也视作录音匹配候选（兜底）。
 		return "recording"
-	case strings.Contains(name, "albumartist"):
+	case strings.Contains(n, "artist"):
 		return "artist"
-	case strings.Contains(name, "artist"):
-		return "artist"
-	case strings.Contains(name, "work"):
+	case strings.Contains(n, "work"):
 		return "work"
 	}
+
 	return ""
 }
+
+// mbidNameReplacer 归一化标签字段名中的分隔符。
+var mbidNameReplacer = strings.NewReplacer(" ", "", "_", "", "-", "")
 
 // buildTrackIndex 由飞牛曲目列表构建三种匹配索引（与 feiniu.BuildTrackIndexes 同口径）：
 //   - byArtistTitle：艺人名+曲名（含主标题降级）→ GUID
@@ -341,8 +356,12 @@ func buildTrackIndex(tracks []feiniu.Track) (byArtistTitle, byTitle map[string]s
 				titleCandidates[mainKey] = append(titleCandidates[mainKey], t.GUID)
 			}
 		}
-		if base := strings.ToLower(filepath.Base(t.AudioSpec.Path)); base != "" {
-			byBase[base] = append(byBase[base], t.GUID)
+		// 注意：filepath.Base("") 返回 "."，必须先判空，
+		// 否则缺路径的曲目会在索引里塞进一个无意义的 "." 键。
+		if t.AudioSpec.Path != "" {
+			if base := strings.ToLower(filepath.Base(t.AudioSpec.Path)); base != "" && base != "." {
+				byBase[base] = append(byBase[base], t.GUID)
+			}
 		}
 	}
 
