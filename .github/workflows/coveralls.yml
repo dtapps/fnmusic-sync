@@ -2,24 +2,19 @@
 #
 # 为什么独立：
 #   - 与 Codecov 解耦：Coveralls 侧故障 / token 失效不会拖垮 Codecov 上传与测试 job；
-#   - 凭证隔离：只用 COVERALLS_REPO_TOKEN，不扩散到 Codecov 流程；
-#   - Codecov 那条已经跑通，不动它。
+#   - 凭证隔离：只用内置 GITHUB_TOKEN，不扩散到 Codecov 流程；
+#   - Codecov 那条（.github/workflows/coverage.yml）已经跑通，不动它。
 #
 # 代价：本工作流会把测试再跑一遍（与 coverage.yml 重复）。这是「独立」换来的隔离性。
-#
-# 与 coverage.yml（Codecov）的关系：同一个 CI 镜像、同一条 Go 覆盖率命令、相同的 go/node flag，
-# 只是上报目标不同；两条通道互不依赖，任一方故障不影响另一方。
 #
 # 为什么是单个 job（而不是 go / node 拆两个 job）：
 #   Coveralls 以 build 为单位聚合报告，go / node 两份报告必须落在同一个 build 里，
 #   再靠 flag 合并；同一个 job 上传天然同 build。拆成两个 job 需要完整的
-#   parallel + parallel-finished 协议，且 goveralls 与 coveralls-action 混用容易踩坑，
+#   parallel + parallel-finished 协议，两侧混用不同上传器容易踩坑，
 #   故这里保持单 job 顺序执行，换取确定性。
 #
-# 前提：仓库 secrets 里配置 COVERALLS_REPO_TOKEN（fork PR 无 secret 时跳过上传步骤）。
 # 参考：
 #   https://github.com/coverallsapp/github-action
-#   https://github.com/mattn/goveralls
 name: Coveralls
 
 on:
@@ -37,9 +32,7 @@ concurrency:
 jobs:
   coverage:
     runs-on: ubuntu-latest
-    # 复用预构建 CI 镜像（含 Go + Node + pnpm，以及 gotestsum / goveralls 等 Go 工具链）。
-    # 镜像由 .github/workflows/ci-image.yml 推送；首次使用前必须先跑一次该工作流。
-    # 注意：fnmusic-sync 不是 Wails 应用，镜像里不带 GTK/WebKit，Go 测试也无需 CGO 系统库。
+    # 复用预构建 CI 镜像
     container:
       image: ghcr.io/${{ github.repository }}/ci:latest
     env:
@@ -48,8 +41,6 @@ jobs:
       - name: 检出代码
         uses: actions/checkout@v7
 
-      # 镜像已预装 Go 工具链（GOPATH=/go，工具在 /go/bin 且已在 PATH），
-      # 这里把路径常量写入 $GITHUB_ENV，供后续缓存步骤引用。
       - name: 设置 Go 工具链目录
         shell: bash
         run: |
@@ -89,34 +80,24 @@ jobs:
         run: make deps
 
       - name: 生成 Go 测试覆盖率
-        # 范围与 coverage.yml（Codecov）/ CNB 一致：./... 排除 sqlc 生成目录 internal/db、internal/datadb。
-        # gotestsum 仅用于命令对齐 / 本地排查，JUnit 报告不上传 Coveralls。
         run: |
           gotestsum --junitfile go-test-report.xml -- -vet=off -coverpkg=$(go list ./... | grep -vE '/(db|datadb)$' | paste -sd, -) -coverprofile=coverage.out ./...
 
       - name: 上传 Go 覆盖率到 Coveralls
-        # token 缺失（如 fork PR）时跳过，不让上传成为失败点。
         if: env.COVERALLS_REPO_TOKEN != ''
-        continue-on-error: true # Coveralls 故障不阻断 CI（对齐 Codecov 的 fail_ci_if_error: false）
-        shell: bash
-        run: |
-          # 不要剥模块前缀！goveralls 会读 go.mod 的 module 名（cnb.cool/dtapp/fnmusic-sync），
-          # 自己把覆盖文件里的模块路径映射回仓库根（gocover.go findFile）。
-          # 一旦 sed 掉前缀，路径变成 cmd/... 会被当成导入路径去 GOPATH/GOROOT 找，
-          # 报 `package cmd/fnmusic-sync is not in std`。原样喂 coverage.out 即可。
-          goveralls \
-            -coverprofile=coverage.out \
-            -service=github \
-            -repotoken="$COVERALLS_REPO_TOKEN" \
-            -flagname=go
+        continue-on-error: true
+        uses: coverallsapp/github-action@v2
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          file: coverage.out
+          format: golang
+          flag-name: go
 
       - name: 生成前端测试覆盖率
-        # 前端在 cmd/frontend，产物为 cmd/frontend/coverage/lcov.info。
         working-directory: cmd/frontend
         run: pnpm test:coverage
 
       - name: 上传前端覆盖率到 Coveralls
-        # 与 Go 报告同一 job、同一 build，靠 flag 合并成一份总覆盖率。
         if: env.COVERALLS_REPO_TOKEN != ''
         continue-on-error: true
         uses: coverallsapp/github-action@v2
