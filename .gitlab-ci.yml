@@ -1,0 +1,290 @@
+# 覆盖率上报到 GitLab「自带」能力 —— 本文件自成一套：跑在 GitLab 自己的 runner 上、用 GitLab 自己的
+# registry 镜像、数据只进 GitLab。不与任何其它平台的流程共用引用。
+#
+# 为什么 GitLab 要单独一套：它的覆盖率是 CI 内建的，不接第三方服务、也没有仓库内配置文件可复用。
+# 官方把这件事拆成两个「互不联动」的机制（原话：read different inputs, produce different outputs,
+# and do not share configuration. Configuring one does not enable the other）：
+#
+#   ① coverage: <正则>                      → 百分比：job 页 / MR 小部件 / 流水线列表 / 覆盖率徽章
+#                                            / Analytics 覆盖率趋势
+#   ② artifacts:reports:coverage_report    → MR diff 行级注释（绿=已覆盖 红=未覆盖 橙=已加载未执行）
+#      只认 Cobertura / JaCoCo（不认 lcov，更不认 go 的 coverprofile）
+#
+# 所以两条都配：百分比靠正则从日志抓，行级靠 Cobertura 工件。
+#
+# 口径与另外两套完全一致：同一条 go test 命令（-vet=off、-coverpkg 排除 db/datadb 生成代码）、
+# 同一个前端 `vitest run --coverage`。差异只在「怎么上报」。
+#
+# 前置条件（不满足会静默不跑）：
+#   1. GitLab 项目要开 CI/CD。pull mirror 仓库默认可能没开：
+#      Settings → CI/CD → General pipelines；镜像仓库还需勾 "Run pipelines for mirrored repositories"。
+#   2. GitLab 项目要开 Container Registry：CI 镜像由本流水线自己构建（check-image 判断 →
+#      build-image 构建 → merge-image 指向 latest，见文件下半部分），源文件是本平台专用的
+#      .gitlab/ci/Dockerfile。镜像不在 registry 里时下一条流水线会自动补建，不用人工干预。
+#
+# 代价：测试会再跑一遍（各平台各一次）。这是「多平台各自出数」的固定成本，
+# 与 docs/coveralls.md 里「为什么独立工作流」是同一笔账。
+
+stages:
+  - image
+  - coverage
+
+variables:
+  # 缓存目录全部收进项目内：GitLab 的 cache 只能存取项目目录下的路径
+  GOCACHE: $CI_PROJECT_DIR/.cache/go-build
+  GOMODCACHE: $CI_PROJECT_DIR/.cache/go-mod
+  GOBIN: $CI_PROJECT_DIR/.cache/bin
+  PNPM_STORE_DIR: $CI_PROJECT_DIR/.cache/pnpm-store
+  # 置为 true 时强制重建 CI 镜像（Run pipeline 页面会把这个变量列出来，方便勾）
+  # 平时留空：重建与否由 check-image 按「Dockerfile 内容哈希对应的 tag 在不在 registry 里」判断
+  CI_FORCE_REBUILD_IMAGE: ''
+  # CI 镜像：GitLab 自己构建、存在 GitLab 自己的 registry 里
+  #   - 构建：check-image 判断要不要建 → build-image（amd64 原生构建）→ merge-image（指向 ci:latest）
+  #   - 只出 amd64：流水线全部跑在 amd64 runner 上，arm64 镜像没有消费方
+  #   - 消费：go-coverage / node-coverage 直接拉这个地址
+  #   - 换 registry 不必改代码：用项目级变量覆盖本变量即可
+  CI_IMAGE: $CI_REGISTRY_IMAGE/ci:latest
+  # 覆盖率采集不该被超时掐断，但也不该无限跑
+  GIT_DEPTH: '20'
+
+default:
+  image:
+    # 本仓库 registry 里自己构建的镜像（amd64 单平台），由下面的 check-image → build-image →
+    # merge-image 产出（同实例 registry，Runner 用 CI_JOB_TOKEN 拉）
+    name: $CI_IMAGE
+    # 镜像的 CMD 是 bash；不覆盖 entrypoint 时 runner 起的 shell 会被它接管
+    entrypoint: ['']
+  interruptible: true
+  # 容器里进程是 root、checkout 目录属主不是 root，git 会以 dubious ownership 直接失败
+  # （install 阶段 pnpm/git 相关命令、以及任何读 git 信息的工具都会受影响）
+  before_script:
+    - git config --global --add safe.directory "$CI_PROJECT_DIR"
+  cache:
+    key:
+      files:
+        - go.sum
+        - cmd/frontend/pnpm-lock.yaml
+    paths:
+      - .cache/
+
+# ---------------------------------------------------------------------------
+# CI 镜像：GitLab 侧自己构建（只出 amd64，单平台）
+# ---------------------------------------------------------------------------
+# 三步：
+#   check-image   算 .gitlab/ci/Dockerfile 的内容哈希，查 registry 里有没有对应 tag
+#   build-image   缺就构建（跑在 amd64 原生 runner 上，不用 QEMU、不做交叉构建）
+#   merge-image   把该镜像挂到 ci:latest（消费方 default.image 只用这个）
+#
+# 为什么只出 amd64：本项目 GitLab 流水线全部跑在 amd64 runner 上，arm64 镜像没有任何消费方，
+# 多建一份只是白烧一倍构建时间。真要 arm64（例如在 Apple Silicon 上本地 docker 跑这个镜像调试），
+# 见 docs/gitlab-ci.md §4.1「需要 arm64 时怎么加回来」。
+#
+# tag 规则（内容寻址，不靠 commit 差分）：
+#   ci:sha-<Dockerfile 内容 sha256 前 12 位>   Dockerfile 对应的那份镜像
+#   ci:latest                                 消费方（default.image）只用这个
+#   ci:buildcache                             buildkit registry cache
+#
+# ⚠️ 为什么不用 rules:changes 判断「要不要重建」（本项目真实踩过）：
+#   rules:changes 比的是「这次 commit 相对上一次有没有改 Dockerfile」，不是「registry 里有没有
+#   能用的镜像」。两者不等价：镜像一次都没建成过时，你只改 .gitlab-ci.yml 推上来 → Dockerfile
+#   没变 → build job 不创建 → coverage 拉 ci:latest 直接 `manifest unknown` 失败，而且下一条流水线
+#   还是同样结果，死循环，只能人工 Run pipeline 才跳得出来。
+#   改成内容哈希 + 存在性检查后，判断依据变成「这份 Dockerfile 对应的 tag 在不在」：缺了就自动补建
+#   （自愈），有就十几秒跳过（不白烧 10 分钟）。
+check-image:
+  stage: image
+  image:
+    name: docker:cli
+    entrypoint: ['']
+  before_script:
+    # buildx 缺失时后面会直接报错，先把版本印在日志里便于定位
+    - docker --version || true
+    - docker buildx version || true
+    - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
+  script:
+    - |
+      set -e
+      repo="$CI_REGISTRY_IMAGE/ci"
+      # 内容哈希：Dockerfile 一个字没改 → tag 一样 → 下面查到就整体跳过
+      tag=$(sha256sum .gitlab/ci/Dockerfile | cut -c1-12)
+      ref="$repo:sha-$tag"
+      needed=true
+      if docker buildx imagetools inspect "$ref" >/dev/null 2>&1; then
+        needed=false
+      fi
+      if [ "$CI_FORCE_REBUILD_IMAGE" = "true" ]; then needed=true; fi
+      echo "$ref 需要构建: $needed"
+      {
+        echo "IMAGE_TAG=$tag"
+        echo "IMAGE_REF=$ref"
+        echo "IMAGE_NEEDED=$needed"
+      } > build-image.env
+      cat build-image.env
+  artifacts:
+    reports:
+      dotenv: build-image.env
+    expire_in: 1 week
+  cache: {}
+  timeout: 10m
+  # 只在默认分支 push 时判断（MR / 其它分支一律不建，避免分支内容覆盖 latest）；强制重建用变量
+  rules: &image-rules
+    - if: $CI_FORCE_REBUILD_IMAGE == "true"
+    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - when: never
+
+# 用 GitLab 官方文档推荐的 **rootless BuildKit**（Use BuildKit to build Docker images）：
+#   - 不需要 privileged、不需要 docker:dind，GitLab.com 的 hosted runner 开箱可用
+#   - Dockerfile 走本平台自己那份 .gitlab/ci/Dockerfile
+build-image:
+  stage: image
+  needs:
+    - job: check-image
+  image:
+    name: moby/buildkit:rootless
+    # 官方明确要求：不覆盖 entrypoint 会启动常驻 daemon 而不是执行构建，job 会一直挂到超时
+    entrypoint: ['']
+  variables:
+    BUILDKITD_FLAGS: --oci-worker-no-process-sandbox
+  # job 级 before_script 会整体替换 default 的，所以这里只保留 BuildKit 需要的 registry 凭据
+  before_script:
+    - mkdir -p ~/.docker
+    - echo "{\"auths\":{\"$CI_REGISTRY\":{\"username\":\"$CI_REGISTRY_USER\",\"password\":\"$CI_REGISTRY_PASSWORD\"}}}" >
+      ~/.docker/config.json
+  script:
+    - |
+      set -e
+      # Dockerfile 内容没变且 tag 已在 registry 里 → 直接跳过（几十秒）
+      if [ "$IMAGE_NEEDED" != "true" ]; then
+        echo "$IMAGE_REF 已存在，跳过构建"
+        exit 0
+      fi
+      # ⚠️ --output 只写一个 tag：它的值按逗号切成多段 key=value，写成 name=repo:a,repo:b
+      #   时第二段不是 key=value → `error: invalid value ...`（实测在 GitLab runner 上就是这么挂的）。
+      #   可读的 ci:latest 交给 merge-image 用 imagetools 补。
+      # 不给 --opt platform：buildkit 默认按 runner 自身架构（amd64）原生构建；
+      # 显式写死反而会在别的架构 runner 上退化成 QEMU 模拟。
+      buildctl-daemonless.sh build \
+        --frontend dockerfile.v0 \
+        --local context=. \
+        --local dockerfile=.gitlab/ci \
+        --import-cache type=registry,ref=$CI_REGISTRY_IMAGE/ci:buildcache \
+        --export-cache type=registry,ref=$CI_REGISTRY_IMAGE/ci:buildcache \
+        --output type=image,name=$IMAGE_REF,push=true
+      echo "已推送 $IMAGE_REF"
+  cache: {}
+  # 首次构建要装 GTK/WebKit + wails + golangci-lint，留足余量；有 cache 时几分钟
+  timeout: 1h
+  # 只用 amd64 原生 runner（GitLab.com 免费层标签）
+  tags:
+    - saas-linux-small-amd64
+  rules: *image-rules
+
+# ---------------------------------------------------------------------------
+# 指到 ci:latest
+# ---------------------------------------------------------------------------
+# `docker buildx imagetools create` 是纯 registry API 操作，不需要 daemon / dind（docker:cli 是
+# alpine，自带 sh 与 buildx 插件）。它会**新建** index 覆盖目标 tag，反复跑不会把旧 manifest 叠加
+# 进去；本次没重建时它也只是把 latest 重新指一遍（十几秒，顺带修好被误删的 latest）。
+merge-image:
+  stage: image
+  needs:
+    - job: check-image
+    - job: build-image
+  image:
+    name: docker:cli
+    entrypoint: ['']
+  before_script:
+    - docker --version || true
+    - docker buildx version || true
+    - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
+  script:
+    - |
+      set -e
+      if ! docker buildx imagetools inspect "$IMAGE_REF" >/dev/null 2>&1; then
+        echo "registry 里没有 $IMAGE_REF，无法生成 latest"
+        exit 1
+      fi
+      echo "指向 → $CI_REGISTRY_IMAGE/ci:latest ← $IMAGE_REF"
+      docker buildx imagetools create -t "$CI_REGISTRY_IMAGE/ci:latest" "$IMAGE_REF"
+      # 打印 index 里的平台，日志里能直接看出这份 latest 是什么架构
+      docker buildx imagetools inspect "$CI_REGISTRY_IMAGE/ci:latest"
+  cache: {}
+  timeout: 10m
+  rules: *image-rules
+
+# ---------------------------------------------------------------------------
+# Go：语句覆盖率 → 百分比 + Cobertura
+# ---------------------------------------------------------------------------
+go-coverage:
+  stage: coverage
+  script:
+    - go mod download
+    # 命令口径与其它平台保持一致（coverage.yml / coveralls.yml / .cnb/workflows/*-coverage.yml），
+    # 不要各平台各写一版：
+    #   -vet=off        —— 与其它平台口径一致，避免 vet 在不同 Go 版本上随机红
+    #   -coverpkg 排除 db/datadb —— sqlc 生成代码，计入会把覆盖率稀释到失去意义
+    - PKGS=$(go list ./... | grep -vE '/(db|datadb)$' | paste -sd, -)
+    - go test -vet=off -coverpkg="$PKGS" -coverprofile=coverage.out ./...
+    # 最后一行形如 `total:	(statements)	27.3%`，被下面 coverage: 的正则抓走
+    - go tool cover -func=coverage.out | tail -1
+    # GitLab 不认 coverprofile，转 Cobertura（GitLab 只认 Cobertura / JaCoCo）
+    - gocover-cobertura < coverage.out > coverage-go.xml
+    # 已实测（v1.5.0）：gocover-cobertura 自己就把路径relativize 成仓库相对路径
+    #   <class ... filename="cmd/fnmusic-sync/auth.go">
+    # 所以**不要**再 sed 剥前缀 —— 那是给 goveralls 定位磁盘文件用的另一回事
+    # （见 docs/coveralls.md 3.3①）。这里若发现 filename 带模块前缀，先查 cwd 是否在仓库根。
+    - grep -c '<class' coverage-go.xml
+  # 抓「语句覆盖率」百分比。GitLab 用行内匹配，^$ 锚定到单行，避免抓到按函数明细里的数字
+  coverage: '/^total:\s+\(statements\)\s+([0-9.]+)%$/'
+  artifacts:
+    when: always
+    expire_in: 1 week
+    paths:
+      - coverage.out
+      - coverage-go.xml
+    reports:
+      coverage_report:
+        coverage_format: cobertura
+        path: coverage-go.xml
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+# ---------------------------------------------------------------------------
+# 前端：lcov（本地/其他平台用）+ Cobertura（GitLab 用）
+# ---------------------------------------------------------------------------
+node-coverage:
+  stage: coverage
+  script:
+    - pnpm config set store-dir "$PNPM_STORE_DIR"
+    - pnpm --dir cmd/frontend install --frozen-lockfile --prefer-offline
+    # reporter 用 CLI 覆盖，不为 CI 去改 cmd/frontend/vitest.config.ts（本地默认仍是 lcov + text）
+    #   lcov          —— 留给 Coveralls/Codecov/CNB
+    #   cobertura     —— 给 GitLab 行级注释，产物是 cmd/frontend/coverage/cobertura-coverage.xml
+    #   json-summary  —— 给下面那行日志算百分比
+    - >-
+      pnpm --dir cmd/frontend exec vitest run --coverage --coverage.reporter=lcov --coverage.reporter=text --coverage.reporter=cobertura
+      --coverage.reporter=json-summary
+    # vitest 的 root 是 cmd/frontend/，cobertura 里写的是 frontend 相对路径（filename="src/..."）；
+    # GitLab 按**仓库根**匹配，补上 cmd/frontend/ 前缀（产物必为 src/ 开头，vitest.config.ts include 即是）
+    - sed -i 's#filename="src/#filename="cmd/frontend/src/#g' cmd/frontend/coverage/cobertura-coverage.xml
+    # 打一行固定格式，供 coverage: 正则抓取（text reporter 的表格格式不稳定，别指望它）
+    - >-
+      node -e "const t=require('./cmd/frontend/coverage/coverage-summary.json').total; console.log('Total lines: '+t.lines.pct+'%')"
+  # ⚠️ 这里默认**不配** coverage:。原因：GitLab 对同一次流水线里所有带 coverage: 的 job 取**算术平均**
+  # 展示在 MR 小部件和徽章上；Go 是语句覆盖率、前端是行覆盖率（all:true 把未测文件按 0% 计入
+  # 分母），两个口径平均出来是一个既非 A 也非 B 的数，趋势变化也解释不清。
+  # 所以要显示前端覆盖率时：把这行取消注释、并把 go-coverage 的 coverage: 注释掉，二选一。
+  # coverage: '/^Total lines:\s+([0-9.]+)%$/'
+  artifacts:
+    when: always
+    expire_in: 1 week
+    paths:
+      - cmd/frontend/coverage/
+    reports:
+      coverage_report:
+        coverage_format: cobertura
+        path: cmd/frontend/coverage/cobertura-coverage.xml
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH

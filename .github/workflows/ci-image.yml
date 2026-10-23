@@ -12,8 +12,10 @@
 #
 # 注意：首次使用前必须先跑一次本工作流把镜像推上去，push.yml 才能 pull 到。
 # 注意：每次构建推新 sha 标签，旧版本由末尾「清理旧镜像版本」只保留最近 5 个，避免撑爆 GHCR 存储配额。
+# 注意：只构建 linux/amd64（2026-10-23 起）。消费方（push.yml / codecov.yml / coveralls.yml）的
+#       runs-on 全是 ubuntu-latest，arm64 那份建出来没有任何人拉；而且多平台构建的 arm64 腿是
+#       QEMU 模拟，装 GTK/WebKit + go install 十几个工具会慢到离谱，纯粹白烧 Actions 额度。
 # https://github.com/actions/checkout
-# https://github.com/docker/setup-qemu-action
 # https://github.com/docker/setup-buildx-action
 # https://github.com/docker/login-action
 # https://github.com/docker/metadata-action
@@ -49,9 +51,8 @@ jobs:
       - name: 检出代码
         uses: actions/checkout@v7
 
-      - name: 设置 QEMU（多架构构建：amd64 原生，arm64 用 QEMU 模拟）
-        uses: docker/setup-qemu-action@v4
-
+      # 不再 setup-qemu：只建 linux/amd64，runner 本身就是 amd64，原生构建即可，
+      # 装 QEMU 只会让人误以为还有 arm64 那条腿。
       - name: 设置 Buildx
         uses: docker/setup-buildx-action@v4
 
@@ -78,9 +79,9 @@ jobs:
         with:
           context: .
           file: .github/ci/Dockerfile
-          # 同时构建 amd64 与 arm64，推到 GHCR 形成多架构 manifest；
-          # push.yml 的 container 会按运行器架构自动拉取对应层。
-          platforms: linux/amd64,linux/arm64
+          # 只建 amd64：三个消费方 workflow 的 runs-on 都是 ubuntu-latest（amd64），
+          # arm64 没有消费方。需要 arm64 时见 docs/ci-image.md §3.2「加回 arm64」。
+          platforms: linux/amd64
           # PR（含 fork）无推送权限，仅构建校验；其余事件推送
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
@@ -90,8 +91,8 @@ jobs:
           cache-to: type=gha,mode=max
 
       # 清理旧镜像版本：每次构建都会推一个新 sha 标签并更新 latest，旧的 sha 版本会无限堆积、
-      # 撑爆 GHCR 存储配额（本镜像多架构 + 含 GTK/WebKit 开发库，单版本就有好几 GB）。
-      # 这里只保留 latest + 最近 5 个版本（多架构 manifest 整体计为一个版本）。
+      # 撑爆 GHCR 存储配额（本镜像含 GTK/WebKit 开发库，单版本就有好几 GB）。
+      # 这里只保留 latest + 最近 5 个版本。
       # 注意：镜像名是 ghcr.io/<owner>/<repo>/ci，GHCR 包名是 <repo>/ci（含仓库名那段），
       # 不是末尾的 ci，否则 delete-package-versions 会找不到包。
       - name: 清理旧镜像版本

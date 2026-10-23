@@ -1,7 +1,6 @@
 # Node 单元测试覆盖率实现文案（fnmusic-sync 前端实战：Svelte 5 + vitest + CNB）
 
-> 按 fnmusic-sync 项目 `cmd/frontend` 实际实现整理：Svelte 5 + Vite + TypeScript + pnpm，vitest 5，5 个测试文件 57 个用例，lines 基线 45.41%。
-> 方案可复制到其他 Vite 系项目（Vue/React/Svelte），按项目实际调整目录、入口排除项与环境桩。
+> 按 fnmusic-sync 项目 `cmd/frontend` 实际实现整理：Svelte 5 + Vite + TypeScript + pnpm，vitest 5，5 个测试文件 57 个用例，lines 基线 45.41%。 方案可复制到其他 Vite 系项目（Vue/React/Svelte），按项目实际调整目录、入口排除项与环境桩。
 
 # 任务：为 Svelte 5 前端实现单元测试覆盖率上报与红线门禁（CNB 云原生构建）
 
@@ -166,7 +165,7 @@ console.debug = () => {};
 本项目 5 个测试文件共 57 个用例：
 
 | 文件           | 用例数 | 覆盖内容                                                                 |
-| -------------- | ------ | ------------------------------------------------------------------------ |
+|----------------|--------|--------------------------------------------------------------------------|
 | utils.test.ts  | 22     | 日期/时长格式化、Profile URL、`cn`、`errMessage`、`hasSessionKey`        |
 | stores.test.ts | 18     | toast 定时移除、Tab hash 同步、主题/语言持久化与 auto 跟随、reloadConfig |
 | logger.test.ts | 8      | 五级日志过滤、非法级别回落 info、空 tag                                  |
@@ -263,7 +262,7 @@ CNB 语义：事件键下的值是 Pipeline 数组，同事件多个条目 = 多
 ## 覆盖率实况（首次实现基线，57 个用例）
 
 | 文件                | % Stmts   | % Lines   | 说明                                         |
-| ------------------- | --------- | --------- | -------------------------------------------- |
+|---------------------|-----------|-----------|----------------------------------------------|
 | **All files**       | **45.36** | **45.41** | 全量度量（all: true）                        |
 | types.ts            | 100       | 100       | `createEmptyUser` 纯工厂函数                 |
 | i18n/index.ts       | 100       | 100       | `mapLanguage`                                |

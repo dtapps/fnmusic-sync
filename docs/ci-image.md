@@ -5,7 +5,7 @@
 ## 1. 两种分发模型（最重要的差异）
 
 | 维度     | CNB（`.cnb/ci/Dockerfile`）                    | GitHub（`.github/ci/Dockerfile`）                                     |
-| -------- | ---------------------------------------------- | --------------------------------------------------------------------- |
+|----------|------------------------------------------------|-----------------------------------------------------------------------|
 | 分发方式 | **每次运行时构建**，由 CNB 平台自动完成并缓存  | **预构建推送**到 `ghcr.io/<owner>/<repo>/ci:latest`，复用             |
 | 构建声明 | 各工作流 `docker: build: .cnb/ci/Dockerfile`   | `.github/workflows/ci-image.yml` 手动触发构建                         |
 | 引用方式 | 工作流声明 `build:` 后，步骤直接在该容器内执行 | 工作流 `container: image: ghcr.io/${{ github.repository }}/ci:latest` |
@@ -23,28 +23,29 @@
 
 基础镜像 `golang:1.27.3-trixie`（自带 Go 1.27 + git），额外安装：
 
-| 工具             | 版本       | 用途                         |
-| ---------------- | ---------- | ---------------------------- |
-| UPX              | `5.2.1`    | 二进制压缩（release 打包用） |
-| nfpm             | `2.48.0`   | 打包 deb/rpm/apk             |
-| fnpack           | `1.2.3`    | 飞牛 fnOS fpk 打包           |
-| Node.js          | `26.12.1`  | 前端构建                     |
-| pnpm             | `12.15.0`  | 前端包管理                   |
-| sqlc             | `v1.31.1`  | 生成 `internal/db`/`datadb`  |
-| golangci-lint    | `v2.15.0`  | Go lint（`make check`）      |
-| govulncheck      | `v1.9.0`   | Go 漏洞扫描                  |
-| shfmt            | `v3.14.1`  | shell 格式化                 |
-| dockerfmt        | `v0.5.4`   | Dockerfile 格式化            |
-| yamlfmt          | `v0.21.0`  | YAML 格式化                  |
-| gojq             | `v0.12.19` | JSON 处理                    |
-| go-sql-formatter | `v15.8.2`  | SQL 格式化                   |
+| 工具             | 版本       | 用途                                                                    |
+|------------------|------------|-------------------------------------------------------------------------|
+| UPX              | `5.2.1`    | 二进制压缩（release 打包用）                                            |
+| nfpm             | `2.48.0`   | 打包 deb/rpm/apk                                                        |
+| fnpack           | `1.2.3`    | 飞牛 fnOS fpk 打包                                                      |
+| Node.js          | `26.12.1`  | 前端构建                                                                |
+| pnpm             | `12.15.0`  | 前端包管理                                                              |
+| sqlc             | `v1.31.1`  | 生成 `internal/db`/`datadb`                                             |
+| golangci-lint    | `v2.15.0`  | Go lint（`make check`）                                                 |
+| govulncheck      | `v1.9.0`   | Go 漏洞扫描                                                             |
+| shfmt            | `v3.14.1`  | shell 格式化                                                            |
+| dockerfmt        | `v0.5.4`   | Dockerfile 格式化                                                       |
+| yamlfmt          | `v0.21.0`  | YAML 格式化                                                             |
+| gojq             | `v0.12.19` | JSON 处理                                                               |
+| go-sql-formatter | `v15.8.2`  | SQL 格式化                                                              |
+| markdownfmt      | `v3.1.0`   | Markdown 格式化（`Kunde21/markdownfmt/v3`，shurcooL 原版的维护中 fork） |
 
 Go 工具经 `go install` 装到 `/go/bin`（`GOPATH=/go`，已在 PATH）。
 
 ### 仅 GitHub 版有的工具
 
 | 工具      | 版本      | 用途                                                       |
-| --------- | --------- | ---------------------------------------------------------- |
+|-----------|-----------|------------------------------------------------------------|
 | gotestsum | `v1.13.0` | 跑测试 + JUnit 报告（`coverage.yml` / `coveralls.yml` 用） |
 | goveralls | `v0.0.12` | 上报 Coveralls（`coveralls.yml` 用）                       |
 
@@ -66,6 +67,8 @@ Go 工具经 `go install` 装到 `/go/bin`（`GOPATH=/go`，已在 PATH）。
    - GitHub：手动跑一次 `ci-image.yml`，推送新的 `ghcr.io/.../ci:latest`。**下一次 CI 才会用新镜像**；`latest` 是唯一 tag，无回滚手段，回滚 = 手动重跑旧版本的 `ci-image.yml`。
    - CNB：无需操作，下次运行自动重建（平台有构建缓存）。
 3. **同步检查工作流**：若涉及行为变化（如 goveralls 参数、gotestsum 的 JUnit 路径），检查 `coverage.yml` / `coveralls.yml` / `.cnb/workflows/*-coverage.yml` 是否需要跟进。
+
+> markdownfmt 用 `Kunde21/markdownfmt/v3`（shurcooL 原版已停更，fork 支持 GFM 全语法）；模块路径带 `/v3`，安装路径是 `.../v3/cmd/markdownfmt`。
 
 > gotestsum 的历史教训：`v1.12.0` 在 Go 1.27 下编译失败，必须钉 `v1.13.0`。升级前先在本地 `go install <path>@<new-version>` 验证编译通过。
 

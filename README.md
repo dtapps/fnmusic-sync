@@ -8,20 +8,9 @@
 
 <div align="center">
 
-[![Latest Release](https://img.shields.io/github/v/release/dtapps/fnmusic-sync?style=flat-square)](https://github.com/dtapps/fnmusic-sync/releases)
-[![Downloads](https://img.shields.io/github/downloads/dtapps/fnmusic-sync/total?style=flat-square)](https://github.com/dtapps/fnmusic-sync/releases)
-[![Stars](https://img.shields.io/github/stars/dtapps/fnmusic-sync?style=flat-square)](https://github.com/dtapps/fnmusic-sync/stargazers)
-[![Forks](https://img.shields.io/github/forks/dtapps/fnmusic-sync?style=flat-square)](https://github.com/dtapps/fnmusic-sync/network/members)
-[![License](https://img.shields.io/github/license/dtapps/fnmusic-sync?style=flat-square)](LICENSE)
-[![Platform](https://img.shields.io/badge/platform-Linux-007EC6?style=flat-square)](https://github.com/dtapps/fnmusic-sync)
-[![Build](https://img.shields.io/github/actions/workflow/status/dtapps/fnmusic-sync/push.yml?style=flat-square)](https://github.com/dtapps/fnmusic-sync/actions/workflows/push.yml)
-![下载请求数](https://img.shields.io/endpoint?label=下载请求数&url=https%3A%2F%2Fdl-stats.dtapp.top%2Fshields.json%3Fplatform%3Dgithub.com%26repository%3D%2Fdtapps%2Ffnmusic-sync)
+[![Latest Release](https://img.shields.io/github/v/release/dtapps/fnmusic-sync?style=flat-square)](https://github.com/dtapps/fnmusic-sync/releases) [![Downloads](https://img.shields.io/github/downloads/dtapps/fnmusic-sync/total?style=flat-square)](https://github.com/dtapps/fnmusic-sync/releases) [![Stars](https://img.shields.io/github/stars/dtapps/fnmusic-sync?style=flat-square)](https://github.com/dtapps/fnmusic-sync/stargazers) [![Forks](https://img.shields.io/github/forks/dtapps/fnmusic-sync?style=flat-square)](https://github.com/dtapps/fnmusic-sync/network/members) [![License](https://img.shields.io/github/license/dtapps/fnmusic-sync?style=flat-square)](LICENSE) [![Platform](https://img.shields.io/badge/platform-Linux-007EC6?style=flat-square)](https://github.com/dtapps/fnmusic-sync) [![Build](https://img.shields.io/github/actions/workflow/status/dtapps/fnmusic-sync/push.yml?style=flat-square)](https://github.com/dtapps/fnmusic-sync/actions/workflows/push.yml) ![下载请求数](https://img.shields.io/endpoint?label=下载请求数&url=https%3A%2F%2Fdl-stats.dtapp.top%2Fshields.json%3Fplatform%3Dgithub.com%26repository%3D%2Fdtapps%2Ffnmusic-sync)
 
-[![CNB Release](https://cnb.cool/dtapp/fnmusic-sync/-/badge/release)](https://cnb.cool/dtapp/fnmusic-sync/-/badge/release.link)
-[![CNB Stars](https://cnb.cool/dtapp/fnmusic-sync/-/badge/star)](https://cnb.cool/dtapp/fnmusic-sync)
-[![CNB Forks](https://cnb.cool/dtapp/fnmusic-sync/-/badge/fork)](https://cnb.cool/dtapp/fnmusic-sync)
-[![CNB Build](https://cnb.cool/dtapp/fnmusic-sync/-/badge/git/latest/ci/status/push)](https://cnb.cool/dtapp/fnmusic-sync)
-![下载请求数](https://img.shields.io/endpoint?label=下载请求数&url=https%3A%2F%2Fdl-stats.dtapp.net%2Fshields.json%3Fplatform%3Dcnb.cool%26repository%3D%2Fdtapp%2Ffnmusic-sync)
+[![CNB Release](https://cnb.cool/dtapp/fnmusic-sync/-/badge/release)](https://cnb.cool/dtapp/fnmusic-sync/-/badge/release.link) [![CNB Stars](https://cnb.cool/dtapp/fnmusic-sync/-/badge/star)](https://cnb.cool/dtapp/fnmusic-sync) [![CNB Forks](https://cnb.cool/dtapp/fnmusic-sync/-/badge/fork)](https://cnb.cool/dtapp/fnmusic-sync) [![CNB Build](https://cnb.cool/dtapp/fnmusic-sync/-/badge/git/latest/ci/status/push)](https://cnb.cool/dtapp/fnmusic-sync) ![下载请求数](https://img.shields.io/endpoint?label=下载请求数&url=https%3A%2F%2Fdl-stats.dtapp.net%2Fshields.json%3Fplatform%3Dcnb.cool%26repository%3D%2Fdtapp%2Ffnmusic-sync)
 
 </div>
 
@@ -50,7 +39,7 @@ socket 绑定在 inode 上，用 `os.Rename`（mv）改名后官方后端仍能�
 ## 默认路径
 
 | 用途                 | 传统安装                                 | fpk 安装                                     |
-| -------------------- | ---------------------------------------- | -------------------------------------------- |
+|----------------------|------------------------------------------|----------------------------------------------|
 | 二进制               | `/usr/bin/fnmusic-sync`                  | `/var/apps/fnmusic-sync/target/fnmusic-sync` |
 | 配置文件             | `/etc/fnmusic-sync/config.yaml`          | `$TRIM_PKGETC/config.yaml`                   |
 | 数据库（运营状态）   | `/var/lib/fnmusic-sync/state.db`         | `$TRIM_PKGVAR/state.db`                      |
@@ -163,7 +152,7 @@ sudo fnmusic-sync service nodebug  # 关闭 debug 模式并重启服务
 ```
 
 | 子命令                               | 说明                                                                  |
-| ------------------------------------ | --------------------------------------------------------------------- |
+|--------------------------------------|-----------------------------------------------------------------------|
 | `version`                            | 打印版本、Git 提交、构建时间、Go 版本、平台、配置/状态/日志路径       |
 | `self-upgrade`                       | 升级自身到仓库最新版本（自动检测包管理器，下载 deb 安装并重启服务）   |
 | `service install`                    | 安装系统服务（systemd，需 root）——安装脚本已自动执行                  |
@@ -174,7 +163,7 @@ sudo fnmusic-sync service nodebug  # 关闭 debug 模式并重启服务
 | `service nodebug`                    | 关闭 debug 模式（移除 --debug，daemon-reload + restart）              |
 
 | 参数              | 默认值  | 说明                                  |
-| ----------------- | ------- | ------------------------------------- |
+|-------------------|---------|---------------------------------------|
 | `--upstream-wait` | `30s`   | 等待官方后端就绪超时                  |
 | `--check`         | `false` | 只体检，不接管                        |
 | `--debug`         | `false` | 打印请求/响应详情（含脱敏后的鉴权头） |
@@ -252,7 +241,7 @@ logging:
 ```
 
 | 段                                                      | 说明                                                                                                                                          |
-| ------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+|---------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------|
 | `server`                                                | socket 路径固定不可配；`socket_mode` 控制 socket 权限，`upstream_wait` 控制等待官方后端超时                                                   |
 | `users`                                                 | 按飞牛用户名隔离的推送凭证，可配多个用户                                                                                                      |
 | `playback.scrobble_threshold`                           | `auto`=听满 min(时长/2, 4min)（Last.fm 规则）；`30s`/`2m`=固定时长；`50%`=按比例；`off`=收到播放即推（不建议日常用）                          |
@@ -272,8 +261,7 @@ logging:
 ### Last.fm 授权
 
 1. `users.<名字>.lastfm` 填 `enabled: true` + `api_key` + `api_secret`，`session_key` 留空；
-2. 启动程序，日志里会出现授权链接：
-   `Last.fm 需要授权，请在浏览器打开以下链接并点击同意`；
+2. 启动程序，日志里会出现授权链接： `Last.fm 需要授权，请在浏览器打开以下链接并点击同意`；
 3. 浏览器点「同意」后，程序自动把 `session_key` 和 `username` 写回配置文件并热加载生效（180 秒轮询，超时重启程序可重试）。
 
 ListenBrainz 只需填 `token`，`username` 留空时自动获取并写回。
@@ -283,7 +271,7 @@ ListenBrainz 只需填 `token`，`username` 留空时自动获取并写回。
 支持将 ListenBrainz 的推荐歌单同步到飞牛音乐，按用户独立配置。
 
 | 歌单类型             | 说明                                      | 特殊要求                                                                       |
-| -------------------- | ----------------------------------------- | ------------------------------------------------------------------------------ |
+|----------------------|-------------------------------------------|--------------------------------------------------------------------------------|
 | `daily_jams`         | 每日推荐                                  | 需在 ListenBrainz 上关注 [`troi-bot`](https://listenbrainz.org/user/troi-bot/) |
 | `weekly_jams`        | 每周推荐                                  | 无                                                                             |
 | `weekly_exploration` | 每周探索（发现新音乐）                    | 无                                                                             |
@@ -296,9 +284,7 @@ ListenBrainz 只需填 `token`，`username` 留空时自动获取并写回。
 
 1. **ListenBrainz 用户名**：必须填写 `users.<名字>.listenbrainz.username`
 2. **关注 troi-bot**（daily-jams 必须）：在 ListenBrainz 上关注 [`troi-bot`](https://listenbrainz.org/user/troi-bot/) 机器人，它会基于你的听歌历史生成推荐
-3. **曲库里有对应歌曲**：曲目按「录音 MBID → 艺人名+曲名 → 仅曲名」的顺序匹配，
-   推荐曲名里的括号附注（如 `不将就 (Can't Bear It)`）会自动截断后再次比对，
-   因此**不强要求音乐文件带 MBID 标签**
+3. **曲库里有对应歌曲**：曲目按「录音 MBID → 艺人名+曲名 → 仅曲名」的顺序匹配， 推荐曲名里的括号附注（如 `不将就 (Can't Bear It)`）会自动截断后再次比对， 因此**不强要求音乐文件带 MBID 标签**
 4. **启用歌单同步**：在 `playlist.enabled: true` 且用户配置中开启对应的歌单类型
 
 **配置示例：**
@@ -337,9 +323,7 @@ users:
           limit: 50
 ```
 
-> ⚠️ **注意**：歌单同步从 ListenBrainz 的 `createdfor` 接口取"分享给你的"推荐歌单（daily-jams / weekly-jams / weekly-exploration，取最新一期），
-> 再按「录音 MBID → 艺人名+曲名 → 仅曲名」在飞牛音乐库中匹配，只**增量添加**缺失的曲目，重复同步不会把歌单撑大。
-> 每轮同步会在日志里打印匹配数与未匹配示例，便于排查命中率。
+> ⚠️ **注意**：歌单同步从 ListenBrainz 的 `createdfor` 接口取"分享给你的"推荐歌单（daily-jams / weekly-jams / weekly-exploration，取最新一期）， 再按「录音 MBID → 艺人名+曲名 → 仅曲名」在飞牛音乐库中匹配，只**增量添加**缺失的曲目，重复同步不会把歌单撑大。 每轮同步会在日志里打印匹配数与未匹配示例，便于排查命中率。
 
 ## 日志
 
@@ -360,7 +344,7 @@ tail -f /var/log/fnmusic-sync/fnmusic-sync.log
 ```
 
 | 现象                      | 原因与处理                                                                                                             |
-| ------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+|---------------------------|------------------------------------------------------------------------------------------------------------------------|
 | 飞牛音乐 502              | socket 权限不足：nginx 以 `www-data` 运行，代理 socket 必须允许 other 访问（`socket_mode: 0` 继承官方权限，至少 0666） |
 | 代理收不到任何请求        | 官方后端重启后重新绑定了原路径，重启代理重新接管                                                                       |
 | scrobble 不推送           | 用户名 key 与飞牛 `/user/me` 返回不一致、凭证未填全、或进度未到阈值（先用 `30s` 验证）                                 |
@@ -416,7 +400,7 @@ fpkg/                 飞牛 fnOS 应用包（fpk）源码
 ## 仓库
 
 | 平台   | 地址                                   |
-| ------ | -------------------------------------- |
+|--------|----------------------------------------|
 | CNB    | https://cnb.cool/dtapp/fnmusic-sync    |
 | GitHub | https://github.com/dtapps/fnmusic-sync |
 

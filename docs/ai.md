@@ -894,9 +894,7 @@ logging:
 /var/log/fnmusic-sync/fnmusic-sync.log
 ```
 
-目录与文件名是代码常量（`defaultLogDir` / `defaultLogFile`），**配置文件不提供 dir / file 选项**；
-仅 `--log-dir` 可临时覆盖（`off` / `none` / `-` 表示只输出控制台、不写文件）。
-日志同时输出到控制台(stderr)与文件；目录不可写时降级为仅控制台。
+目录与文件名是代码常量（`defaultLogDir` / `defaultLogFile`），**配置文件不提供 dir / file 选项**； 仅 `--log-dir` 可临时覆盖（`off` / `none` / `-` 表示只输出控制台、不写文件）。 日志同时输出到控制台(stderr)与文件；目录不可写时降级为仅控制台。
 
 路径约定（FHS）：
 
@@ -991,16 +989,14 @@ health check
 尽可能恢复官方 socket
 ```
 
-服务由 Go 库 `github.com/kardianos/service` 管理（`cmd/fnmusic-sync/service.go`），
-不手写 unit 文件：
+服务由 Go 库 `github.com/kardianos/service` 管理（`cmd/fnmusic-sync/service.go`）， 不手写 unit 文件：
 
 ```bash
 fnmusic-sync service install    # 写 /etc/systemd/system/fnmusic-sync.service
 fnmusic-sync service start|stop|restart|status
 ```
 
-模板通过 `Option["SystemdScript"]` 覆盖库默认模板（库模板把 `RestartSec` 写死成 120），
-生成内容：
+模板通过 `Option["SystemdScript"]` 覆盖库默认模板（库模板把 `RestartSec` 写死成 120）， 生成内容：
 
 ```ini
 [Unit]
@@ -1071,9 +1067,7 @@ DEBUG playback event
 级别优先级：--debug > logging.level（可热更新）
 ```
 
-轮转由 `gopkg.in/natefinch/lumberjack.v2` 实现（`lumberjack.Logger` 作为文件 writer）：
-超过 `max_size` 切割为 `fnmusic-sync-<时间>.log`，历史文件按 `compress` gzip 压缩，
-再按 `max_backups` / `max_age` 清理。
+轮转由 `gopkg.in/natefinch/lumberjack.v2` 实现（`lumberjack.Logger` 作为文件 writer）： 超过 `max_size` 切割为 `fnmusic-sync-<时间>.log`，历史文件按 `compress` gzip 压缩， 再按 `max_backups` / `max_age` 清理。
 
 实现：`cmd/fnmusic-sync/logging.go`，`multiHandler` 把一条记录扇出到多个 `slog.Handler`，单个失败不影响其它。
 
@@ -1176,8 +1170,7 @@ sudo ./scripts/install.sh uninstall [--purge]  # 卸载（--purge 连配置、�
 curl -fsSL <仓库>/-/git/raw/main/scripts/install.sh | sudo sh
 ```
 
-安装脚本**不下载仓库里的任何文件**（只下载 Release 里的二进制包）：
-配置文件由程序首次运行时自己生成（SaveDefault）。
+安装脚本**不下载仓库里的任何文件**（只下载 Release 里的二进制包）： 配置文件由程序首次运行时自己生成（SaveDefault）。
 
 约束：
 

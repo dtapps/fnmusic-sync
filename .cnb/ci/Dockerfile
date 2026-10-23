@@ -17,6 +17,7 @@ ARG GITHUB_MIRROR="https://files.m.daocloud.io"
 # https://github.com/google/yamlfmt/releases
 # https://github.com/itchyny/gojq/releases
 # https://github.com/wasilibs/go-sql-formatter/releases
+# https://github.com/Kunde21/markdownfmt/releases
 # ==========================================
 ARG UPX_VERSION=5.2.1
 ARG NFPM_VERSION=2.48.0
@@ -31,10 +32,12 @@ ARG DOCKERFMT_VERSION=v0.5.4
 ARG YAMLFMT_VERSION=v0.21.0
 ARG GOJQ_VERSION=v0.12.19
 ARG GOSQLFORMATTER_VERSION=v15.8.2
+ARG MARKDOWNFMT_VERSION=v3.1.0
 
 # 1. 设置 Go 环境变量
 ENV GO111MODULE=on
 ENV GOPROXY=https://mirrors.cloud.tencent.com/go/,direct
+ENV GOINSECURE=go.dtapp.net
 ENV GOPATH=/go
 ENV PATH="$GOPATH/bin:$PATH"
 
@@ -146,6 +149,8 @@ RUN echo "==> 预安装 Go 工具链（版本已锁定）..." \
     && echo "==> gojq 安装完成 (${GOJQ_VERSION})" \
     && go install github.com/wasilibs/go-sql-formatter/v15/cmd/sql-formatter@${GOSQLFORMATTER_VERSION} \
     && echo "==> go-sql-formatter 安装完成 (${GOSQLFORMATTER_VERSION})" \
+    && go install github.com/Kunde21/markdownfmt/v3/cmd/markdownfmt@${MARKDOWNFMT_VERSION} \
+    && echo "==> markdownfmt 安装完成 (${MARKDOWNFMT_VERSION})" \
     && echo "--- Go 工具链安装完成 ---" \
     && ls -l $GOPATH/bin
 

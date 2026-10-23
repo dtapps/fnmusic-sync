@@ -247,24 +247,36 @@ format-yaml:
 	@yamlfmt -conf .yamlfmt \
 		".cnb" \
 		".github" \
+		".gitlab" \
 		".cnb.yml" \
 		".nfpm.yaml" \
 		"internal/db" \
-		".golangci.yml" || { echo "❌ yamlfmt 格式化失败"; exit 1; }
+		".golangci.yml" \
+		".gitlab-ci.yml" || { echo "❌ yamlfmt 格式化失败"; exit 1; }
 	@echo "[Format] YAML 格式化完成（yamlfmt）。"
 
 # 格式化 Markdown 文件
 .PHONY: format-markdown
 format-markdown:
 	@echo "[Format] 格式化文档 (Markdown)…"
-	@npx --yes prettier@latest \
-		--write \
-		--tab-width 2 \
-		--print-width 120 \
-		--prose-wrap preserve \
-		"**/*.md" \
-		|| echo "⚠️  prettier 格式化失败，请确认 npx 可用"
-	@echo "[Format] Markdown 格式化完成。"
+	@command -v markdownfmt >/dev/null 2>&1 || { \
+		echo "⚠️  markdownfmt 未安装，跳过 Markdown 格式化。" ; \
+		echo "   提示: 可通过运行 'go install github.com/Kunde21/markdownfmt/v3/cmd/markdownfmt@latest' 安装" ; \
+		exit 0 ; \
+	}
+	@echo "[Format] 使用 markdownfmt 格式化 Markdown..."
+	@for f in $(shell find . -type f -name '*.md' \
+		-not -path '*/node_modules/*' \
+		-not -path './.git/*' \
+		-not -path './.vscode/*' \
+		-not -path './.idea/*' \
+		-not -path './.codebuddy/*' \
+		-not -path './.trae/*' \
+		-not -path './.mimocode/*'); do \
+		[ -f "$$f" ] || continue; \
+		markdownfmt -w "$$f" || { echo "❌ markdownfmt 格式化失败: $$f"; exit 1; }; \
+	done
+	@echo "[Format] Markdown 格式化完成（markdownfmt）。"
 
 # 格式化 Shell 脚本
 .PHONY: format-shell
@@ -303,6 +315,8 @@ format-docker:
 	}
 	@echo "[Format] 使用 dockerfmt 格式化 Dockerfile..."
 	@find .cnb -type f -name "Dockerfile*" -exec dockerfmt -w {} + || { echo "❌ dockerfmt 格式化失败"; exit 1; }
+	@find .github -type f -name "Dockerfile*" -exec dockerfmt -w {} + || { echo "❌ dockerfmt 格式化失败"; exit 1; }
+	@find .gitlab -type f -name "Dockerfile*" -exec dockerfmt -w {} + || { echo "❌ dockerfmt 格式化失败"; exit 1; }
 	@echo "[Format] Dockerfile 格式化完成（dockerfmt）。"
 
 # 检查（Go + HTML/CSS/JS/TS/Svelte + Linux 打包：含 fpk 与无 fpk 两种）
@@ -658,6 +672,7 @@ sync-github:
 push:
 	git push origin HEAD
 	git push github HEAD
+	git push gitlab HEAD
 	@echo "推送完成！"
 
 # 强制推送到所有远程仓库（忽略冲突）
@@ -665,4 +680,5 @@ push:
 push-force:
 	git push --force origin HEAD
 	git push --force github HEAD
+	git push --force gitlab HEAD
 	@echo "强制推送完成！"

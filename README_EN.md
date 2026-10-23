@@ -8,20 +8,9 @@ It takes over Feiniu Music's (trim-music) communication link via a unix socket, 
 
 <div align="center">
 
-[![Latest Release](https://img.shields.io/github/v/release/dtapps/fnmusic-sync?style=flat-square)](https://github.com/dtapps/fnmusic-sync/releases)
-[![Downloads](https://img.shields.io/github/downloads/dtapps/fnmusic-sync/total?style=flat-square)](https://github.com/dtapps/fnmusic-sync/releases)
-[![Stars](https://img.shields.io/github/stars/dtapps/fnmusic-sync?style=flat-square)](https://github.com/dtapps/fnmusic-sync/stargazers)
-[![Forks](https://img.shields.io/github/forks/dtapps/fnmusic-sync?style=flat-square)](https://github.com/dtapps/fnmusic-sync/network/members)
-[![License](https://img.shields.io/github/license/dtapps/fnmusic-sync?style=flat-square)](LICENSE)
-[![Platform](https://img.shields.io/badge/platform-Linux-007EC6?style=flat-square)](https://github.com/dtapps/fnmusic-sync)
-[![Build](https://img.shields.io/github/actions/workflow/status/dtapps/fnmusic-sync/push.yml?style=flat-square)](https://github.com/dtapps/fnmusic-sync/actions/workflows/push.yml)
-![Download Requests](https://img.shields.io/endpoint?label=Download%20Requests&url=https%3A%2F%2Fdl-stats.dtapp.top%2Fshields.json%3Fplatform%3Dgithub.com%26repository%3D%2Fdtapps%2Ffnmusic-sync)
+[![Latest Release](https://img.shields.io/github/v/release/dtapps/fnmusic-sync?style=flat-square)](https://github.com/dtapps/fnmusic-sync/releases) [![Downloads](https://img.shields.io/github/downloads/dtapps/fnmusic-sync/total?style=flat-square)](https://github.com/dtapps/fnmusic-sync/releases) [![Stars](https://img.shields.io/github/stars/dtapps/fnmusic-sync?style=flat-square)](https://github.com/dtapps/fnmusic-sync/stargazers) [![Forks](https://img.shields.io/github/forks/dtapps/fnmusic-sync?style=flat-square)](https://github.com/dtapps/fnmusic-sync/network/members) [![License](https://img.shields.io/github/license/dtapps/fnmusic-sync?style=flat-square)](LICENSE) [![Platform](https://img.shields.io/badge/platform-Linux-007EC6?style=flat-square)](https://github.com/dtapps/fnmusic-sync) [![Build](https://img.shields.io/github/actions/workflow/status/dtapps/fnmusic-sync/push.yml?style=flat-square)](https://github.com/dtapps/fnmusic-sync/actions/workflows/push.yml) ![Download Requests](https://img.shields.io/endpoint?label=Download%20Requests&url=https%3A%2F%2Fdl-stats.dtapp.top%2Fshields.json%3Fplatform%3Dgithub.com%26repository%3D%2Fdtapps%2Ffnmusic-sync)
 
-[![CNB Release](https://cnb.cool/dtapp/fnmusic-sync/-/badge/release)](https://cnb.cool/dtapp/fnmusic-sync/-/badge/release.link)
-[![CNB Stars](https://cnb.cool/dtapp/fnmusic-sync/-/badge/star)](https://cnb.cool/dtapp/fnmusic-sync)
-[![CNB Forks](https://cnb.cool/dtapp/fnmusic-sync/-/badge/fork)](https://cnb.cool/dtapp/fnmusic-sync)
-[![CNB Build](https://cnb.cool/dtapp/fnmusic-sync/-/badge/git/latest/ci/status/push)](https://cnb.cool/dtapp/fnmusic-sync)
-![Download Requests](https://img.shields.io/endpoint?label=Download%20Requests&url=https%3A%2F%2Fdl-stats.dtapp.net%2Fshields.json%3Fplatform%3Dcnb.cool%26repository%3D%2Fdtapp%2Ffnmusic-sync)
+[![CNB Release](https://cnb.cool/dtapp/fnmusic-sync/-/badge/release)](https://cnb.cool/dtapp/fnmusic-sync/-/badge/release.link) [![CNB Stars](https://cnb.cool/dtapp/fnmusic-sync/-/badge/star)](https://cnb.cool/dtapp/fnmusic-sync) [![CNB Forks](https://cnb.cool/dtapp/fnmusic-sync/-/badge/fork)](https://cnb.cool/dtapp/fnmusic-sync) [![CNB Build](https://cnb.cool/dtapp/fnmusic-sync/-/badge/git/latest/ci/status/push)](https://cnb.cool/dtapp/fnmusic-sync) ![Download Requests](https://img.shields.io/endpoint?label=Download%20Requests&url=https%3A%2F%2Fdl-stats.dtapp.net%2Fshields.json%3Fplatform%3Dcnb.cool%26repository%3D%2Fdtapp%2Ffnmusic-sync)
 
 </div>
 
@@ -50,7 +39,7 @@ A socket is bound to an inode. After renaming with `os.Rename` (mv), the officia
 ## Default paths
 
 | Purpose                  | Traditional install                      | fpk install                                  |
-| ------------------------ | ---------------------------------------- | -------------------------------------------- |
+|--------------------------|------------------------------------------|----------------------------------------------|
 | Binary                   | `/usr/bin/fnmusic-sync`                  | `/var/apps/fnmusic-sync/target/fnmusic-sync` |
 | Config file              | `/etc/fnmusic-sync/config.yaml`          | `$TRIM_PKGETC/config.yaml`                   |
 | Database (state)         | `/var/lib/fnmusic-sync/state.db`         | `$TRIM_PKGVAR/state.db`                      |
@@ -163,7 +152,7 @@ sudo fnmusic-sync service nodebug  # disable debug mode and restart service
 ```
 
 | Subcommand                           | Description                                                                                                        |
-| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------ |
+|--------------------------------------|--------------------------------------------------------------------------------------------------------------------|
 | `version`                            | Print version, git commit, build time, Go version, platform, config/state/log paths                                |
 | `self-upgrade`                       | Upgrade itself to the latest repo version (auto-detect package manager, download deb, install and restart service) |
 | `service install`                    | Install system service (systemd, needs root) — already done by install script                                      |
@@ -174,7 +163,7 @@ sudo fnmusic-sync service nodebug  # disable debug mode and restart service
 | `service nodebug`                    | Disable debug mode (remove --debug, daemon-reload + restart)                                                       |
 
 | Flag              | Default | Description                                                 |
-| ----------------- | ------- | ----------------------------------------------------------- |
+|-------------------|---------|-------------------------------------------------------------|
 | `--upstream-wait` | `30s`   | Timeout for waiting for the official backend to be ready    |
 | `--check`         | `false` | Only health-check, no takeover                              |
 | `--debug`         | `false` | Print request/response details (with redacted auth headers) |
@@ -252,7 +241,7 @@ logging:
 ```
 
 | Section                                                 | Description                                                                                                                                                                                                   |
-| ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+|---------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `server`                                                | socket path is fixed and not configurable; `socket_mode` controls socket permissions, `upstream_wait` controls the wait timeout for the official backend                                                      |
 | `users`                                                 | Per-Feiniu-username isolated push credentials; multiple users supported                                                                                                                                       |
 | `playback.scrobble_threshold`                           | `auto`=listen until min(duration/2, 4min) (Last.fm rule); `30s`/`2m`=fixed duration; `50%`=proportional; `off`=push on play (not recommended for daily use)                                                   |
@@ -270,8 +259,7 @@ logging:
 ### Last.fm authorization
 
 1. In `users.<name>.lastfm`, set `enabled: true` + `api_key` + `api_secret`, leave `session_key` empty;
-2. Start the program; an authorization link appears in the log:
-   `Last.fm needs authorization, please open the following link in your browser and click agree`;
+2. Start the program; an authorization link appears in the log: `Last.fm needs authorization, please open the following link in your browser and click agree`;
 3. After clicking "Agree" in the browser, the program auto-writes `session_key` and `username` back to the config file and hot-reloads them (180s polling; if it times out, restart the program to retry).
 
 ListenBrainz only needs `token`; when `username` is empty it is auto-fetched and written back.
@@ -281,7 +269,7 @@ ListenBrainz only needs `token`; when `username` is empty it is auto-fetched and
 Syncs ListenBrainz recommended and listening-stats playlists to Feiniu Music, configured independently per user.
 
 | Playlist type        | Description                                      | Special requirement                                                               |
-| -------------------- | ------------------------------------------------ | --------------------------------------------------------------------------------- |
+|----------------------|--------------------------------------------------|-----------------------------------------------------------------------------------|
 | `daily_jams`         | Daily recommendation                             | Must follow [`troi-bot`](https://listenbrainz.org/user/troi-bot/) on ListenBrainz |
 | `weekly_jams`        | Weekly recommendation                            | None                                                                              |
 | `weekly_exploration` | Weekly exploration (discover new music)          | None                                                                              |
@@ -293,9 +281,7 @@ Syncs ListenBrainz recommended and listening-stats playlists to Feiniu Music, co
 
 1. **ListenBrainz username**: `users.<name>.listenbrainz.username` must be filled in
 2. **Follow troi-bot** (required for daily-jams): follow the [`troi-bot`](https://listenbrainz.org/user/troi-bot/) bot on ListenBrainz; it generates recommendations based on your listening history
-3. **Corresponding tracks in your library**: tracks are matched in order of "recording MBID → artist name + track title → track title only",
-   bracketed annotations in recommended track titles (e.g. `不将就 (Can't Bear It)`) are auto-truncated and re-compared,
-   so **music files are not required to carry MBID tags**
+3. **Corresponding tracks in your library**: tracks are matched in order of "recording MBID → artist name + track title → track title only", bracketed annotations in recommended track titles (e.g. `不将就 (Can't Bear It)`) are auto-truncated and re-compared, so **music files are not required to carry MBID tags**
 4. **Enable playlist sync**: set `playlist.enabled: true` and enable the corresponding playlist type in the user config
 
 **Config example:**
@@ -334,9 +320,7 @@ users:
           limit: 50
 ```
 
-> ⚠️ **Note**: Playlist sync reads the "shared-with-you" recommended playlists (daily-jams / weekly-jams / weekly-exploration, latest issue) from ListenBrainz's `createdfor` endpoint,
-> then matches them against the Feiniu Music library by "recording MBID → artist name + track title → track title only", only **incrementally adding** missing tracks — repeating sync will not bloat the playlist.
-> Each sync round prints the match count and unmatched examples in the log for easy hit-rate troubleshooting.
+> ⚠️ **Note**: Playlist sync reads the "shared-with-you" recommended playlists (daily-jams / weekly-jams / weekly-exploration, latest issue) from ListenBrainz's `createdfor` endpoint, then matches them against the Feiniu Music library by "recording MBID → artist name + track title → track title only", only **incrementally adding** missing tracks — repeating sync will not bloat the playlist. Each sync round prints the match count and unmatched examples in the log for easy hit-rate troubleshooting.
 
 ## Logging
 
@@ -357,7 +341,7 @@ tail -f /var/log/fnmusic-sync/fnmusic-sync.log
 ```
 
 | Symptom                         | Cause & handling                                                                                                                                              |
-| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+|---------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | Feiniu Music 502                | Insufficient socket permissions: nginx runs as `www-data`, the proxy socket must allow other access (`socket_mode: 0` inherits official perms, at least 0666) |
 | Proxy receives no requests      | The official backend re-bound the original path after restart — restart the proxy to take over again                                                          |
 | Scrobble not pushed             | Username key doesn't match fnOS `/user/me` return, credentials incomplete, or progress hasn't reached the threshold (verify with `30s` first)                 |
@@ -413,7 +397,7 @@ The following are still being evaluated and not yet implemented:
 ## Repositories
 
 | Platform | URL                                    |
-| -------- | -------------------------------------- |
+|----------|----------------------------------------|
 | CNB      | https://cnb.cool/dtapp/fnmusic-sync    |
 | GitHub   | https://github.com/dtapps/fnmusic-sync |
 

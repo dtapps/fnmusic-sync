@@ -1,7 +1,6 @@
 # Go 单元测试覆盖率实现文案（fnmusic-sync 后端实战：Go + CNB）
 
-> 按 fnmusic-sync 项目实际实现整理（2026-10 实测）：无 ent，生成代码是 sqlc 的 `internal/db`、`internal/datadb`；本地基线约 1.5%，红线暂设 `lines: 0` / `diffLines: 0` 只收集不门禁。
-> 方案可复制到其他 Go 项目，按项目实际调整包路径与生成代码排除项。
+> 按 fnmusic-sync 项目实际实现整理（2026-10 实测）：无 ent，生成代码是 sqlc 的 `internal/db`、`internal/datadb`；本地基线约 1.5%，红线暂设 `lines: 0` / `diffLines: 0` 只收集不门禁。 方案可复制到其他 Go 项目，按项目实际调整包路径与生成代码排除项。
 
 # 任务：为 Go 项目实现单元测试覆盖率上报与红线门禁（CNB 云原生构建）
 

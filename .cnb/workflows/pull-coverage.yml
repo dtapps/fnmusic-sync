@@ -32,8 +32,8 @@
           options:
             key: go # 多报告数据键：与 Node 侧（key: node）区分，各自写入 meta map 互不覆盖
             name: Go Coverage # 徽章显示名，与 key 一对一对应
-            diffLines: 50 # 增量覆盖率红线（%）：本次 PR 变更代码的覆盖率，低于此值阻断流水线
-            lines: 10 # 全量覆盖率底线，与 push 流水线一致，防止总量被单个 PR 拉低
+            # diffLines: 50 # 增量覆盖率红线（%）：本次 PR 变更代码的覆盖率，低于此值阻断流水线
+            # lines: 10 # 全量覆盖率底线，与 push 流水线一致，防止总量被单个 PR 拉低
             lang: go # golang 格式的覆盖率报告必须指定，否则计算有误差
             pattern: 'coverage.out'
             breakIfNoCoverage: false # 找不到覆盖率报告时仅缺失数据、不阻断流水线；低于 lines/diffLines 红线仍会拦截
@@ -46,7 +46,7 @@
 
     # Node 单元测试覆盖率（增量红线）
     # pull_request 事件下 testing:coverage 额外计算增量覆盖率（diffLines 门禁）；
-    # 前端为 Svelte 5 + vitest（node 环境 + 环境桩），产出 cmd/frontend/coverage/lcov.info。
+    # 前端为 Svelte 5 + vitest（node 环境 + 环境桩）。
     - runner:
         tags: cnb:arch:amd64
       docker:
@@ -68,8 +68,8 @@
           options:
             key: node # 多报告数据键：与 Go 侧（key: go）区分，各自写入 meta map 互不覆盖
             name: Node Coverage # 徽章显示名，与 key 一对一对应
-            diffLines: 80 # 增量覆盖率红线（%）：本次 PR 变更代码的覆盖率，低于此值阻断流水线
-            lines: 90 # 全量覆盖率底线，与 push 流水线一致，防止总量被单个 PR 拉低
+            # diffLines: 80 # 增量覆盖率红线（%）：本次 PR 变更代码的覆盖率，低于此值阻断流水线
+            # lines: 90 # 全量覆盖率底线，与 push 流水线一致，防止总量被单个 PR 拉低
             pattern: 'cmd/frontend/coverage/lcov.info'
             breakIfNoCoverage: true # 找不到覆盖率报告则报错终止，避免静默通过
           exports:

@@ -5,7 +5,7 @@
 ## 1. 总览：三个支柱 + 职责分离
 
 | 支柱                     | 内容            | 本仓库实现                                                                                                         | Codecov 里看什么                      |
-| ------------------------ | --------------- | ------------------------------------------------------------------------------------------------------------------ | ------------------------------------- |
+|--------------------------|-----------------|--------------------------------------------------------------------------------------------------------------------|---------------------------------------|
 | 覆盖率 Coverage          | 代码行覆盖率    | `codecov/codecov-action` 上传 Go `coverage.out` 与前端 `lcov.info`                                                 | Coverage 面板、PR 评论、patch 状态    |
 | 打包体积 Bundle Analysis | 前端 chunk 体积 | `@codecov/vite-plugin`（构建时上传）                                                                               | Bundle 面板（体积趋势 / 回归）        |
 | 测试结果 Test Analytics  | 单测运行结果    | Go：`gotestsum --junitfile`；前端(Svelte)：Vitest `json` → 脚本转 JUnit；合并由 `codecov/test-results-action` 上传 | Tests 面板（时长 / flaky / 失败分析） |
@@ -15,7 +15,7 @@
 ## 2. 涉及文件清单
 
 | 文件                                            | 作用                                                                                                                |
-| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+|-------------------------------------------------|---------------------------------------------------------------------------------------------------------------------|
 | `.github/codecov.yml`                           | Codecov 规则：忽略 `internal/db`、`internal/datadb` 等 sqlc 生成代码、`flags`（go / node）、`status: informational` |
 | `.github/workflows/coverage.yml`                | GitHub Actions 流水线：装依赖 → 跑 Go/前端测试 → 构建前端 → 上传覆盖率 / 测试结果                                   |
 | `cmd/frontend/vite.config.ts`                   | 条件加载 `@codecov/vite-plugin`（仅当 `CODECOV_TOKEN` 存在时实例化）                                                |
@@ -27,6 +27,7 @@
 ### 3.1 覆盖率（Coverage）
 
 - Go：复用 CNB 的同款口径
+
   ```
   go test -vet=off -coverpkg=$(go list ./... | grep -vE '/(db|datadb)$' | paste -sd, -) -coverprofile=coverage.out ./...
   ```
@@ -38,6 +39,7 @@
 ### 3.2 打包体积（Bundle Analysis）
 
 - 插件 `@codecov/vite-plugin@2.0.1` 在 `cmd/frontend/vite.config.ts` 中**条件加载**：
+
   ```ts
   ...(process.env.CODECOV_TOKEN
     ? [
@@ -59,6 +61,7 @@
 Go 与前端(Svelte) 都不原生产出 JUnit，分别用不同方式转换后**合并上传**到同一个 `codecov/test-results-action@v1`：
 
 - **Go**：`go test` 不原生产 JUnit，用 `gotestsum` 包裹（参数原样透传，`coverage.out` 照常产出），额外生成 `go-test-report.xml`：
+
   ```
   go install gotest.tools/gotestsum@v1.13.0
   export PATH="$(go env GOPATH)/bin:$PATH"
@@ -67,9 +70,11 @@ Go 与前端(Svelte) 都不原生产出 JUnit，分别用不同方式转换后**
   - ⚠️ `gotestsum` 必须固定为 **v1.13.0**：v1.12.0 依赖的旧版 `golang.org/x/tools` 无法在 Go 1.27 上编译（`invalid array length`），v1.13.0 升到 x/tools v0.36.0 后正常。
 - **前端(Svelte / Vitest 5.0.5)**：无内置 junit reporter（社区 `@vitest/junit` 包在 npm 也已不可得），改用内置 `json` reporter 产出 `test-results.json`，再由零依赖脚本转 JUnit：
   1. 测试步骤额外挂内置 `json` reporter 产出 `test-results.json`：
+
      ```
      pnpm test:coverage --reporter=default --reporter=json --outputFile=test-results.json
      ```
+
      （`coverage/lcov.info` 仍正常产出，不受影响。）
   2. 转换步骤用 `node scripts/vitest-json-to-junit.mjs` 把 JSON 转成 `test-report.xml`（JUnit 格式）。
 - 上传步骤的 `files` 已合并两份报告：`cmd/frontend/test-report.xml,./go-test-report.xml`。
@@ -80,7 +85,7 @@ Go 与前端(Svelte) 都不原生产出 JUnit，分别用不同方式转换后**
 在 `.github/codecov.yml` 的顶层 `component_management` 里按业务模块把覆盖率切块，Codecov 会多出一个 **Components** 面板，分别看各模块的趋势与回归。它和 `coverage.flags` 不同：flags 是「按语言分开上传」，components 是「同一份覆盖率数据按目录再切块」。
 
 | component_id | 名称                | 路径                                                                                                                                                                                                    |
-| ------------ | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+|--------------|---------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | go-playback  | Go · 播放与队列     | `internal/playback/**`、`internal/playlist/**`                                                                                                                                                          |
 | go-scrobble  | Go · 打点与元数据   | `internal/scrobbler/**`、`internal/lastfm/**`、`internal/listenbrainz/**`、`internal/mbid/**`                                                                                                           |
 | go-platform  | Go · 平台与基础设施 | `internal/config/**`、`internal/model/**`、`internal/proxy/**`、`internal/feiniu/**`、`internal/reqlog/**`、`internal/safego/**`、`internal/strutil/**`、`internal/updater/**`、`internal/buildinfo/**` |
