@@ -17,6 +17,7 @@ FROM golang:1.27.3-trixie
 # https://github.com/itchyny/gojq/releases
 # https://github.com/wasilibs/go-sql-formatter/releases
 # https://github.com/gotestyourself/gotestsum/releases
+# https://github.com/mattn/goveralls/releases
 # ==========================================
 ARG UPX_VERSION=5.2.1
 ARG NFPM_VERSION=2.48.0
@@ -32,6 +33,7 @@ ARG YAMLFMT_VERSION=v0.21.0
 ARG GOJQ_VERSION=v0.12.19
 ARG GOSQLFORMATTER_VERSION=v15.8.2
 ARG GOTESTSUM_VERSION=v1.13.0
+ARG GOVERALLS_VERSION=v0.0.12
 
 # 1. 设置 Go 环境变量
 ENV GOPATH=/go
@@ -140,6 +142,8 @@ RUN echo "==> 预安装 Go 工具链（版本已锁定）..." \
     && echo "==> go-sql-formatter 安装完成 (${GOSQLFORMATTER_VERSION})" \
     && go install gotest.tools/gotestsum@${GOTESTSUM_VERSION} \
     && echo "==> gotestsum 安装完成 (${GOTESTSUM_VERSION})" \
+    && go install github.com/mattn/goveralls@${GOVERALLS_VERSION} \
+    && echo "==> goveralls 安装完成 (${GOVERALLS_VERSION})" \
     && echo "--- Go 工具链安装完成 ---" \
     && ls -l $GOPATH/bin
 
