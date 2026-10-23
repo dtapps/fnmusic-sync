@@ -70,7 +70,7 @@ jobs:
         working-directory: cmd/frontend
 
       - name: 上传 Go 覆盖率到 Codecov
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@v7
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: ./coverage.out
@@ -78,7 +78,7 @@ jobs:
           fail_ci_if_error: false
 
       - name: 上传前端覆盖率到 Codecov
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@v7
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: ./cmd/frontend/coverage/lcov.info
