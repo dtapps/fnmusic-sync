@@ -62,3 +62,6 @@ coverage.out
 coverage.html
 /cmd/frontend/coverage/
 coverage-go.xml
+/cmd/frontend/test-results.json
+/cmd/frontend/test-report.xml
+/go-test-report.xml

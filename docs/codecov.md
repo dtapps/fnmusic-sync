@@ -80,6 +80,47 @@ Go 与前端(Svelte) 都不原生产出 JUnit，分别用不同方式转换后**
 - 上传步骤的 `files` 已合并两份报告：`cmd/frontend/test-report.xml,./go-test-report.xml`。
 - 最终 Codecov 的 **Tests** 面板同时包含 Go 与前端(Svelte) 的测试结果。
 
+#### classname 必须是「仓库相对 + `/` 分隔」
+
+Codecov Test Analytics **只用 `testcase` 的 `classname` 属性**定位用例归属文件（官方 Jest 示例即 `JEST_JUNIT_CLASSNAME="{filepath}"`；`file` / `filepath` 属性文档未提及，不可依赖）。`classname` 同时决定文件分组、跨 run 关联（flaky 判定）与失败位置跳转。
+
+差异来自各自默认产出：
+
+- gotestsum（Go）：`classname` = 包导入路径 `cnb.cool/dtapp/fnmusic-sync/internal/auth` → 天然稳定 ✅
+- Vitest `json` reporter：`testResults[].name` 是**测试文件绝对路径**，直接写进 `classname` 就带上 runner 前缀 ❌
+
+runner 前缀**随 CI 执行形态变化**，同一仓库前后两次 run 就会把同一条用例记成两条（`…/a.test.ts > 用例A` 与 `/__w/…/a.test.ts > 用例B`）：
+
+| 执行形态                                               | 典型 checkout 路径                |
+|--------------------------------------------------------|-----------------------------------|
+| GitHub Actions 裸 runner（`runs-on:` 无 `container:`） | `/home/runner/work/<repo>/<repo>` |
+| GitHub Actions 容器 job（`container:`）                | `/__w/<repo>/<repo>`              |
+| GitLab CI                                              | `/builds/<group>/<repo>`          |
+| CNB / 常见容器默认 workdir                             | `/workspace/<repo>`               |
+| 本地                                                   | `/Users/<me>/<repo>`              |
+
+因此 `vitest-json-to-junit.mjs` 在写 XML 前做了**两层**归一化，结果与具体前缀无关：
+
+1. 从**脚本自身位置**（`import.meta.url`）向上找 `go.mod` / `.git` 得到仓库根；
+2. **第 1 层（常规，覆盖 99% 场景）**：JSON 与脚本在同一份 checkout 树内，直接 `path.relative(repoRoot, abs)` 再 `split(path.sep).join("/")`；
+3. **第 2 层（兜底）**：路径不在这棵树里（测试在容器内跑 `/__w/…`、转换在宿主上跑；或本机复现别的 CI 产出的 JSON）时，从尾部取最长的「在仓库里真实存在」的后缀。认不出来就原样返回，绝不编造路径。
+
+四个坑：
+
+- **不要用 `process.cwd()` 推仓库根**：转换步骤的 `working-directory` 是 `cmd/frontend`，cwd 不是仓库根，会算出 `../src/...`。
+- **不要用 `codecov.yml` 的 `fixes:` 兜底**：`fixes` 属覆盖率侧路径修补，对 Test Analytics 无效；即便生效也只能写死某个 CI 的前缀，换个 runner 形态（无容器的 `/home/runner/work/...`）立刻失效。
+- **历史数据不会迁移**：已上传的绝对路径记录保留到 Codecov 60 天保留期满才自然淘汰。UI 上还能看到旧记录 ≠ 修复没生效，要看最新一次 run。
+- **兜底层不能用 `existsSync`**：会命中 `cmd/frontend/src/test` 这类同名目录，必须 `statSync(...).isFile()`；循环上限也保留 `i >= 2`，避免误命中仓库根的 `go.mod` / `package.json`。
+
+自查：
+
+```bash
+grep -o 'classname="[^"]*"' cmd/frontend/test-report.xml | sort -u | head
+# 期望 cmd/frontend/src/test/x.test.ts；出现以 / 或 C:\ 开头即为此问题
+```
+
+脚本在两层都失败时（文件确实不在当前 checkout）会打 `⚠️` 警告，而不是静默产出坏数据。
+
 ### 3.4 Components 面板
 
 在 `.github/codecov.yml` 的顶层 `component_management` 里按业务模块把覆盖率切块，Codecov 会多出一个 **Components** 面板，分别看各模块的趋势与回归。它和 `coverage.flags` 不同：flags 是「按语言分开上传」，components 是「同一份覆盖率数据按目录再切块」。
@@ -111,6 +152,7 @@ Go 与前端(Svelte) 都不原生产出 JUnit，分别用不同方式转换后**
 - **Go 覆盖率 / Tests 上报 0% 或空**：本项目 `*_test.go` 被 `.gitignore` 忽略，GitHub Actions checkout 后**无 Go 测试可跑**，`go test`/`gotestsum` 仍会产出全 0% 的 `coverage.out` 与（空）`go-test-report.xml`（不会因 `breakIfNoCoverage` 失败）。要拿到真实 Go 数据，需先把测试文件纳入 git（从 `.gitignore` 移除 `*_test.go` 或 `git add -f`）。前端不受影响（测试已跟踪）。
 - **Bundle 面板空白**：检查「构建前端」步骤是否真的上传成功；插件与 Vite 8 不兼容时该步骤会 `continue-on-error` 失败但不阻断。
 - **Tests 面板空白**：检查 `test-results.json` 与 `go-test-report.xml` 是否生成、`vitest-json-to-junit.mjs` 是否产出 `test-report.xml`、`codecov/test-results-action` 是否拿到 token。
+- **Tests 面板用例名带 `/__w/...`、`/home/runner/work/...` 等前缀**：JUnit 里 `classname` 是绝对路径，跨 run 无法关联（详见 3.3「classname 必须是仓库相对」）。用 `grep -o 'classname="[^"]*"' cmd/frontend/test-report.xml | sort -u` 自查；脚本已在生成端归一化，并会在仍有绝对路径时打 `⚠️` 警告。注意已污染的历史数据不会迁移，只有新 run 才正确。
 - **覆盖率双份/互相覆盖**：确认 `.github/codecov.yml` 的 `flags` 已区分 `go` / `node`，且 `status` 为 `informational`。
 
 ## 7. 注意事项
