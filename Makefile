@@ -347,6 +347,38 @@ lint-frontend:
 
 # ==================== 构建 ====================
 
+# ==================== 版本备份 / 还原 ====================
+
+# build-frontend 会用 sed 把 PKG_VERSION 写进 $(FRONTEND_PKG)（与 git tag 保持一致），
+# 而且 sed -i.bak 之后顺手把 .bak 删了，于是构建完工作区就残留 package.json 的版本改动。
+# 会在外围构建的目标（build-linux-all → package-linux-deb/fpk → package-linux → check）
+# 统一用这两个目标夹一下：进构建前备份，出构建后还原。也可单独手动调用。
+# 备份放 bin/（已 gitignore），不污染源码树；restore 成功后才删备份，中途失败可手动补还原。
+FRONTEND_PKG     = $(FRONTEND_DIR)/package.json
+FRONTEND_PKG_BAK = $(BUILD_DIR)/package.json.ver.bak
+
+# 备份 package.json（已存在备份则沿用，不会用被改过的版本覆盖原始版本）
+.PHONY: backup-version
+backup-version:
+	@mkdir -p $(BUILD_DIR)
+	@if [ -f $(FRONTEND_PKG_BAK) ]; then \
+		echo "[版本] 备份已存在（上次未还原），沿用：$(FRONTEND_PKG_BAK)"; \
+	else \
+		cp $(FRONTEND_PKG) $(FRONTEND_PKG_BAK); \
+		echo "[版本] 已备份 $(FRONTEND_PKG) → $(FRONTEND_PKG_BAK)"; \
+	fi
+
+# 还原 package.json，并删除备份
+.PHONY: restore-version
+restore-version:
+	@if [ -f $(FRONTEND_PKG_BAK) ]; then \
+		cp $(FRONTEND_PKG_BAK) $(FRONTEND_PKG); \
+		rm -f $(FRONTEND_PKG_BAK); \
+		echo "[版本] 已还原 $(FRONTEND_PKG)"; \
+	else \
+		echo "[版本] 无备份，跳过还原"; \
+	fi
+
 # 构建前端（Svelte + Tailwind → internal/webui/www/）
 # 打包时同步 version 到 package.json，与 git tag 保持一致
 .PHONY: build-frontend
@@ -513,8 +545,10 @@ build-linux-arm64:
 	$(call build_tag_binary,linux,arm64,Linux ARM64 带标签,$(BUILD_TAG))
 
 # 构建 Linux 平台（不带标签 + 带标签）
+# 两端夹 backup-version / restore-version：build-frontend 会改 cmd/frontend/package.json，
+# 构建完直接还原，使 package-linux-deb/fpk、package-linux、check 之后工作区保持干净。
 .PHONY: build-linux-all
-build-linux-all: build-frontend build-linux-amd64 build-linux-arm64
+build-linux-all: backup-version build-frontend build-linux-amd64 build-linux-arm64 restore-version
 
 # 清理裸二进制（保留 .tar.gz 压缩包供自升级下载，上传前执行）
 .PHONY: clean-binaries
