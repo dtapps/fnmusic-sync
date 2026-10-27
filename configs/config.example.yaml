@@ -21,6 +21,10 @@ library:
   # MBID 本地扫描的去抖间隔（避免每次用户识别/定时同步都全量遍历音乐目录）。
   # 支持 Go 时长格式：300s、10m、6h、24h。空或非法值回退到 6h，限制在 [1m, 24h]。
   scan_interval: 6h
+  # 本地文件标签缺少 MBID 时，是否在线查询 MusicBrainz WS/2 补全 recording MBID。
+  # 开启后按「艺人名+曲名」查询（遵守 1 请求/秒 限速），结果落库 matched_by=musicbrainz。
+  # 默认 false：默认不依赖外网；仅在需要 MBID 精确匹配、又不方便用 Picard 打标时打开。
+  mbid_online_lookup: false
 
 # 每个用户各自配置自己的 Last.fm / ListenBrainz 账号（多用户隔离）。
 # key 必须与飞牛 /user/me 返回的用户名一致（从日志“识别到用户 用户名=xxx”确认）。

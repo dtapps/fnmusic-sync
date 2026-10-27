@@ -18,6 +18,7 @@
 
 - **CNB**：`.cnb/workflows/` 里 `push.yml`、`release.yml`、`pull-coverage.yml`、`push-coverage.yml` 共 6 处 `build: .cnb/ci/Dockerfile`。
 - **GitHub**：`push.yml`、`coverage.yml`（Codecov）、`coveralls.yml`（Coveralls）三个工作流的 `container:`。
+- **GitLab**：`.gitlab-ci.yml` 的 `default.image`（`check-image` → `build-image` → `merge-image` 用 `.gitlab/ci/Dockerfile` 自建，存在 GitLab 自己的 registry；消费方只有 `package-release`）。
 
 ## 2. 工具清单（两版一致，版本号逐项对应）
 

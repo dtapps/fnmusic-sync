@@ -1,9 +1,19 @@
+# https://docs.cnb.cool/zh/security/sca-sbom.html
 '**':
   pull_request:
     - stages:
-        # https://docs.cnb.cool/zh/security/sca-sbom.html
         - name: 生成 SBOM Delta
           image: cnbcool/sca-sbom:latest
           settings:
             # 输出文件路径
             output: ${CNB_BUILD_WORKSPACE}/.cnb-sca/sbom-delta.json
+  push:
+    - stages:
+        - name: 生成完整 SBOM
+          image: cnbcool/sca-sbom:latest
+          timeout: 30m
+          settings:
+            # 全量
+            scanMode: full
+            # 上传
+            publish: true

@@ -8,9 +8,11 @@ It takes over Feiniu Music's (trim-music) communication link via a unix socket, 
 
 <div align="center">
 
-[![Latest Release](https://img.shields.io/github/v/release/dtapps/fnmusic-sync?style=flat-square)](https://github.com/dtapps/fnmusic-sync/releases) [![Downloads](https://img.shields.io/github/downloads/dtapps/fnmusic-sync/total?style=flat-square)](https://github.com/dtapps/fnmusic-sync/releases) [![Stars](https://img.shields.io/github/stars/dtapps/fnmusic-sync?style=flat-square)](https://github.com/dtapps/fnmusic-sync/stargazers) [![Forks](https://img.shields.io/github/forks/dtapps/fnmusic-sync?style=flat-square)](https://github.com/dtapps/fnmusic-sync/network/members) [![License](https://img.shields.io/github/license/dtapps/fnmusic-sync?style=flat-square)](LICENSE) [![Platform](https://img.shields.io/badge/platform-Linux-007EC6?style=flat-square)](https://github.com/dtapps/fnmusic-sync) [![Build](https://img.shields.io/github/actions/workflow/status/dtapps/fnmusic-sync/push.yml?style=flat-square)](https://github.com/dtapps/fnmusic-sync/actions/workflows/push.yml) ![Download Requests](https://img.shields.io/endpoint?label=Download%20Requests&url=https%3A%2F%2Fdl-stats.dtapp.top%2Fshields.json%3Fplatform%3Dgithub.com%26repository%3D%2Fdtapps%2Ffnmusic-sync)
+[![Latest Release](https://img.shields.io/github/v/release/dtapps/fnmusic-sync?style=flat-square)](https://github.com/dtapps/fnmusic-sync/releases) [![Downloads](https://img.shields.io/github/downloads/dtapps/fnmusic-sync/total?style=flat-square)](https://github.com/dtapps/fnmusic-sync/releases) [![Stars](https://img.shields.io/github/stars/dtapps/fnmusic-sync?style=flat-square)](https://github.com/dtapps/fnmusic-sync/stargazers) [![Forks](https://img.shields.io/github/forks/dtapps/fnmusic-sync?style=flat-square)](https://github.com/dtapps/fnmusic-sync/network/members) [![License](https://img.shields.io/github/license/dtapps/fnmusic-sync?style=flat-square)](LICENSE) [![Platform](https://img.shields.io/badge/platform-Linux-007EC6?style=flat-square)](https://github.com/dtapps/fnmusic-sync) [![Build](https://img.shields.io/github/actions/workflow/status/dtapps/fnmusic-sync/push.yml?style=flat-square)](https://github.com/dtapps/fnmusic-sync/actions/workflows/push.yml) [![Codecov](https://img.shields.io/codecov/c/github/dtapps/fnmusic-sync?style=flat-square&logo=codecov&label=codecov)](https://codecov.io/gh/dtapps/fnmusic-sync) [![Coveralls](https://img.shields.io/coverallsCoverage/github/dtapps/fnmusic-sync?style=flat-square&logo=coveralls&label=coveralls)](https://coveralls.io/github/dtapps/fnmusic-sync) ![Download Requests](https://img.shields.io/endpoint?label=Download%20Requests&url=https%3A%2F%2Fdl-stats.dtapp.top%2Fshields.json%3Fplatform%3Dgithub.com%26repository%3D%2Fdtapps%2Ffnmusic-sync)
 
-[![CNB Release](https://cnb.cool/dtapp/fnmusic-sync/-/badge/release)](https://cnb.cool/dtapp/fnmusic-sync/-/badge/release.link) [![CNB Stars](https://cnb.cool/dtapp/fnmusic-sync/-/badge/star)](https://cnb.cool/dtapp/fnmusic-sync) [![CNB Forks](https://cnb.cool/dtapp/fnmusic-sync/-/badge/fork)](https://cnb.cool/dtapp/fnmusic-sync) [![CNB Build](https://cnb.cool/dtapp/fnmusic-sync/-/badge/git/latest/ci/status/push)](https://cnb.cool/dtapp/fnmusic-sync) ![Download Requests](https://img.shields.io/endpoint?label=Download%20Requests&url=https%3A%2F%2Fdl-stats.dtapp.net%2Fshields.json%3Fplatform%3Dcnb.cool%26repository%3D%2Fdtapp%2Ffnmusic-sync)
+[![CNB Release](https://cnb.cool/dtapp/fnmusic-sync/-/badge/release)](https://cnb.cool/dtapp/fnmusic-sync/-/badge/release.link) [![CNB Stars](https://cnb.cool/dtapp/fnmusic-sync/-/badge/star)](https://cnb.cool/dtapp/fnmusic-sync) [![CNB Forks](https://cnb.cool/dtapp/fnmusic-sync/-/badge/fork)](https://cnb.cool/dtapp/fnmusic-sync) [![CNB Build](https://cnb.cool/dtapp/fnmusic-sync/-/badge/git/latest/ci/status/push)](https://cnb.cool/dtapp/fnmusic-sync) [![CNB Coverage](https://cnb.cool/dtapp/fnmusic-sync/-/badge/git/latest/testing/unit/coverage)](https://cnb.cool/dtapp/fnmusic-sync) [![CNB Coverage PR](https://cnb.cool/dtapp/fnmusic-sync/-/badge/git/latest/testing/unit/coverage-pr)](https://cnb.cool/dtapp/fnmusic-sync) ![Download Requests](https://img.shields.io/endpoint?label=Download%20Requests&url=https%3A%2F%2Fdl-stats.dtapp.net%2Fshields.json%3Fplatform%3Dcnb.cool%26repository%3D%2Fdtapp%2Ffnmusic-sync)
+
+[![CNB Vulnerability](https://cnb.cool/dtapp/fnmusic-sync/-/badge/security/vulnerability/full/latest)](https://cnb.cool/dtapp/fnmusic-sync/-/badge/security/vulnerability/full/latest.link) [![CNB Vulnerability diff](https://cnb.cool/dtapp/fnmusic-sync/-/badge/security/vulnerability/diff/latest)](https://cnb.cool/dtapp/fnmusic-sync/-/badge/security/vulnerability/diff/latest.link) [![CNB License](https://cnb.cool/dtapp/fnmusic-sync/-/badge/security/license/full/latest)](https://cnb.cool/dtapp/fnmusic-sync/-/badge/security/license/full/latest.link) [![CNB License diff](https://cnb.cool/dtapp/fnmusic-sync/-/badge/security/license/diff/latest)](https://cnb.cool/dtapp/fnmusic-sync/-/badge/security/license/diff/latest.link) [![CNB SBOM](https://cnb.cool/dtapp/fnmusic-sync/-/badge/security/sbom/full/latest)](https://cnb.cool/dtapp/fnmusic-sync/-/badge/security/sbom/full/latest.link) [![CNB SBOM diff](https://cnb.cool/dtapp/fnmusic-sync/-/badge/security/sbom/diff/latest)](https://cnb.cool/dtapp/fnmusic-sync/-/badge/security/sbom/diff/latest.link)
 
 </div>
 
@@ -49,6 +51,26 @@ A socket is bound to an inode. After renaming with `os.Rename` (mv), the officia
 | Official upstream socket | `/var/run/trim_music_upstream.socket`    | same as left                                 |
 
 > In fpk mode, paths are determined by fnOS environment variables (`TRIM_APPDEST`, `TRIM_PKGETC`, `TRIM_PKGVAR`, etc.) and detected automatically at startup.
+
+## Documentation
+
+Full documentation lives in [`docs/`](docs/README.md) (Chinese), organized as mechanics / reference / engineering:
+
+| Topic                                   | Document                                                |
+|-----------------------------------------|---------------------------------------------------------|
+| Architecture, socket takeover, proxying | [Architecture & runtime](docs/architecture.md)          |
+| Playback parsing and scrobble decisions | [Playback events & scrobble](docs/scrobble-pipeline.md) |
+| Playlist sync and MBID matching         | [Playlist sync](docs/playlist-sync.md)                  |
+| Every config key and hot-reload limits  | [Configuration reference](docs/configuration.md)        |
+| Commands, flags, service management     | [Command line](docs/cli.md)                             |
+| Web UI HTTP endpoints                   | [Web UI API](docs/webui-api.md)                         |
+| Database schema and sqlc                | [Database](docs/database.md)                            |
+| Local development and builds            | [Development guide](docs/development.md)                |
+| Install, upgrade, rollback, monitoring  | [Deployment & operations](docs/deployment.md)           |
+| Symptom-driven troubleshooting          | [Troubleshooting](docs/troubleshooting.md)              |
+| Commit conventions and CI gates         | [Contributing](docs/contributing.md)                    |
+
+The repo root also has [CHANGELOG.md](CHANGELOG.md), [CONTRIBUTING.md](CONTRIBUTING.md) (short path) and [SECURITY.md](SECURITY.md) (threat model and hardening).
 
 ## Quick start
 
@@ -142,6 +164,7 @@ sudo nohup fnmusic-sync >/dev/null 2>&1 &   # run in background
 ```bash
 fnmusic-sync version          # view version, git commit, build time
 fnmusic-sync --check          # health check: socket ownership/permissions/connectivity, without takeover
+fnmusic-sync sockets          # print ownership/permissions/owner/PID and verdict for both sockets
 fnmusic-sync --debug          # foreground run + verbose request/response logging
 fnmusic-sync self-upgrade     # upgrade to the latest repo version (needs sudo)
 fnmusic-sync service status   # view service run state (equivalent to systemctl status)
@@ -154,6 +177,7 @@ sudo fnmusic-sync service nodebug  # disable debug mode and restart service
 | Subcommand                           | Description                                                                                                        |
 |--------------------------------------|--------------------------------------------------------------------------------------------------------------------|
 | `version`                            | Print version, git commit, build time, Go version, platform, config/state/log paths                                |
+| `sockets`                            | Print ownership, permissions, owner, PID and verdict for the proxy and upstream sockets                            |
 | `self-upgrade`                       | Upgrade itself to the latest repo version (auto-detect package manager, download deb, install and restart service) |
 | `service install`                    | Install system service (systemd, needs root) — already done by install script                                      |
 | `service uninstall`                  | Uninstall system service (needs root) — already done by uninstall script                                           |
@@ -162,11 +186,13 @@ sudo fnmusic-sync service nodebug  # disable debug mode and restart service
 | `service debug`                      | Enable debug mode (modify ExecStart to add --debug, daemon-reload + restart)                                       |
 | `service nodebug`                    | Disable debug mode (remove --debug, daemon-reload + restart)                                                       |
 
-| Flag              | Default | Description                                                 |
-|-------------------|---------|-------------------------------------------------------------|
-| `--upstream-wait` | `30s`   | Timeout for waiting for the official backend to be ready    |
-| `--check`         | `false` | Only health-check, no takeover                              |
-| `--debug`         | `false` | Print request/response details (with redacted auth headers) |
+| Flag              | Default | Description                                                                             |
+|-------------------|---------|-----------------------------------------------------------------------------------------|
+| `--upstream-wait` | `30s`   | Timeout for waiting for the official backend to be ready; overridden by config (below)  |
+| `--check`         | `false` | Only health-check, no takeover                                                          |
+| `--debug`         | `false` | Enable capture/request-detail logs and the goroutine monitor; does not change log level |
+
+> `server.upstream_wait` always has a value (default `30s`) and overrides `--upstream-wait` when the config is loaded, so the flag currently has no effect — change the config file instead. See [Command line](docs/cli.md).
 
 ## Configuration
 
@@ -328,7 +354,7 @@ users:
 - Fixed path: **`/var/log/fnmusic-sync/fnmusic-sync.log`** (directory and filename are written into code constants; the config file does not provide `dir`/`file` options).
 - **Automatic rotation** (lumberjack): when a single file exceeds `logging.max_size` MB it is rotated; historical files are auto gzip-compressed (`.gz`) and deleted automatically when exceeding `logging.max_backups` files or `logging.max_age` days.
 - When the directory is not writable, a WARN is printed and it degrades to console-only — it will not cause startup failure.
-- Level priority: `--debug` > `logging.level`; adjustable at runtime via hot-reload.
+- `--debug` (or the `wizard_debug=1` environment variable) enables capture/request-detail logs (`capture.log`, `lastfm.log`, `listenbrainz.log`, `feiniu.log`) and the goroutine monitor — it **does not** change the slog level. The main log level is controlled only by `logging.level`, adjustable at runtime via hot-reload. See [Command line](docs/cli.md).
 
 ## Check & troubleshooting
 
@@ -365,20 +391,30 @@ CI (`.cnb/workflows/release.yml`) builds and publishes a Release when a tag is c
 ## Directory structure
 
 ```text
-cmd/fnmusic-sync/      main program (main.go / upgrade.go / logging.go / service.go / runtime.go / auth.go)
+cmd/fnmusic-sync/      main program (main.go / root_cmd.go / runtime.go / setup.go / check.go / auth.go / logging.go / cmd_service.go / cmd_upgrade.go / cmd_sockets.go / version.go / webui_*.go)
+cmd/frontend/         Web UI frontend source (Svelte + Vite), built into internal/webui/www
 internal/buildinfo/   build info (version, etc., injected by Makefile -ldflags)
-internal/config/      config loading, hot-reload, default config generation
-internal/feiniu/      Feiniu Music API client (track index, playlist management)
-internal/playback/    playback event parsing, scrobble decision, user identification and stats
-internal/playlist/    ListenBrainz / Last.fm playlist sync service
-internal/proxy/       socket takeover, HTTP reverse proxy, health check
+internal/config/      config loading, hot-reload, default config generation and write-back
+internal/db/          operational state DB state.db (run_status / users / playback_log / sync_log, sqlc)
+internal/datadb/      MBID DB data.db (track_mbid_map, sqlc)
+internal/feiniu/      Feiniu Music API client (track index, playlist management, covers)
+internal/lastfm/      Last.fm client (signing, scrobble, auth, playlist reads)
+internal/listenbrainz/ ListenBrainz client (submit-listens, playlists, stats)
+internal/mbid/        MBID resolution, local tag scan, MusicBrainz lookup
+internal/model/       shared models (Track, etc.)
+internal/playback/    playback event parsing, sessions, scrobble decision, user identification
+internal/playlist/    Last.fm / ListenBrainz playlist sync service
+internal/proxy/       socket takeover/restore, HTTP reverse proxy, bypass capture, health check
 internal/reqlog/      request logger
-internal/scrobbler/   Last.fm / ListenBrainz client
+internal/safego/      goroutine wrapper with recover
+internal/scrobbler/   scrobble interfaces and type definitions (implemented in lastfm / listenbrainz)
 internal/strutil/     string utilities
-internal/webui/       Web config UI (fpk mode, unified gateway)
+internal/updater/     self-upgrade (version check, package download and install)
+internal/webui/       Web config UI and HTTP API (fpk mode, unified gateway)
 configs/              config examples
 scripts/              install.sh (install/upgrade/uninstall) + postinstall.sh + preremove.sh
 fpkg/                 fnOS app package (fpk) source
+docs/                 documentation (entry point: docs/README.md)
 ```
 
 ## Planned (playlist sources under consideration)

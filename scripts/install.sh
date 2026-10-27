@@ -232,7 +232,7 @@ do_install() {
   log "查看版本：${BINARY} version"
   log "体检：    ${BINARY} --check"
   log "升级：    sudo ${BINARY} self-upgrade"
-  log "卸载：    sudo apt remove ${BINARY}
+  log "卸载：    sudo apt remove ${BINARY}"
 }
 
 do_uninstall() {

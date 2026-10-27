@@ -1,8 +1,57 @@
+# 知识库构建
+# https://docs.cnb.cool/zh/ai/knowledge-base.html
 '**':
   push:
-    # 知识库构建
     - stages:
         - name: 知识库构建
           image: cnbcool/knowledge-base
           settings:
-            include: 'docs/**.md'
+            # 指定需要包含的文件，使用 Glob 模式匹配，默认为 **/**.md， 支持数组或逗号分隔
+            include:
+              - 'docs/**.md'
+              - 'docs/**/**.md'
+              - 'CHANGELOG.md'
+              - 'CONTRIBUTING.md'
+              - 'README_EN.md'
+              - 'README.md'
+              - 'SECURITY.md'
+            # 是否启用 Issue 同步功能
+            issueSyncEnabled: true
+            # 是否忽略文档处理失败
+            ignoreProcessFailures: true
+  issue.open:
+    - stages:
+        - name: 知识库构建
+          image: cnbcool/knowledge-base
+          settings:
+            # 指定需要包含的文件，使用 Glob 模式匹配，默认为 **/**.md， 支持数组或逗号分隔
+            include:
+              - 'docs/**.md'
+              - 'docs/**/**.md'
+              - 'CHANGELOG.md'
+              - 'CONTRIBUTING.md'
+              - 'README_EN.md'
+              - 'README.md'
+              - 'SECURITY.md'
+            # 是否启用 Issue 同步功能
+            issueSyncEnabled: true
+            # 是否忽略文档处理失败
+            ignoreProcessFailures: true
+  issue.comment:
+    - stages:
+        - name: 知识库构建
+          image: cnbcool/knowledge-base
+          settings:
+            # 指定需要包含的文件，使用 Glob 模式匹配，默认为 **/**.md， 支持数组或逗号分隔
+            include:
+              - 'docs/**.md'
+              - 'docs/**/**.md'
+              - 'CHANGELOG.md'
+              - 'CONTRIBUTING.md'
+              - 'README_EN.md'
+              - 'README.md'
+              - 'SECURITY.md'
+            # 是否启用 Issue 同步功能
+            issueSyncEnabled: true
+            # 是否忽略文档处理失败
+            ignoreProcessFailures: true

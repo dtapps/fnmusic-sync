@@ -705,6 +705,8 @@ sync-github:
 .PHONY: push
 push:
 	git push origin HEAD
+	git push gitee HEAD
+	git push gitcode HEAD
 	git push github HEAD
 	git push gitlab HEAD
 	@echo "推送完成！"
@@ -713,6 +715,8 @@ push:
 .PHONY: push-force
 push-force:
 	git push --force origin HEAD
+	git push --force gitee HEAD
+	git push --force gitcode HEAD
 	git push --force github HEAD
 	git push --force gitlab HEAD
 	@echo "强制推送完成！"

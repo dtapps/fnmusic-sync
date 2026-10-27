@@ -8,9 +8,11 @@
 
 <div align="center">
 
-[![Latest Release](https://img.shields.io/github/v/release/dtapps/fnmusic-sync?style=flat-square)](https://github.com/dtapps/fnmusic-sync/releases) [![Downloads](https://img.shields.io/github/downloads/dtapps/fnmusic-sync/total?style=flat-square)](https://github.com/dtapps/fnmusic-sync/releases) [![Stars](https://img.shields.io/github/stars/dtapps/fnmusic-sync?style=flat-square)](https://github.com/dtapps/fnmusic-sync/stargazers) [![Forks](https://img.shields.io/github/forks/dtapps/fnmusic-sync?style=flat-square)](https://github.com/dtapps/fnmusic-sync/network/members) [![License](https://img.shields.io/github/license/dtapps/fnmusic-sync?style=flat-square)](LICENSE) [![Platform](https://img.shields.io/badge/platform-Linux-007EC6?style=flat-square)](https://github.com/dtapps/fnmusic-sync) [![Build](https://img.shields.io/github/actions/workflow/status/dtapps/fnmusic-sync/push.yml?style=flat-square)](https://github.com/dtapps/fnmusic-sync/actions/workflows/push.yml) ![下载请求数](https://img.shields.io/endpoint?label=下载请求数&url=https%3A%2F%2Fdl-stats.dtapp.top%2Fshields.json%3Fplatform%3Dgithub.com%26repository%3D%2Fdtapps%2Ffnmusic-sync)
+[![Latest Release](https://img.shields.io/github/v/release/dtapps/fnmusic-sync?style=flat-square)](https://github.com/dtapps/fnmusic-sync/releases) [![Downloads](https://img.shields.io/github/downloads/dtapps/fnmusic-sync/total?style=flat-square)](https://github.com/dtapps/fnmusic-sync/releases) [![Stars](https://img.shields.io/github/stars/dtapps/fnmusic-sync?style=flat-square)](https://github.com/dtapps/fnmusic-sync/stargazers) [![Forks](https://img.shields.io/github/forks/dtapps/fnmusic-sync?style=flat-square)](https://github.com/dtapps/fnmusic-sync/network/members) [![License](https://img.shields.io/github/license/dtapps/fnmusic-sync?style=flat-square)](LICENSE) [![Platform](https://img.shields.io/badge/platform-Linux-007EC6?style=flat-square)](https://github.com/dtapps/fnmusic-sync) [![Build](https://img.shields.io/github/actions/workflow/status/dtapps/fnmusic-sync/push.yml?style=flat-square)](https://github.com/dtapps/fnmusic-sync/actions/workflows/push.yml) [![Codecov](https://img.shields.io/codecov/c/github/dtapps/fnmusic-sync?style=flat-square&logo=codecov&label=codecov)](https://codecov.io/gh/dtapps/fnmusic-sync) [![Coveralls](https://img.shields.io/coverallsCoverage/github/dtapps/fnmusic-sync?style=flat-square&logo=coveralls&label=coveralls)](https://coveralls.io/github/dtapps/fnmusic-sync) ![下载请求数](https://img.shields.io/endpoint?label=下载请求数&url=https%3A%2F%2Fdl-stats.dtapp.top%2Fshields.json%3Fplatform%3Dgithub.com%26repository%3D%2Fdtapps%2Ffnmusic-sync)
 
-[![CNB Release](https://cnb.cool/dtapp/fnmusic-sync/-/badge/release)](https://cnb.cool/dtapp/fnmusic-sync/-/badge/release.link) [![CNB Stars](https://cnb.cool/dtapp/fnmusic-sync/-/badge/star)](https://cnb.cool/dtapp/fnmusic-sync) [![CNB Forks](https://cnb.cool/dtapp/fnmusic-sync/-/badge/fork)](https://cnb.cool/dtapp/fnmusic-sync) [![CNB Build](https://cnb.cool/dtapp/fnmusic-sync/-/badge/git/latest/ci/status/push)](https://cnb.cool/dtapp/fnmusic-sync) ![下载请求数](https://img.shields.io/endpoint?label=下载请求数&url=https%3A%2F%2Fdl-stats.dtapp.net%2Fshields.json%3Fplatform%3Dcnb.cool%26repository%3D%2Fdtapp%2Ffnmusic-sync)
+[![CNB Release](https://cnb.cool/dtapp/fnmusic-sync/-/badge/release)](https://cnb.cool/dtapp/fnmusic-sync/-/badge/release.link) [![CNB Stars](https://cnb.cool/dtapp/fnmusic-sync/-/badge/star)](https://cnb.cool/dtapp/fnmusic-sync) [![CNB Forks](https://cnb.cool/dtapp/fnmusic-sync/-/badge/fork)](https://cnb.cool/dtapp/fnmusic-sync) [![CNB Build](https://cnb.cool/dtapp/fnmusic-sync/-/badge/git/latest/ci/status/push)](https://cnb.cool/dtapp/fnmusic-sync) [![CNB Coverage](https://cnb.cool/dtapp/fnmusic-sync/-/badge/git/latest/testing/unit/coverage)](https://cnb.cool/dtapp/fnmusic-sync) [![CNB Coverage PR](https://cnb.cool/dtapp/fnmusic-sync/-/badge/git/latest/testing/unit/coverage-pr)](https://cnb.cool/dtapp/fnmusic-sync) ![下载请求数](https://img.shields.io/endpoint?label=下载请求数&url=https%3A%2F%2Fdl-stats.dtapp.net%2Fshields.json%3Fplatform%3Dcnb.cool%26repository%3D%2Fdtapp%2Ffnmusic-sync)
+
+[![CNB Vulnerability](https://cnb.cool/dtapp/fnmusic-sync/-/badge/security/vulnerability/full/latest)](https://cnb.cool/dtapp/fnmusic-sync/-/badge/security/vulnerability/full/latest.link) [![CNB Vulnerability diff](https://cnb.cool/dtapp/fnmusic-sync/-/badge/security/vulnerability/diff/latest)](https://cnb.cool/dtapp/fnmusic-sync/-/badge/security/vulnerability/diff/latest.link) [![CNB License](https://cnb.cool/dtapp/fnmusic-sync/-/badge/security/license/full/latest)](https://cnb.cool/dtapp/fnmusic-sync/-/badge/security/license/full/latest.link) [![CNB License diff](https://cnb.cool/dtapp/fnmusic-sync/-/badge/security/license/diff/latest)](https://cnb.cool/dtapp/fnmusic-sync/-/badge/security/license/diff/latest.link) [![CNB SBOM](https://cnb.cool/dtapp/fnmusic-sync/-/badge/security/sbom/full/latest)](https://cnb.cool/dtapp/fnmusic-sync/-/badge/security/sbom/full/latest.link) [![CNB SBOM diff](https://cnb.cool/dtapp/fnmusic-sync/-/badge/security/sbom/diff/latest)](https://cnb.cool/dtapp/fnmusic-sync/-/badge/security/sbom/diff/latest.link)
 
 </div>
 
@@ -49,6 +51,26 @@ socket 绑定在 inode 上，用 `os.Rename`（mv）改名后官方后端仍能�
 | 官方 upstream socket | `/var/run/trim_music_upstream.socket`    | 同左                                         |
 
 > fpk 模式下路径由飞牛 fnOS 环境变量（`TRIM_APPDEST`、`TRIM_PKGETC`、`TRIM_PKGVAR` 等）决定，程序启动时自动检测。
+
+## 文档
+
+完整文档在 [`docs/`](docs/README.md)，按「运行机制 / 参考手册 / 开发运维」组织：
+
+| 主题                         | 文档                                                  |
+|------------------------------|-------------------------------------------------------|
+| 架构、socket 接管与转发机制  | [架构与运行原理](docs/architecture.md)                |
+| 播放事件解析与 scrobble 判定 | [播放事件与 scrobble 判定](docs/scrobble-pipeline.md) |
+| 歌单同步与 MBID 匹配         | [歌单同步机制](docs/playlist-sync.md)                 |
+| 配置项全量与热加载边界       | [配置参考](docs/configuration.md)                     |
+| 命令、flag、服务管理         | [命令行](docs/cli.md)                                 |
+| Web UI HTTP 接口             | [Web UI API](docs/webui-api.md)                       |
+| 数据库表结构与 sqlc          | [数据库结构](docs/database.md)                        |
+| 本地开发与构建               | [开发指南](docs/development.md)                       |
+| 安装、升级、回滚、监控       | [部署与运维](docs/deployment.md)                      |
+| 症状驱动的排障手册           | [故障排查](docs/troubleshooting.md)                   |
+| 提交规范与 CI 门禁           | [贡献指南](docs/contributing.md)                      |
+
+仓库根目录还有三份通用文件：[更新日志](CHANGELOG.md)、[贡献指南](CONTRIBUTING.md)（最短路径版）、[安全策略](SECURITY.md)（含威胁模型与加固建议）。
 
 ## 快速开始
 
@@ -142,6 +164,7 @@ sudo nohup fnmusic-sync >/dev/null 2>&1 &   # 后台常驻
 ```bash
 fnmusic-sync version          # 查看版本、Git 提交、构建时间
 fnmusic-sync --check          # 体检：socket 归属/权限/连通性，不接管
+fnmusic-sync sockets          # 只打印两个 socket 的归属/权限/属主/PID 与结论
 fnmusic-sync --debug          # 前台运行 + 请求/响应详细日志
 fnmusic-sync self-upgrade     # 升级到仓库最新版本（需 sudo）
 fnmusic-sync service status   # 查看服务运行状态（等价 systemctl status）
@@ -154,6 +177,7 @@ sudo fnmusic-sync service nodebug  # 关闭 debug 模式并重启服务
 | 子命令                               | 说明                                                                  |
 |--------------------------------------|-----------------------------------------------------------------------|
 | `version`                            | 打印版本、Git 提交、构建时间、Go 版本、平台、配置/状态/日志路径       |
+| `sockets`                            | 打印代理 socket 与 upstream socket 的归属、权限、属主、PID 与结论     |
 | `self-upgrade`                       | 升级自身到仓库最新版本（自动检测包管理器，下载 deb 安装并重启服务）   |
 | `service install`                    | 安装系统服务（systemd，需 root）——安装脚本已自动执行                  |
 | `service uninstall`                  | 卸载系统服务（需 root）——卸载脚本已自动执行                           |
@@ -162,11 +186,13 @@ sudo fnmusic-sync service nodebug  # 关闭 debug 模式并重启服务
 | `service debug`                      | 开启 debug 模式（修改 ExecStart 加 --debug，daemon-reload + restart） |
 | `service nodebug`                    | 关闭 debug 模式（移除 --debug，daemon-reload + restart）              |
 
-| 参数              | 默认值  | 说明                                  |
-|-------------------|---------|---------------------------------------|
-| `--upstream-wait` | `30s`   | 等待官方后端就绪超时                  |
-| `--check`         | `false` | 只体检，不接管                        |
-| `--debug`         | `false` | 打印请求/响应详情（含脱敏后的鉴权头） |
+| 参数              | 默认值  | 说明                                                               |
+|-------------------|---------|--------------------------------------------------------------------|
+| `--upstream-wait` | `30s`   | 等待官方后端就绪超时；注意 `server.upstream_wait` 会覆盖它（见下） |
+| `--check`         | `false` | 只体检，不接管                                                     |
+| `--debug`         | `false` | 开启抓包/请求明细日志与 goroutine 监视器，不改日志级别             |
+
+> `server.upstream_wait` 始终有值（默认 `30s`），加载配置时会无条件覆盖 `--upstream-wait`，因此该 flag 目前实际不生效 —— 要改等待时间请改配置文件。细节见 [命令行](docs/cli.md)。
 
 ## 配置
 
@@ -331,7 +357,7 @@ users:
 - 路径固定：**`/var/log/fnmusic-sync/fnmusic-sync.log`**（目录与文件名写在代码常量里，配置文件不提供 `dir`/`file` 选项）。
 - **自动轮转**（lumberjack）：单文件超过 `logging.max_size` MB 就切割，历史文件自动 gzip 压缩（`.gz`），超过 `logging.max_backups` 份或 `logging.max_age` 天的自动删除。
 - 目录不可写时打印 WARN 并降级为仅控制台，不会导致启动失败。
-- 级别优先级：`--debug` > `logging.level`；热加载可运行时调整。
+- `--debug`（或环境变量 `wizard_debug=1`）开启的是抓包/请求明细日志（`capture.log`、`lastfm.log`、`listenbrainz.log`、`feiniu.log`）与 goroutine 监视器，**不改变** slog 级别；主日志级别只由 `logging.level` 决定，可热加载调整。详见 [命令行](docs/cli.md)。
 
 ## 检查与排障
 
@@ -368,20 +394,30 @@ CI（`.cnb/workflows/release.yml`）在打 tag 时构建并发布 Release，支�
 ## 目录结构
 
 ```text
-cmd/fnmusic-sync/     主程序（main.go / upgrade.go / logging.go / service.go / runtime.go / auth.go）
+cmd/fnmusic-sync/     主程序（main.go / root_cmd.go / runtime.go / setup.go / check.go / auth.go / logging.go / cmd_service.go / cmd_upgrade.go / cmd_sockets.go / version.go / webui_*.go）
+cmd/frontend/         Web UI 前端源码（Svelte + Vite），构建产物内嵌到 internal/webui/www
 internal/buildinfo/   构建信息（版本号等，由 Makefile -ldflags 注入）
-internal/config/      配置加载、热加载、默认配置生成
-internal/feiniu/      飞牛音乐 API 客户端（曲目索引、歌单管理）
-internal/playback/    播放事件解析、scrobble 判定、用户识别与统计
-internal/playlist/    ListenBrainz / Last.fm 歌单同步服务
-internal/proxy/       socket 接管、HTTP 反向代理、健康检查
+internal/config/      配置加载、热加载、默认配置生成与回写
+internal/db/          运营状态库 state.db（run_status / users / playback_log / sync_log，sqlc 生成）
+internal/datadb/      MBID 数据库 data.db（track_mbid_map，sqlc 生成）
+internal/feiniu/      飞牛音乐 API 客户端（曲目索引、歌单管理、封面）
+internal/lastfm/      Last.fm 客户端（签名、scrobble、授权、歌单读取）
+internal/listenbrainz/ ListenBrainz 客户端（submit-listens、歌单与统计）
+internal/mbid/        MBID 解析与本地标签扫描、MusicBrainz 查询
+internal/model/       共享数据模型（Track 等）
+internal/playback/    播放事件解析、播放会话、scrobble 判定、用户识别
+internal/playlist/    Last.fm / ListenBrainz 歌单同步服务
+internal/proxy/       socket 接管与还原、HTTP 反向代理、旁路捕获、健康检查
 internal/reqlog/      请求日志记录器
-internal/scrobbler/   Last.fm / ListenBrainz 客户端
+internal/safego/      带 recover 的 goroutine 封装
+internal/scrobbler/   scrobble 接口与类型定义（实现分布在 lastfm / listenbrainz）
 internal/strutil/     字符串工具
-internal/webui/       Web 配置界面（fpk 模式，统一网关）
+internal/updater/     自升级（版本检查、安装包下载与安装）
+internal/webui/       Web 配置界面与 HTTP API（fpk 模式，统一网关）
 configs/              配置示例
 scripts/              install.sh（安装/升级/卸载）+ postinstall.sh + preremove.sh
 fpkg/                 飞牛 fnOS 应用包（fpk）源码
+docs/                 文档（入口 docs/README.md）
 ```
 
 ## 规划中（考虑开发的歌单源）
