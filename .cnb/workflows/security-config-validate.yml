@@ -1,0 +1,9 @@
+# 代码安全扫描配置自检
+# https://docs.cnb.cool/zh/security/config-file.html
+'**':
+  pull_request:
+    - stages:
+        - name: 校验代码安全扫描配置
+          image: cnbcool/code-security-config
+          args:
+            - validate

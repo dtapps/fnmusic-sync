@@ -10,3 +10,4 @@ include:
   - .cnb/workflows/sca-license.yml
   - .cnb/workflows/sca-sbom.yml
   - .cnb/workflows/sca-vulnerability.yml
+  - .cnb/workflows/security-config-validate.yml

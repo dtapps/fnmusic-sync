@@ -1,24 +1,18 @@
 # CNB 代码安全扫描配置
 # 文档: https://docs.cnb.cool/zh/security/config-file.html
 #
-# 注意：scan.paths 为 gitignore 风格规则列表，按顺序匹配、后者覆盖前者。
-# 正向 pattern = 纳入扫描范围；排除必须用 '!' 取反（且 YAML 中 ! 须引号包裹）。
-# 曾误将排除项写成正向 patterns，等于把扫描范围收窄为「只有测试文件」，适得其反。
+# 注意：排除项必须写成 ignoreFrom 引用的忽略文件，或 paths 中以 '!' 开头的取反规则。
+# '.scanignore' 与 'ignoreFrom' 指定的文件不会合并——一旦配置 ignoreFrom，
+# 该能力所需的全部忽略规则都要写进那个文件。
+# 别把这些规则直接塞进 scan.paths 冒充排除：paths 用的是 gitignore 语义，
+# 正向 pattern 是「纳入扫描」，只有 '!...' 才表示排除。
 
-# 秘密扫描（API Key、Token、凭据等）
+# 公共忽略规则：Go 测试文件、测试数据、依赖与构建产物
 secrets:
   scan:
-    paths:
-      - '**' # 先纳入全部文件
-      - '!vendor/**' # 排除 vendor 依赖目录
-      - '!**/*_test.go' # 排除 Go 测试文件
-      - '!**/testdata/**' # 排除 Go 测试数据目录
+    ignoreFrom: .cnb/security/scanignore/common
 
 # 软件成分分析（依赖漏洞扫描）
 software-composition-analysis:
   scan:
-    paths:
-      - '**' # 先纳入全部文件
-      - '!vendor/**' # 排除 vendor 依赖目录
-      - '!**/*_test.go' # 排除 Go 测试文件
-      - '!**/testdata/**' # 排除 Go 测试数据目录
+    ignoreFrom: .cnb/security/scanignore/common

@@ -1,0 +1,12 @@
+# 依赖与构建产物
+vendor/
+node_modules/
+dist/
+
+# Go 测试文件与测试数据
+**/*_test.go
+**/testdata/
+
+# 测试夹具里的伪凭据、证书，避免 secrets 扫描噪声
+**/testfixtures/**
+**/fixtures/**
