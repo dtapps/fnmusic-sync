@@ -25,16 +25,18 @@ func TestUserAgent(t *testing.T) {
 	}
 }
 
-func TestIsCNBAndIsGitHub(t *testing.T) {
+func TestIsSource(t *testing.T) {
 	tests := []struct {
 		source   string
 		wantCNB  bool
 		wantGitH bool
+		wantGitL bool
 	}{
-		{source: "cnb", wantCNB: true, wantGitH: false},
-		{source: "github", wantCNB: false, wantGitH: true},
-		{source: "", wantCNB: false, wantGitH: false},
-		{source: "unknown", wantCNB: false, wantGitH: false},
+		{source: "cnb", wantCNB: true, wantGitH: false, wantGitL: false},
+		{source: "github", wantCNB: false, wantGitH: true, wantGitL: false},
+		{source: "gitlab", wantCNB: false, wantGitH: false, wantGitL: true},
+		{source: "", wantCNB: false, wantGitH: false, wantGitL: false},
+		{source: "unknown", wantCNB: false, wantGitH: false, wantGitL: false},
 	}
 
 	for _, tt := range tests {
@@ -47,6 +49,10 @@ func TestIsCNBAndIsGitHub(t *testing.T) {
 
 			if got := IsGitHub(); got != tt.wantGitH {
 				t.Errorf("RepoSource=%q IsGitHub() = %v, want %v", tt.source, got, tt.wantGitH)
+			}
+
+			if got := IsGitLab(); got != tt.wantGitL {
+				t.Errorf("RepoSource=%q IsGitLab() = %v, want %v", tt.source, got, tt.wantGitL)
 			}
 		})
 	}

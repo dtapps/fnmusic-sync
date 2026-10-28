@@ -42,6 +42,14 @@ ENV GOINSECURE=go.dtapp.net
 ENV GOPATH=/go
 ENV PATH="$GOPATH/bin:$PATH"
 
+# 1.5 缓存失效锚点（只给 GitLab 定时流水线用，其它平台没这两行）
+#   BuildKit 的 layer cache 键里没有「今天是几号」：base image digest 没变、命令没变，
+#   下面 apt-get install 那层就是命中的，镜像里的包版本会永远停在第一次构建那天。
+#   定时流水线传进来的 CACHE_BUST 每次不同，这一层随之失效，从它往后全部重建，
+#   才真吃到源上更新的包。默认值固定 —— 普通 push / 手动构建仍然全命中缓存。
+ARG CACHE_BUST=static
+RUN echo "cache-bust=$CACHE_BUST"
+
 # 2. 安装基础构建工具
 RUN apt-get update && apt-get install -y --no-install-recommends \
     wget \

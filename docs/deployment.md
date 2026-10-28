@@ -159,7 +159,41 @@ sudo sh /tmp/install.sh upgrade
 sudo sh /tmp/install.sh upgrade --version v0.0.32
 ```
 
-`self-upgrade` 的版本来源由编译期注入的 `REPO_SOURCE` 决定（`internal/updater`）：`github` 走 `api.github.com/repos/dtapps/fnmusic-sync/releases/latest`，其它值走 CNB 的 releases API。**CNB 路径要求二进制里带 `CnbToken`**，否则直接返回 `CNB 访问令牌未配置，暂时无法自动升级，请前往 … 手动下载`——自建或改源构建时这是第一个会撞的墙。下载会先走统计中转（GitHub 源 `dl-stats.dtapp.top`、CNB 源 `dl-stats.dtapp.net`），失败自动回退源站；`SHA256SUMS`、`GIT_COMMIT`、`BUILD_TIME` 三个元数据文件不走中转。
+`self-upgrade` 的版本来源由编译期注入的 `REPO_SOURCE` 决定（`internal/updater`）：
+
+| `REPO_SOURCE`      | 取 tag 的接口                                                                                              | 下载地址                                                       | 令牌                                           |
+|--------------------|------------------------------------------------------------------------------------------------------------|----------------------------------------------------------------|------------------------------------------------|
+| `github`           | `api.github.com/repos/dtapps/fnmusic-sync/releases?per_page=20`（列表，为了读到 `prerelease` / `draft`）   | `<repo>/releases/download/<tag>/<file>`                        | `GithubToken` 可选                             |
+| `gitlab`           | `gitlab.com/api/v4/projects/dtapps%2Ffnmusic-sync/releases`（`released_at` 倒序，跳过 `upcoming_release`） | `<repo>/-/releases/<tag>/downloads/<file>`（302 到通用包仓库） | `GitlabToken` 可选（私有项目必需，`read_api`） |
+| 其它（默认 `cnb`） | `api.cnb.cool/dtapp/fnmusic-sync/-/releases`                                                               | `<repo>/-/releases/download/<tag>/<file>`                      | `CnbToken` **必需**                            |
+
+**CNB 路径要求二进制里带 `CnbToken`**，否则直接返回 `CNB 访问令牌未配置，暂时无法自动升级，请前往 … 手动下载`——自建或改源构建时这是第一个会撞的墙。GitLab 公开项目可匿名读 releases API；私有项目不带 `GitlabToken` 会拿到 404（GitLab 对未认证请求不说 401），提示语会让你去配 token。
+
+下载会先走统计中转 `dl-stats.dtapp.net`（三个来源统一，中转不挑源站：GitHub 的 release asset 与 GitLab 的 Release 直链都实测能转发），失败自动回退源站。`SHA256SUMS`、`GIT_COMMIT`、`BUILD_TIME` 三个元数据文件在任何来源下都不走中转，否则统计会被元数据请求污染。
+
+**预发布怎么排除**：三个平台的信号能力不一样——GitHub 与 CNB 的 releases API 都有 `prerelease` 字段；**GitLab 的 Release 根本没有预发布概念**（只有 `upcoming_release`，语义是「计划发布」，不是预发布）。所以判定取**并集**：平台字段标了 **或** tag 带 semver 后缀（`v1.2.3-rc.1`、`v1.2.4-beta`），任一成立就算预发布，`FetchLatestTag` 优先返回正式版。三个平台只要有一个信号到位就不会漏，这就是“后缀约定 + prerelease 字段”的兼容之处：
+
+| 当前版本       | 会拿到什么                                                       |
+|----------------|------------------------------------------------------------------|
+| 稳定版         | 最新的**正式版**；只有预发布时退回最新一条（不至于永远升不了级） |
+| `-rc` 等预发布 | 最新的预发布（预发布用户能继续往前走）                           |
+| `dev`（本地）  | 同上，视为预发布客户端                                           |
+
+这套规则**依赖发布时的 tag 命名**，所以发版流水线里**只有一个参数：版本号**。五个平台（CNB / GitHub / GitLab / Gitee / GitCode）共用同一份判定（`scripts/ci/resolve-prerelease.sh`），没有开关、没有「是否预发布」字段可填：
+
+| 版本号形态               | 判定     | 说明                                                   |
+|--------------------------|----------|--------------------------------------------------------|
+| `v1.2.3`                 | 正式版   | `PRERELEASE=false`                                     |
+| `v1.2.3-rc.1`            | 预发布   | 带 semver 的 `-<prerelease>` 段就是预发布              |
+| `v1.2.3-beta.1`          | 预发布   | 同上                                                   |
+| `v1.2.3-alpha.1`         | 预发布   | 同上（`-dev` / `-pre` 之类也一样，判法与客户端一致）   |
+| 空 / `v` / `1.2` / `abc` | 直接失败 | `+build` 元数据也挡：deb 与 fpk 的版本段没为它做过处理 |
+
+判法与客户端 `internal/updater.isPrereleaseTag` 逐字对齐 —— 两边不一致的后果是「发出去的版本没人能升上去」或者「稳定用户被推到 rc 上」，两种都撤不回来。
+
+为什么把那个开关彻底删掉：它跟版本号会打架，而打架的时候必然是在用户什么都没做错的时候打。CNB 的 `switch` 踩过：`web_trigger.yml` 里写死 `default: 'false'`，实际传进来仍是 `true`，「`v0.1.31` + 预发布」撞上硬失败，red 在第一步，页面上没有任何东西能让用户看出这个 `true` 从哪来。版本号里已经写了 `-rc.1`，再让人勾一遍只是多一个出错的地方。
+
+**deb 的版本号要单独转一道**：`0.1.32-rc.1` 在 dpkg 眼里**比 `0.1.32` 新**——Debian 版本是 `upstream-revision`，同 upstream 时带 revision 的那份更大，用户装了 rc 之后正式版就成了降级。所以 deb 元数据用 tilde：`0.1.32~rc.1`（排序低于空串）。这步在 `Makefile` 的 `DEB_VERSION` 里，只作用于 deb；fpk 的 manifest 与前端 `package.json` 仍用原样 semver。
 
 `self-upgrade` 的重启用意很直白：升级流程本身跑在 systemd 管理的进程里，`systemctl restart` 会先杀掉自己，所以它用 `sh -c "nohup systemctl restart … &"` 脱离当前进程树，让 stop→start 能跑完。
 

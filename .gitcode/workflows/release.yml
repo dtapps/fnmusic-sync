@@ -1,0 +1,240 @@
+# 发布工作流：在本平台自己编译出 deb / fpk，然后发 GitCode Release
+#
+# 和 GitHub / CNB / GitLab 是同一个角色 —— 构建方，不是转发方。
+# 差别只在环境来源：
+#   GitHub  用 ghcr.io/<repo>/ci:latest 预构建镜像（Go/Node/nfpm/fnpack 全烤好）
+#   CNB     用 .cnb/ci/Dockerfile 现场构建镜像
+#   GitLab  用 .gitlab/ci/Dockerfile 构建并推 registry
+#   GitCode 没有「用自己的镜像跑 job」这个能力 → 每次现场装工具链
+# 现场安装的逻辑在 scripts/ci/build-linux-packages.sh，与 Gitee 共用同一份。
+#
+# 产物（与另外三个平台逐字一致）：
+#   bin/fnmusic-sync_amd64.deb  bin/fnmusic-sync_arm64.deb
+#   bin/fnmusic-sync-amd64.fpk  bin/fnmusic-sync-arm64.fpk
+#
+# 前置 secrets：
+#   GITCODE_TOKEN  repo 读写。既用于检出私有仓库，也用于建 Release、取上传地址、传文件
+#
+# 触发：GitCode 页面 → Actions → Release → Run workflow，填 version（必填）。
+#       外部也可以用 dispatch 接口拉起：
+#       POST /api/v8/repos/:owner/:repo/actions/workflows/release.yml/dispatches
+#       {"ref":"main","inputs":{"version":"1.2.3"}}
+#       预发布把 version 写成 1.2.3-rc.1，没有第二个参数。
+#
+# API 版本：dispatch 走 v8，Release 走 v5。v5 要求 access_token 走 query 串，
+# 所以下面只在 cat 响应体时打印状态，不打印完整 URL（URL 里就是令牌）。
+#
+# 为什么不用 uses: actions/checkout@v4：
+# GitCode 的动作市场覆盖范围没法在这里核实，而 git clone 只需要 git 和令牌，
+# 是必然可用的最小依赖。代价是多写三行，收益是这层不依赖平台实现。
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '版本号。预发布看后缀：1.2.3-rc.1 / 1.2.3-beta.1 / 1.2.3-alpha.1；没有后缀就是正式版'
+        required: true
+
+# 同一时间只允许一条发布在跑。
+# 不能按版本号分组：同一次发布可以被写成 0.1.31 / v0.1.31 两种样子，分组键不同就等于
+# 没锁，两条流水线会同时往同一个 tag 传文件、互相覆盖。
+# 也不能 cancel-in-progress：这条流水线是「建 Release → 要上传地址 → 逐个 PUT」，
+# 砍在中间会留下一个只挂了部分附件的 Release，比排队慢更贵（GitLab 那份设了不可打断，同理）。
+concurrency:
+  group: release-job
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      # ---------------------------------------------------------------
+      # 1. 版本号归一化 + 检出代码
+      # ---------------------------------------------------------------
+      - name: 检出代码
+        shell: bash
+        env:
+          GITCODE_TOKEN: ${{ secrets.GITCODE_TOKEN }}
+          VERSION_INPUT: ${{ inputs.version }}
+          REPO_PATH: dtapp/fnmusic-sync
+        run: |
+          set -euo pipefail
+
+          RAW="${VERSION_INPUT:?未传入 version}"
+          # 手填的东西会带前后空格（复制粘贴尤其常见）。先削干净，否则 " 0.1.31" 会拼成
+          # "v 0.1.31"，下面红在格式校验上，而报错里那个空格肉眼几乎看不见。
+          RAW="${RAW#"${RAW%%[![:space:]]*}"}"
+          RAW="${RAW%"${RAW##*[![:space:]]}"}"
+          case "$RAW" in v*) TAG="$RAW" ;; *) TAG="v$RAW" ;; esac
+          VER="${TAG#v}"
+
+          # 二次校验与 resolve-prerelease.sh 同一条正则。这里必须先判一次：下面要用 TAG 去
+          # checkout，而 scripts/ci/resolve-prerelease.sh 在空工作区里还不存在。
+          if ! printf '%s' "$VER" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z]+)*$'; then
+            echo "版本号格式不对：${RAW}（期望 0.1.31 / v0.1.31 / v0.1.32-rc.1）"
+            exit 1
+          fi
+          echo "版本号: ${TAG}"
+
+          # 检出：runner 已经把仓库挂进来就直接用，否则自己 clone。
+          # 需要 git log 生成「更新内容」，所以不能 --depth 1。
+          if [ -d .git ] && [ -f go.mod ]; then
+            echo "使用 runner 已有工作区"
+            git fetch --tags --force origin 2>/dev/null || true
+          else
+            echo "工作区为空，clone ${REPO_PATH}"
+            if [ -n "${GITCODE_TOKEN:-}" ]; then
+              URL="https://oauth2:${GITCODE_TOKEN}@gitcode.com/${REPO_PATH}.git"
+            else
+              URL="https://gitcode.com/${REPO_PATH}.git"
+            fi
+            git clone --depth 50 --branch "$TAG" "$URL" . 2>/dev/null \
+              || git clone --depth 50 "$URL" .
+          fi
+
+          # 切到目标 tag：tag 不存在时先按当前分支构建，发布阶段会因为 tag 缺失而失败，
+          # 这样错误信息落在「发布」而不是「检出」，定位更快
+          git checkout --force "$TAG" 2>/dev/null || echo "警告：本地没有 tag ${TAG}，按当前 HEAD 构建"
+
+          # 预发布判定与另外四个平台同一份规则（scripts/ci/resolve-prerelease.sh）：只看后缀。
+          # source 它而不是自己写一遍 case。必须放在检出之后：工作区为空时上面才刚 clone
+          # 出这个文件。算出来的值写进 .ci-release.env，下游「发布」步骤的 release_status
+          # 和正文的「是否预发布」都取这一份，不各判一次。
+          export VERSION="$TAG"
+          # shellcheck disable=SC1091
+          . scripts/ci/resolve-prerelease.sh
+          VER="${TAG#v}"
+          PRE="$PRERELEASE"
+          echo "预发布: ${PRE}"
+
+          # 后续步骤共用的变量写进文件，不依赖平台的跨 step 变量机制
+          {
+            echo "TAG=${TAG}"
+            echo "VER=${VER}"
+            echo "PRE=${PRE}"
+            echo "REPO_PATH=${REPO_PATH}"
+          } > .ci-release.env
+
+          git log --oneline -3 || true
+
+      # ---------------------------------------------------------------
+      # 2. 现场装工具链并打包
+      # ---------------------------------------------------------------
+      - name: 构建安装包（deb + fpk，两架构）
+        shell: bash
+        run: |
+          set -euo pipefail
+          # shellcheck disable=SC1091
+          . ./.ci-release.env
+
+          export VERSION="$TAG"
+          export PRERELEASE="$PRE"
+          export REPO_SOURCE=gitcode
+          export DL_BASE="https://gitcode.com/${REPO_PATH}/releases/download/${TAG}"
+
+          bash scripts/ci/build-linux-packages.sh
+
+      # ---------------------------------------------------------------
+      # 3. 发布：建 Release + 逐个上传
+      # ---------------------------------------------------------------
+      - name: 发布到 GitCode Release
+        shell: bash
+        env:
+          GITCODE_TOKEN: ${{ secrets.GITCODE_TOKEN }}
+        run: |
+          set -euo pipefail
+          # shellcheck disable=SC1091
+          . ./.ci-release.env
+
+          : "${GITCODE_TOKEN:?未配置 secret GITCODE_TOKEN}"
+          command -v jq >/dev/null 2>&1 || { echo "环境缺少 jq"; exit 1; }
+
+          API="https://api.gitcode.com/api/v5"
+          BODY_FILE="release_body.md"
+          [ -f "$BODY_FILE" ] || { echo "缺少正文文件 $BODY_FILE"; exit 1; }
+
+          # 幂等：先删同 tag 的旧 release（该端点官方文档未明示，失败只警告不阻断）
+          DEL=$(curl -s -o /dev/null -w "%{http_code}" -X DELETE \
+            "${API}/repos/${REPO_PATH}/releases/${TAG}?access_token=${GITCODE_TOKEN}")
+          case "$DEL" in
+            200|204) echo "已删除已存在的 release ${TAG}" ;;
+            404) echo "无旧 release，直接新建" ;;
+            *) echo "⚠ 删除旧 release 返回 HTTP=${DEL}（继续，若创建 409 需手动清理）" ;;
+          esac
+
+          # 预发布在这里落地：pre → release_status=pre，latest → release_status=latest
+          if [ "$PRE" = "true" ]; then STATUS="pre"; else STATUS="latest"; fi
+
+          PAYLOAD=$(jq -n \
+            --arg tag "$TAG" \
+            --arg name "$TAG" \
+            --rawfile body "$BODY_FILE" \
+            --arg tc "main" \
+            --arg st "$STATUS" \
+            '{tag_name: $tag, name: $name, body: $body, target_commitish: $tc, release_status: $st}')
+
+          echo "创建 GitCode Release: ${TAG}（release_status=${STATUS}）"
+          CREATE=$(curl -s -o create.json -w "%{http_code}" -X POST \
+            -H "Content-Type: application/json" \
+            -d "$PAYLOAD" \
+            "${API}/repos/${REPO_PATH}/releases?access_token=${GITCODE_TOKEN}")
+          if [ "$CREATE" != "200" ] && [ "$CREATE" != "201" ]; then
+            echo "创建 release 失败 HTTP=${CREATE}"
+            cat create.json 2>/dev/null || true
+            exit 1
+          fi
+          echo "✓ release 已创建"
+
+          # 逐个文件：先要预签名上传地址，再 PUT 文件本体
+          for f in bin/*.deb bin/*.fpk; do
+            [ -f "$f" ] || continue
+            NAME=$(basename "$f")
+            ENC=$(printf '%s' "$NAME" | jq -sRr @uri)
+
+            UP=$(curl -s -o up.json -w "%{http_code}" \
+              "${API}/repos/${REPO_PATH}/releases/${TAG}/upload_url?access_token=${GITCODE_TOKEN}&file_name=${ENC}")
+            if [ "$UP" != "200" ]; then
+              echo "获取 ${NAME} 上传地址失败 HTTP=${UP}"
+              cat up.json 2>/dev/null || true
+              exit 1
+            fi
+
+            PUT_URL=$(jq -r '.url' up.json)
+            # 预签名 URL 要求原样带回 headers（含 Content-Type / x-obs-*），漏一个都会失败
+            HDRS=()
+            while IFS= read -r h; do HDRS+=(-H "$h"); done \
+              < <(jq -r '.headers // {} | to_entries[] | "\(.key): \(.value)"' up.json)
+
+            PUT_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X PUT "${HDRS[@]}" --upload-file "$f" "$PUT_URL")
+            case "$PUT_CODE" in
+              200|201|204) echo "  ✓ 已上传 ${NAME}（$(ls -lh "$f" | awk '{print $5}')）" ;;
+              *) echo "  ✗ 上传 ${NAME} 失败 HTTP=${PUT_CODE}"; exit 1 ;;
+            esac
+          done
+
+          # 正文里的下载链接是按 /releases/download/<tag>/<file> 拼的，反查一遍确认能直连。
+          # 不通不失败：Release 与附件本身已经传成功，死的只是正文表格里的链接。
+          echo ""
+          echo "校验正文里的下载链接："
+          BAD=0
+          for f in bin/*.deb bin/*.fpk; do
+            [ -f "$f" ] || continue
+            NAME=$(basename "$f")
+            ENC=$(printf '%s' "$NAME" | jq -sRr @uri)
+            CODE=$(curl -s -o /dev/null -w "%{http_code}" -L --max-time 20 \
+              "https://gitcode.com/${REPO_PATH}/releases/download/${TAG}/${ENC}" || echo "000")
+            if [ "$CODE" = "200" ]; then
+              echo "  ✓ ${NAME}"
+            else
+              echo "  ⚠ ${NAME} 返回 HTTP=${CODE}"
+              BAD=$((BAD + 1))
+            fi
+          done
+          if [ "$BAD" -gt 0 ]; then
+            echo "提示：${BAD} 个文件反查没到 200，若本平台不是 /releases/download/<tag>/<file>"
+            echo "      结构，改 scripts/ci/build-linux-packages.sh 的 DL_BASE 与这里的拼法。"
+          fi
+
+          echo ""
+          echo "完成：https://gitcode.com/${REPO_PATH}/releases/tag/${TAG}"

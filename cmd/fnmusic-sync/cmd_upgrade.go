@@ -72,7 +72,7 @@ func init() {
 }
 
 // doSelfUpgrade 检查并升级当前二进制到最新 release。
-// 根据构建来源（CNB / GitHub）自动选择对应的下载源。
+// 根据构建来源（CNB / GitHub / GitLab）自动选择对应的下载源。
 func doSelfUpgrade() error {
 	arch := runtime.GOARCH
 	osName := runtime.GOOS

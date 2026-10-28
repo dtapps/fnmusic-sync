@@ -78,37 +78,38 @@ PR 描述建议包含四段（照这个写，评审就能直接看）：
 
 同一个仓库挂了三套流水线，职责不同，不能互相替代：
 
-| 平台      | 文件                                                                        | 触发                            | 跑什么                                                                                                                                                                       |
-|-----------|-----------------------------------------------------------------------------|---------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| CNB（主） | `.cnb/workflows/push.yml`                                                   | push                            | `make deps` → `make format` → `make check`（镜像 `.cnb/ci/Dockerfile`）                                                                                                      |
-| CNB       | `.cnb/workflows/push-coverage.yml`                                          | push                            | Go/Node 单元测试 + `testing:coverage` 全量上报                                                                                                                               |
-| CNB       | `.cnb/workflows/pull-coverage.yml`                                          | pull_request                    | 同上，PR 事件额外算增量覆盖率                                                                                                                                                |
-| CNB       | `.cnb/workflows/release.yml`                                                | `web_trigger_build_go_project`  | 打包 deb/fpk → `git:release` → 上传附件                                                                                                                                      |
-| CNB       | `.cnb/workflows/code-review.yml`                                            | pull_request                    | AI 代码评审（`cnbcool/code-review`），critical 不阻断（`fail_on_critical: false`）                                                                                           |
-| CNB       | `.cnb/workflows/sca-sbom.yml` / `sca-license.yml` / `sca-vulnerability.yml` | pull_request / push             | PR：增量扫描 + `failOnSeverity: high` 门禁；push：全量扫描（`scanMode: full`、`publish: true`、无门禁），把 `sca.*.full.*` 元数据写到默认分支最新 commit，供 README 徽章读取 |
-| CNB       | `.cnb/workflows/cnb-sechook.yml`                                            | pull_request                    | 敏感信息与代码扫描统计                                                                                                                                                       |
-| CNB       | `.cnb/workflows/codewiki.yml`                                               | `tag_push`                      | 生成 Code Wiki 并入库                                                                                                                                                        |
-| CNB       | `.cnb/workflows/knowledge-base.yml`                                         | push / issue 事件               | 把 `docs/**/**.md` 与 `README*.md`、`CHANGELOG.md` 等建进知识库                                                                                                              |
-| GitHub    | `.github/workflows/push.yml`                                                | push / PR                       | 与 CNB push 同四步，跑在 GHCR 的 `ci:latest` 镜像里                                                                                                                          |
-| GitHub    | `.github/workflows/coverage.yml`                                            | push / PR                       | 覆盖率 + Bundle Analysis + 测试结果上报 Codecov                                                                                                                              |
-| GitHub    | `.github/workflows/coveralls.yml`                                           | push / PR                       | 覆盖率上报 Coveralls（独立 job，刻意与 Codecov 解耦）                                                                                                                        |
-| GitHub    | `.github/workflows/release.yml`                                             | `workflow_dispatch`             | 输入版本号 → 打包 → 发 GitHub Release                                                                                                                                        |
-| GitHub    | `.github/workflows/ci-image.yml`                                            | Dockerfile 变更 / 每周一 / 手动 | 构建并推送 CI 镜像，清理旧版本只留 5 个                                                                                                                                      |
-| GitLab    | `.gitlab-ci.yml` + `.gitlab/workflows/*`                                    | 默认分支 push / 网页手动        | 只做镜像与发布（`package-release`），**不跑覆盖率**                                                                                                                          |
+| 平台      | 文件                                                                        | 触发                                                     | 跑什么                                                                                                                                                                       |
+|-----------|-----------------------------------------------------------------------------|----------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| CNB（主） | `.cnb/workflows/push.yml`                                                   | push                                                     | `make deps` → `make format` → `make check`（镜像 `.cnb/ci/Dockerfile`）                                                                                                      |
+| CNB       | `.cnb/workflows/push-coverage.yml`                                          | push                                                     | Go/Node 单元测试 + `testing:coverage` 全量上报                                                                                                                               |
+| CNB       | `.cnb/workflows/pull-coverage.yml`                                          | pull_request                                             | 同上，PR 事件额外算增量覆盖率                                                                                                                                                |
+| CNB       | `.cnb/workflows/release.yml`                                                | `web_trigger_build_go_project`                           | 打包 deb/fpk → `git:release` → 上传附件                                                                                                                                      |
+| CNB       | `.cnb/workflows/code-review.yml`                                            | pull_request                                             | AI 代码评审（`cnbcool/code-review`），critical 不阻断（`fail_on_critical: false`）                                                                                           |
+| CNB       | `.cnb/workflows/sca-sbom.yml` / `sca-license.yml` / `sca-vulnerability.yml` | pull_request / push                                      | PR：增量扫描 + `failOnSeverity: high` 门禁；push：全量扫描（`scanMode: full`、`publish: true`、无门禁），把 `sca.*.full.*` 元数据写到默认分支最新 commit，供 README 徽章读取 |
+| CNB       | `.cnb/workflows/cnb-sechook.yml`                                            | pull_request                                             | 敏感信息与代码扫描统计                                                                                                                                                       |
+| CNB       | `.cnb/workflows/codewiki.yml`                                               | `tag_push`                                               | 生成 Code Wiki 并入库                                                                                                                                                        |
+| CNB       | `.cnb/workflows/knowledge-base.yml`                                         | push / issue 事件                                        | 把 `docs/**/**.md` 与 `README*.md`、`CHANGELOG.md` 等建进知识库                                                                                                              |
+| GitHub    | `.github/workflows/push.yml`                                                | push / PR                                                | 与 CNB push 同四步，跑在 GHCR 的 `ci:latest` 镜像里                                                                                                                          |
+| GitHub    | `.github/workflows/coverage.yml`                                            | push / PR                                                | 覆盖率 + Bundle Analysis + 测试结果上报 Codecov                                                                                                                              |
+| GitHub    | `.github/workflows/coveralls.yml`                                           | push / PR                                                | 覆盖率上报 Coveralls（独立 job，刻意与 Codecov 解耦）                                                                                                                        |
+| GitHub    | `.github/workflows/release.yml`                                             | `workflow_dispatch`                                      | 输入版本号 → 打包 → 发 GitHub Release                                                                                                                                        |
+| GitHub    | `.github/workflows/ci-image.yml`                                            | Dockerfile 变更 / 每周一 / 手动                          | 构建并推送 CI 镜像，清理旧版本只留 5 个                                                                                                                                      |
+| GitLab    | `.gitlab-ci.yml` + `.gitlab/workflows/*`                                    | 默认分支 push（仅 Dockerfile 变更）/ 网页手动 / 每周定时 | 镜像按需引入 + 发布（`package-release`），**不跑覆盖率**                                                                                                                     |
 
 再加两个「转发壳」：`.gitcode/workflows/release.yml` 与 `.workflow/release.yml` 不构建，只把 GitHub Release 的产物转发到 GitCode / Gitee。
 
 ### 失败怎么定位
 
-| 现象                                    | 看哪里                                                                                                 |
-|-----------------------------------------|--------------------------------------------------------------------------------------------------------|
-| CNB push 在「格式化」或「检查」阶段失败 | 该 step 的日志末尾；`make format` 会就地改文件，失败常常是「格式化后仍有 lint 错」                     |
-| GitHub 的 `check` job 拉不到镜像        | 先跑一次 `.github/workflows/ci-image.yml`，镜像不存在时 `container.image` 直接失败                     |
-| lint 只在 CI 报、本地不报               | 本地 `golangci-lint` 版本比镜像新或旧；镜像固定 `GOLANGCI_LINT_VERSION=v2.15.0`                        |
-| 覆盖率 job 报 `no coverage data`        | Go 侧 `breakIfNoCoverage: false`（只缺失不阻断），Node 侧是 `true`（直接失败），优先查前端用例是否全挂 |
-| 覆盖率徽章数字变了但测试没动            | CNB 的 `testing:coverage` 是硬门禁，Codecov/Coveralls 只是可视化；两边口径不同属正常                   |
-| 发布产物少了 `.tar.gz`                  | release 步骤里 `make clean-archives` 会删掉压缩包，只留安装包                                          |
-| GitLab 流水线一个 job 都没有            | `workflow.rules` 只允许默认分支 push 与网页手动触发；MR 上不会建流水线                                 |
+| 现象                                    | 看哪里                                                                                                                                                      |
+|-----------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| CNB push 在「格式化」或「检查」阶段失败 | 该 step 的日志末尾；`make format` 会就地改文件，失败常常是「格式化后仍有 lint 错」                                                                          |
+| GitHub 的 `check` job 拉不到镜像        | 先跑一次 `.github/workflows/ci-image.yml`，镜像不存在时 `container.image` 直接失败                                                                          |
+| lint 只在 CI 报、本地不报               | 本地 `golangci-lint` 版本比镜像新或旧；镜像固定 `GOLANGCI_LINT_VERSION=v2.15.0`                                                                             |
+| 覆盖率 job 报 `no coverage data`        | Go 侧 `breakIfNoCoverage: false`（只缺失不阻断），Node 侧是 `true`（直接失败），优先查前端用例是否全挂                                                      |
+| 覆盖率徽章数字变了但测试没动            | CNB 的 `testing:coverage` 是硬门禁，Codecov/Coveralls 只是可视化；两边口径不同属正常                                                                        |
+| 发布产物少了 `.tar.gz`                  | release 步骤里 `make clean-archives` 会删掉压缩包，只留安装包                                                                                               |
+| GitLab 流水线一个 job 都没有            | 两道闸都在根文件：`include:rules`（镜像组进不进来）+ `workflow:rules`（流水线建不建）。普通代码 push、MR、`VERSION` 留空且没勾 force 的 Run pipeline 都不建 |
+| GitLab 改代码 push 后没流水线           | 预期行为，见上一条与 [gitlab-ci.md](gitlab-ci.md) §4「两层判断」                                                                                            |
 
 ### 覆盖率为什么分 Go / Node 两个 key
 
@@ -199,10 +200,11 @@ git status           # 确认 format 的改动都进本次提交
 
 1. 合并到 `main`，确认 CNB 的 push 与覆盖率流水线都绿。
 2. 触发发布（三套任选其一，语义一致）：
-   - CNB：自定义按钮触发 `.cnb/workflows/release.yml`（`web_trigger_build_go_project`），填 `version` 与 `pre_release`；
-   - GitHub：`workflow_dispatch` 跑 `.github/workflows/release.yml`，输入 `version` 与 `prerelease`；
-   - GitLab：`CI/CD → Pipelines → Run pipeline`，填 `VERSION`（留空只维护镜像）、`PRE_RELEASE`。
-3. 流水线做的事：版本号归一化（自动补 `v` 前缀）→ `make deps` → `VERSION=<tag> REPO_SOURCE=<平台> make package-linux-all` → `make clean-archives` → 生成 Release 正文 → 建 Release 并挂附件。
+   - CNB：自定义按钮触发 `.cnb/workflows/release.yml`（`web_trigger_build_go_project`），只填 `version`；
+   - GitHub：`workflow_dispatch` 跑 `.github/workflows/release.yml`，只填 `version`；
+   - GitLab：`CI/CD → Pipelines → Run pipeline`，只填 `VERSION`（留空只维护镜像）。
+   - **没有预发布开关**：版本号写成 `1.2.3-rc.1`（或 `-beta.1` / `-alpha.1`）就是预发布，不带后缀就是正式版，见 [deployment.md](deployment.md) §升级。
+3. 流水线做的事：版本号归一化 + 校验（自动补 `v` 前缀，规则在 `scripts/ci/resolve-prerelease.sh`）→ `make deps` → `VERSION=<tag> REPO_SOURCE=<平台> make package-linux-all` → `make clean-archives` → 生成 Release 正文 → 建 Release 并挂附件。
 
 产物清单（`bin/` 下）：
 

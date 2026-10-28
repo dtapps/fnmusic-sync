@@ -1,0 +1,216 @@
+# 发布流水线（Gitee）：**不再现场构建**，从 CNB / GitHub 的 Release 取安装包，发到 Gitee Release
+#
+# 为什么改：Gitee Go 没有「用自己镜像跑任务」的能力，只能选插件给的固定环境，于是这条
+# 流水线之前在容器里现场补整套工具链 —— 下 Go 1.27.3（70MB）、装 nfpm、装 pnpm。
+# 每一次都是一场地雷：
+#   - proxy.golang.org 不通，go 每次调用先卡 30 秒去下工具链；
+#   - nfpm 只在 GitHub 放二进制，得靠第三方反代；
+#   - pnpm 12 的 npm 包只是个壳，真身是 @pnpm/exe 里 59MB 的原生二进制（Node SEA），
+#     在 plugin-24 容器里一启动就 Segmentation fault（exit 139），而它没有纯 JS 版本可退。
+# 同样的四个包 CNB 那边早就编好了，而且 CNB 是国内的：实测同一个 fpk，
+#   CNB      3.15 MB/s（4MB / 1.3s）
+#   GitHub   13 KB/s（0.6MB / 45s）—— 差 240 倍
+# 所以这里只搬不建：一分钟内搬完 23MB。**来源由 DOWNLOAD_SOURCE 定死一个**
+# （cnb 或 github），不跨平台混用 —— 理由见下面「前置条件」那段。
+#
+# 产物（与另外四个平台逐字一致）：
+#   bin/fnmusic-sync_amd64.deb  bin/fnmusic-sync_arm64.deb
+#   bin/fnmusic-sync-amd64.fpk  bin/fnmusic-sync-arm64.fpk
+#
+# 两种触发方式：
+#   1) 外部系统 POST Webhook（发完 CNB / GitHub Release 直接调），见 triggers 段；
+#   2) Gitee → 仓库 → 流水线 → 选「发布版本」→ 点「执行」（补发时可手填 VERSION）。
+#
+# 前置条件（Gitee Go → 该仓库流水线 → 设置 → 全局参数）：
+#   - DOWNLOAD_SOURCE  可选，cnb（默认）/ github。**只认一个源，不跨平台混用**：
+#                      包里的二进制注入了 buildinfo.RepoSource，客户端按它决定从哪个平台
+#                      查更新。同一个 Release 里混两个来源，等于用户装哪个包就走哪条升级
+#                      通道 —— 必须发版时定死，不能因为某刻某个源抽风就换。
+#   - VERSION          可选。DOWNLOAD_SOURCE=github 时不填就按 GitHub 最新 Release 判定；
+#                      =cnb 时不填会直接报错（CNB 的 API 匿名 401，查不到最新 tag）。
+#                      补发历史版本时才填，带不带 v 都行（v0.1.31 / 0.1.31）
+#   - 没有 PRERELEASE 参数了：预发布由 VERSION 的后缀决定（v0.1.32-rc.1 是预发布，
+#     v0.1.31 是正式版）。这条流水线只搬不建，但 tag 与 Release 字段仍要按同一规则落地。
+#
+# 附件与正文都跟 certflow 那份一致，但**整条链只认一个平台**：
+#   - DOWNLOAD_SOURCE=cnb：附件名是固定的四个，大小向 CNB 现问（Range 探 Content-Range），
+#     正文在本地按同样的表格格式生成 —— 全程不碰 GitHub 的接口。
+#     原因：包里的二进制注入了 buildinfo.RepoSource，客户端按它决定从哪查更新；
+#     附件从 CNB 来、正文从 GitHub 来，等于一次发布里挂着两个平台的叙事。
+#   - DOWNLOAD_SOURCE=github：附件清单、大小、正文都取 GitHub Release 的元数据。
+#   - 下载器（scripts/ci/gitee-download-assets.js）是 certflow 那段逻辑的移植：
+#     同一套 request/断点续传/速度守护/3 路并发，镜像回退也同一组（仅 github 源）。
+#   - 正文由 scripts/ci/gitee-release-body.js 转单行 HTML 写进 GITEE_PARAMS
+#     （没有 GITEE_PARAMS 就落工作目录同名文件，certflow 同款兜底）。
+# 参数通道的三个硬约束（都是 certflow 那边实测踩出来的）由 gitee-release-body.js 处理：
+#   1. 平台按 = 切 KEY=VALUE → 正文里不能有裸 =，全部转成实体 &#61;；
+#   2. 插件把值当相对路径 open，单段超过 255 字节直接 file name too long 崩掉
+#      → 每累计 200 字节插一个 <br/>，用它自带的 / 把路径切成短段，走 ENOENT 降级；
+#   3. KEY=VALUE 不能跨行 → 拼成单行，HTML 交给 Gitee 渲染。
+#
+# 预发布判定与另外四家同一份规则（scripts/ci/resolve-prerelease.sh）：
+# **只认 tag 后缀** —— v0.1.32-rc.1 是预发布；没有后缀的一律正式版。
+# 这里没有任何「预发布」入参可填：版本号写成什么，Release 字段就是什么。
+#
+# 附件必须逐个列名：插件不支持目录，assertFiles 填 bin 会把整个目录压成
+# bin.tar.gz 去上传，然后 400 失败。CNB / GitHub 那边增减产物时要同步改那份清单。
+version: '1.0'
+name: release
+displayName: 发布版本
+
+triggers:
+  # auto = 允许自动触发；下面没有配 push / pr，所以只有 Webhook 事件能自动拉起流水线。
+  trigger: auto
+  # 自定义事件名，调用方 eventType 必须与之一致（可写多个）。
+  # 调用示例（发完 CNB / GitHub Release 后）：
+  #   POST https://gitee.com/api/v5/repos/dtapps/fnmusic-sync/hooks/{id}/tests
+  #   {"eventType": "fnmusic-sync-release", "payload": {"params": {"VERSION": "v0.1.31"}}}
+  webhook:
+    - 'fnmusic-sync-release'
+
+# 阻塞构建：同一条流水线同时只跑一个，后来的排队等前一个结束。
+# 发版涉及建 Release、传附件、覆盖同名 tag，并发跑会互相踩（allowUpdate 覆盖到一半）。
+strategy:
+  blocking: true
+
+# 引用参数。缺了这段，VERSION 不会进到任务里，脚本拿到的就是空值
+# （实测日志里 RELEASE_VERSION= 为空）。真正要人去配的只有 DOWNLOAD_SOURCE 与 VERSION；
+# PRERELEASE / RELEASE_BODY 是下载阶段算出来写进 GITEE_PARAMS 的，列在这里只为让平台插值。
+ref_variable:
+  - DOWNLOAD_SOURCE
+  - VERSION
+  # 下面两个**不是**仓库级全局参数，也不该由人去配：下载阶段算出来后写进 GITEE_PARAMS，
+  # 下游 release@gitee 的 description / prerelease 从这里插值取值。
+  # 仍然要在这里声明一次 —— 平台只对声明过的变量做插值，漏了就是空字符串。
+  #   PRERELEASE  不是「预发布开关」：它是版本号后缀算出来的结果，页面上没有这个参数了。
+  - PRERELEASE
+  - RELEASE_BODY
+
+stages:
+  # 必须分成两个 stage：stage 之间才算「按配置顺序串行执行」，且上游失败不触发下游 ——
+  # 这才是下载没成功不发布。
+  - name: download-stage
+    displayName: 下载产物
+    strategy: naturally
+    trigger: auto
+    executor: []
+    steps:
+      - step: build@nodejs
+        name: download_assets
+        displayName: 从 CNB / GitHub 取安装包
+        nodeVersion: 20.19.0
+        commands:
+          - |
+            set -eu
+            # 通用变量一律写 ${VERSION} 的精确形式 —— 平台做的是**文本插值**，不是 shell 展开。
+            # 之前写成 ${VERSION:-} 不匹配插值规则，原样落进 shell 后按"未设置则空"求值，
+            # 于是变量恒为空。set +u 只是防止没配时 unbound variable 直接中断，下面显式判空。
+            set +u
+            export RAW_VERSION="${VERSION}"
+            export SOURCE_INPUT="${DOWNLOAD_SOURCE}"
+            set -u
+
+            # 下载源：全局参数决定，只认一个。没配按 cnb（国内直连；包内嵌的
+            # RepoSource 也是 cnb，与历史上 Gitee 编出来的包走同一条升级通道）。
+            case "${SOURCE_INPUT}" in
+              cnb|github) SOURCE="${SOURCE_INPUT}" ;;
+              "") SOURCE=cnb ;;
+              *) echo "错误：DOWNLOAD_SOURCE 只能是 cnb 或 github，收到 '${SOURCE_INPUT}'"; exit 1 ;;
+            esac
+            export DOWNLOAD_SOURCE="${SOURCE}"
+            echo "下载源: ${SOURCE}"
+
+            # 版本号没给就按所选源查最新 Release 的 tag（--resolve-tag 只打印 tag，不下载）。
+            # github 源走 GitHub API；cnb 源的 API 匿名 401，脚本会直接报错让你填 VERSION。
+            # 判定必须在下产物之前完成：正文里的预发布横幅、下游 tagName 都依赖它。
+            if [ -z "${RAW_VERSION}" ]; then
+              echo "VERSION 为空：按 ${SOURCE} 的最新 Release 自动判定"
+              RAW_VERSION="$(node scripts/ci/gitee-download-assets.js --resolve-tag)"
+            fi
+
+            # 预发布判定：只看版本号后缀。规则只有一份，在
+            # scripts/ci/resolve-prerelease.sh 里（五个平台与构建脚本 source 的也是它）。
+            export VERSION="${RAW_VERSION}"
+            # shellcheck disable=SC1091
+            . scripts/ci/resolve-prerelease.sh
+            PRE="${PRERELEASE}"
+            echo "版本号: ${TAG}  预发布: ${PRE}"
+
+            # 只搬不建：附件清单与正文取上游 Release，字节按 DOWNLOAD_SOURCE 从单一来源拿，
+            # 落 bin/ 并写 release_body.md。脚本只用 node 内置模块（镜像里没有 python3 / jq）。
+            export VERSION="${TAG}"
+            export PRERELEASE="${PRE}"
+            export OUT_DIR=bin
+            node scripts/ci/gitee-download-assets.js
+
+            # 正文转单行 HTML 并写进 GITEE_PARAMS。marked 只在这里用一次，装到独立
+            # prefix 里，不碰仓库的 package.json（在仓库根 npm install 有改写 manifest
+            # 的风险），用 NODE_PATH 让 require 找得到。
+            # --registry 必须显式给：脚本里 export 的 npm_config_registry 只活在那个
+            # 子进程里，走到这里已经没了，不写就会去 registry.npmjs.org（国内超时）。
+            RELNOTES_DEPS="${HOME}/.relnotes-deps"
+            npm install "marked@^14" --prefix "$RELNOTES_DEPS" --no-save \
+              --registry https://mirrors.cloud.tencent.com/npm/ \
+              --no-audit --no-fund --loglevel=error
+            NODE_PATH="$RELNOTES_DEPS/node_modules" \
+              node scripts/ci/gitee-release-body.js release_body.md
+
+            # 落盘自检：正文没写进参数文件就直接红在这一步，不要等到发布阶段才发现。
+            # GITEE_PARAMS 有的步骤会被注入、有的不会（build@nodejs 实测没有），
+            # 所以两边都写了一份同样的兜底：没有环境变量就落到工作目录的 GITEE_PARAMS。
+            echo "---- 附件 ----"
+            ls -lh bin/
+            echo "---- 参数文件 ----"
+            PARAMS_FILE="${GITEE_PARAMS:-GITEE_PARAMS}"
+            ls -l "${PARAMS_FILE}"
+            echo "---- 正文 ----"
+            grep -o '^RELEASE_BODY=.\{0,120\}' "${PARAMS_FILE}" || true
+            awk '/^RELEASE_BODY=/{print "RELEASE_BODY 共 " length($0) - 13 " 字节"}' "${PARAMS_FILE}"
+        # 声明产物，供下游 release@gitee 的 upstreamArtifact 取用。
+        # 必须写目录名 bin，不能写 bin/*：实测通配符会把匹配到的文件
+        # 平铺到工作目录根下（bin/ 前缀丢失），插件的 assertFiles 逐条找
+        # bin/xxx.deb 就会 file not exists。目录名则保留层级。
+        artifacts:
+          - name: REL_ASSETS
+            path:
+              - bin
+        notify: []
+        strategy:
+          retry: "0"
+          resource:
+            cpu: "2"
+            memory: "4"
+
+  - name: release-stage
+    displayName: 发布
+    strategy: naturally
+    trigger: auto
+    executor: []
+    steps:
+      - step: release@gitee
+        name: release_gitee
+        displayName: 创建 Gitee Release 并上传附件
+        # tag 直接用 VERSION 原文（下载阶段已归一化成带 v 的形式）。
+        # 这里不能写 v${VERSION}：VERSION 已带 v 时会拼成 vv0.1.31。
+        releaseName: ${VERSION}
+        tagName: ${VERSION}
+        # 正文取自全局参数 RELEASE_BODY：下载阶段把 release_body.md 转成 HTML，
+        # 处理掉 = 和超长分量后写成单行，经 GITEE_PARAMS 到这里插值。
+        # 单行是必须的（KEY=VALUE 不能跨行），单行内的 HTML 由 Gitee 渲染。
+        description: ${RELEASE_BODY}
+        upstreamArtifact:
+          - REL_ASSETS
+        # 必须逐个列文件名。插件不支持目录：填 bin 会把整个目录压成
+        # bin.tar.gz 去上传，然后 400 失败。
+        # 这四个就是 CNB / GitHub Release 里的全部产物，名字不带版本段，
+        # 与下载阶段的落盘名逐字一致。上游增减产物时要同步加行，
+        # 少列一个不会报错，只是那个文件不会出现在 Gitee Release 里。
+        assertFiles:
+          - bin/fnmusic-sync_amd64.deb
+          - bin/fnmusic-sync_arm64.deb
+          - bin/fnmusic-sync-amd64.fpk
+          - bin/fnmusic-sync-arm64.fpk
+        # 预发布：值由下载阶段判定后写进 GITEE_PARAMS，这里插值取 true / false。
+        prerelease: ${PRERELEASE}
+        # 同 tag 已存在时覆盖，代替手写的「先删旧 Release」
+        allowUpdate: true

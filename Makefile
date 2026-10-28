@@ -27,11 +27,18 @@ VERSION ?= $(shell v=$$(git describe --tags --always --dirty 2>/dev/null | sed '
 # Debian / fnOS 包元数据（manifest version、deb version、npm package.json version）
 # 不使用 v 前缀；而二进制内部版本与下载链接仍使用带 v 的 VERSION（与 git tag 保持一致）。
 PKG_VERSION = $(patsubst v%,%,$(VERSION))
+
+# deb 专用版本号：把 semver 的预发布后缀换成 Debian 的 ~ 写法。
+# dpkg 的版本是 upstream-revision，同 upstream 时「有 revision 的那份更大」——
+# 也就是 0.1.32-rc.1 > 0.1.32，用户装了 rc 之后正式版反而成了降级（apt 会拒绝）。
+# 换成 0.1.32~rc.1（tilde 排序低于空串）才对。fnOS 的 fpk 与前端 package.json
+# 仍用原样 semver，只有 deb 元数据需要这一步。
+DEB_VERSION = $(subst -,~,$(PKG_VERSION))
 COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 BUILDTIME ?= $(shell date -u '+%Y-%m-%d %H:%M:%S UTC')
 
 # 构建来源（标识当前二进制由哪个平台构建发布）
-# CNB 构建时注入 REPO_SOURCE=cnb，GitHub 构建时注入 REPO_SOURCE=github
+# CNB 构建时注入 REPO_SOURCE=cnb，GitHub 构建时注入 REPO_SOURCE=github，GitLab 构建时注入 REPO_SOURCE=gitlab
 # 升级时根据此值选择从对应平台下载
 REPO_SOURCE ?= cnb
 
@@ -42,6 +49,10 @@ CNB_TOKEN ?=
 # GitHub 访问令牌（GitHub API 无 Token 也可用，但有速率限制，可以为空）
 # GitHub 构建时通过环境变量 GITHUB_TOKEN 传入
 GITHUB_TOKEN ?=
+
+# GitLab 访问令牌（read_api 权限）。公开项目可匿名读 releases API，因此可以为空；
+# 私有项目不配就会在升级时提示「项目不可读」。GitLab 构建时通过环境变量 GITLAB_TOKEN 传入。
+GITLAB_TOKEN ?=
 
 # 路径（ldflags -X 注入版本变量的包路径，需与 go.mod 模块路径一致）
 PKG_PATH = cnb.cool/dtapp/fnmusic-sync/internal/buildinfo
@@ -57,7 +68,8 @@ LDFLAGS = -s -w \
 	-X '$(PKG_PATH).BinaryName=$(BINARY_NAME)' \
 	-X '$(PKG_PATH).RepoSource=$(REPO_SOURCE)' \
 	-X '$(PKG_PATH).CnbToken=$(CNB_TOKEN)' \
-	-X '$(PKG_PATH).GithubToken=$(GITHUB_TOKEN)'
+	-X '$(PKG_PATH).GithubToken=$(GITHUB_TOKEN)' \
+	-X '$(PKG_PATH).GitlabToken=$(GITLAB_TOKEN)'
 
 # 统一定义构建命令
 # CGO_ENABLED=0: 禁用 CGO，实现完全静态链接
@@ -579,7 +591,7 @@ clean-archives:
 # 生成 nfpm 临时配置文件（替换变量）
 # 参数: $(1)=架构名 (amd64)
 define generate_nfpm_config
-	@sed -e 's|$${ARCH}|$(1)|g' -e 's|$${VERSION}|$(PKG_VERSION)|g' \
+	@sed -e 's|$${ARCH}|$(1)|g' -e 's|$${VERSION}|$(DEB_VERSION)|g' \
 	     -e 's|$${POSTINSTALL}|.nfpm-scripts/postinstall.sh|g' \
 	     -e 's|$${PREREMOVE}|.nfpm-scripts/preremove.sh|g' \
 	     .nfpm.yaml > .nfpm-$(1).yaml

@@ -1,7 +1,22 @@
+# 分支详情页的自定义按钮：填版本号，触发 .cnb/workflows/release.yml。
+#
+# **只有一个输入：version。没有 pre_release 开关了。**
+# 预发布由版本号自己带着走（唯一规则，五个平台共用 scripts/ci/resolve-prerelease.sh）：
+#   v1.2.3          → 正式版
+#   v1.2.3-rc.1     → 预发布
+#   v1.2.3-beta.1   → 预发布
+#   v1.2.3-alpha.1  → 预发布
+# 也就是 semver 的 `-<prerelease>` 段：有就是预发布，没有就是正式版。
+#
+# 开关是删掉的，不是藏起来的。它以前能把整条流水线卡死在第一步：实测点这个按钮时
+# default: 'false' 没有生效，传进来的是 true，「版本号 v0.1.31 + pre_release=true」
+# 撞上硬失败判定，red 在第一步，而页面上没有任何东西能让用户看出这个 true 从哪来。
+# 一个跟版本号会打架、打架时又让人无从下手的表单字段，留着就是纯负债：
+# 版本号里已经写了 -rc.1，再让人勾一遍只是多一个出错的地方。
 branch:
   - buttons:
       - name: 打包 Go 项目
-        description: 打包 Go 项目并发布 Release（可选是否预发布）
+        description: 打包 Go 项目并发布 Release（预发布看版本号后缀：-rc.1 / -beta.1 / -alpha.1）
         event: web_trigger_build_go_project # 触发的 CI 事件名
         permissions:
           roles:
@@ -11,14 +26,8 @@ branch:
         inputs:
           version:
             # 输入框
-            description: 请输入打包版本
+            name: 版本号
+            description: 要发布的版本号，可带或不带 v（1.2.3 / v1.2.3 / v1.2.3-rc.1 / v1.2.3-beta.1 / v1.2.3-alpha.1）
             required: true # 是否必填
             type: input
-            default:
-          pre_release:
-            # 预发布开关
-            name: 预发布版本
-            description: 是否为预发布版本（预发布不会标记为稳定版）
-            required: false # 是否必填
-            type: switch
-            default: 'false'
+            default: ''
