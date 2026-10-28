@@ -7,6 +7,8 @@
 .log
 .task
 .codebuddy
+.gocache
+.gomodcache
 
 # 开发相关
 /cmd/dev*

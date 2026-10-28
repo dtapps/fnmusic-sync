@@ -13,30 +13,25 @@
           - /go/pkg/mod:copy-on-write # 仅缓存 Go 模块下载，避免覆盖镜像内预装的 /go/bin 工具
       imports: https://cnb.cool/dtapp/envs/-/blob/main/update.yml # 导入外部环境变量/配置
       stages:
-        - name: 处理版本号与预发布选项
+        - name: 解析版本号（预发布看后缀）
           script: |
-            echo "原始 version: $version"
+            set -eu
+            echo "原始 version: [${version:-}]"
 
-            # 1. 如果输入没有 v 前缀，自动加上
-            if ! echo "$version" | grep -qE '^v'; then
-              version="v${version}"
-            fi
+            # 归一化 + 格式校验 + 预发布判定只有一份实现，在 scripts/ci/resolve-prerelease.sh，
+            # 五个平台（CNB / GitHub / GitLab / Gitee / GitCode）共同 source 它。
+            # 这里只传版本号：预发布由 `-rc.1` / `-beta.1` / `-alpha.1` 这类后缀决定，
+            # 页面上已经没有开关可以对账了（老的 pre_release 环境变量就算还在也不读）。
+            export VERSION="${version:-}"
+            # shellcheck disable=SC1091
+            . scripts/ci/resolve-prerelease.sh
 
-            echo "处理 version: $version"
+            echo "${PRE_NOTE}"
+            echo "tag: ${TAG}  包版本: ${PKG_VERSION}  预发布: ${PRERELEASE}"
 
-            # 2. 通过 set-output 输出到 result
-            echo "##[set-output interior_version=$version]"
-
-            # 3. 预发布选项：由页面 switch 传入 pre_release（true/false），默认 false
-            pre_release="${pre_release:-false}"
-            if [ "$pre_release" != "true" ] && [ "$pre_release" != "false" ]; then
-              echo "警告：pre_release 值为 '${pre_release}'，仅支持 true/false，已回落到 false"
-              pre_release="false"
-            fi
-            echo "preRelease: $pre_release"
-
-            # 4. 通过 set-output 输出预发布选项
-            echo "##[set-output pre_release=$pre_release]"
+            # 判定完再输出：中途失败时不会留下一半 env 给下游。
+            echo "##[set-output interior_version=${TAG}]"
+            echo "##[set-output pre_release=${PRERELEASE}]"
           exports:
             interior_version: INTERIOR_VERSION
             pre_release: PRE_RELEASE
@@ -59,6 +54,15 @@
 
         - name: 生成 Release 正文
           script: |
+            # 打包没出产物就别往下走：否则会发出一个零附件的 Release，正文表格是空的，
+            # 看起来「成功」，用户点开什么都下不到（GitLab 那份早就有这道闸，这里补上）。
+            count=$(find bin -maxdepth 1 -type f \( -name '*.deb' -o -name '*.fpk' \) | wc -l)
+            if [ "$count" -eq 0 ]; then
+              echo "❌ 打包没有产出任何 deb/fpk，先看 make package-linux-all 的日志"
+              exit 1
+            fi
+            echo "产物 ${count} 个"
+
             CNB_BASE="${CNB_REPO_URL_HTTPS%/}/-"
             DL_BASE="${CNB_BASE}/releases/download/${INTERIOR_VERSION}"
 
@@ -125,12 +129,18 @@
         # 生成 Release 选项文件（preRelease 按传入值动态设置），供 git:release 的 optionsFrom 引用
         - name: 生成 Release 选项文件
           script: |
+            set -eu
+            # preRelease 必须是确定的 true/false：空值写进 yml 后 git:release 会当成脏配置，
+            # 报错还落在「发布」那一步，跟真正的原因隔了三屏。空就直接死在这一步。
+            : "${INTERIOR_VERSION:?INTERIOR_VERSION 为空——第一步没跑成功}"
+            : "${PRE_RELEASE:?PRE_RELEASE 为空——第一步没跑成功}"
             cat > release_options.yml << EOF
             tag: ${INTERIOR_VERSION}
             title: "${INTERIOR_VERSION}"
             descriptionFromFile: release_body.md
             preRelease: ${PRE_RELEASE}
             EOF
+            cat release_options.yml
 
         # https://docs.cnb.cool/zh/build/internal-steps.html#git-release
         - name: 发布 Release

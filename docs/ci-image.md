@@ -1,6 +1,8 @@
 # CI 镜像说明（fnmusic-sync）
 
-本仓库维护**两份 CI 环境镜像定义**：`.cnb/ci/Dockerfile`（CNB 用）与 `.github/ci/Dockerfile`（GitHub Actions 用）。二者基于同一个基础镜像、装同一批工具、版本号逐一对应，**只在镜像的分发方式和网络加速上有差异**。改动任何一版的工具版本，必须同步改另一版。
+本文件对比**两份互为镜像的 CI 环境定义**：`.cnb/ci/Dockerfile`（CNB 用）与 `.github/ci/Dockerfile`（GitHub Actions 用）。二者基于同一个基础镜像、装同一批工具、版本号逐一对应，**只在镜像的分发方式和网络加速上有差异**。改动任何一版的工具版本，必须同步改另一版。
+
+仓库里还有第三份 `.gitlab/ci/Dockerfile`（GitLab 侧自建自存，工具版本同样要跟这两版对齐，但它多两行定时重建用的缓存失效锚点）。它的构建与分发模型见 [gitlab-ci.md](gitlab-ci.md) §4。
 
 ## 1. 两种分发模型（最重要的差异）
 
@@ -19,6 +21,8 @@
 - **CNB**：`.cnb/workflows/` 里 `push.yml`、`release.yml`、`pull-coverage.yml`、`push-coverage.yml` 共 6 处 `build: .cnb/ci/Dockerfile`。
 - **GitHub**：`push.yml`、`coverage.yml`（Codecov）、`coveralls.yml`（Coveralls）三个工作流的 `container:`。
 - **GitLab**：`.gitlab-ci.yml` 的 `default.image`（`check-image` → `build-image` → `merge-image` 用 `.gitlab/ci/Dockerfile` 自建，存在 GitLab 自己的 registry；消费方只有 `package-release`）。
+
+> GitLab 这份 Dockerfile 比另外两版多两行（`ARG CACHE_BUST` + 一行 `RUN echo`），是给定时流水线丢 layer cache 用的，详见 [gitlab-ci.md](gitlab-ci.md) §4.1。**同步工具版本时不要把这两行带过去**——CNB / GitHub 没有对应的构建参数，多出来只会白白失效一次缓存。
 
 ## 2. 工具清单（两版一致，版本号逐项对应）
 
@@ -67,6 +71,7 @@ Go 工具经 `go install` 装到 `/go/bin`（`GOPATH=/go`，已在 PATH）。
 2. **触发重建**：
    - GitHub：手动跑一次 `ci-image.yml`，推送新的 `ghcr.io/.../ci:latest`。**下一次 CI 才会用新镜像**；`latest` 是唯一 tag，无回滚手段，回滚 = 手动重跑旧版本的 `ci-image.yml`。
    - CNB：无需操作，下次运行自动重建（平台有构建缓存）。
+   - GitLab：改动推上默认分支即自动重建（`workflow.rules` 的 `changes` 命中 `.gitlab/ci/Dockerfile`）；不推代码只想重刷，Run pipeline 勾 `CI_FORCE_REBUILD_IMAGE=true`。另外那条每周定时流水线会自己重建一次（见 gitlab-ci.md §4.1）。
 3. **同步检查工作流**：若涉及行为变化（如 goveralls 参数、gotestsum 的 JUnit 路径），检查 `coverage.yml` / `coveralls.yml` / `.cnb/workflows/*-coverage.yml` 是否需要跟进。
 
 > markdownfmt 用 `Kunde21/markdownfmt/v3`（shurcooL 原版已停更，fork 支持 GFM 全语法）；模块路径带 `/v3`，安装路径是 `.../v3/cmd/markdownfmt`。

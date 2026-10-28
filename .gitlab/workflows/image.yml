@@ -1,0 +1,163 @@
+# CI 镜像：GitLab 侧自己构建（只出 amd64，单平台）
+# 由根 .gitlab-ci.yml 的 include 引入；workflow / stages / variables / default 都在根文件里。
+# 本文件只是流水线描述；镜像的构建现场（Dockerfile 及其上下文目录）在 .gitlab/ci/，
+# 拆开放是为了 `--local dockerfile=.gitlab/ci` 只喂 Dockerfile，不把流水线 YAML 当构建上下文。
+#
+# 三步：
+#   check-image   算 .gitlab/ci/Dockerfile 的内容哈希，查 registry 里有没有对应 tag
+#   build-image   缺就构建（跑在 amd64 原生 runner 上，不用 QEMU、不做交叉构建）
+#   merge-image   把该镜像挂到 ci:latest（消费方 default.image 只用这个）
+#
+# tag 规则（内容寻址，不靠 commit 差分）：
+#   ci:sha-<Dockerfile 内容 sha256 前 12 位>   Dockerfile 对应的那份镜像
+#   ci:latest                                 消费方（default.image）只用这个
+#   ci:buildcache                             buildkit registry cache
+#
+# ⚠️ 本文件不是「每条流水线都有一份」的：根文件用 include:rules 决定它进不进来。
+#   动过 .gitlab/ci/Dockerfile 的 push / 定时流水线 / 手工勾 CI_FORCE_REBUILD_IMAGE 才引入，
+#   发布用的 Run pipeline 里这三步**连定义都不存在**。
+#   所以 job 上不要再写 rules —— 判断只写在根文件一处，两处一定会漂。
+#
+# 两个决定，别混：
+#   「这组 job 在不在流水线里」→ 根文件 include:rules（commit 差分 / 流水线来源）
+#   「镜像要不要真的重建」      → check-image（内容哈希 + registry 存在性），这是权威
+#
+# 当年只用 commit 差分当唯一依据踩过坑：镜像从没建成过，改个 .gitlab-ci.yml 推上来 →
+# Dockerfile 没变 → 不引入 build job → release 拉 ci:latest 直接 `manifest unknown`，死循环。
+# 现在两边都有兜底：内容哈希兜「该不该建」，而「镜像万一没了」由每周定时流水线
+# （或勾一次 force）补回来 —— 定时那条不管哈希对不对，一律重建。
+#
+# 定时流水线是唯一会**无视哈希强制重建**的场景：哈希没变不代表镜像不用重建，
+# 基础镜像 golang:*-trixie 的 apt 补丁、Dockerfile 里 apt-get install 拿到的包版本，
+# 只有重新构建（且丢缓存，见 Dockerfile 的 CACHE_BUST）才会更新。
+# 重建写回同一个 sha tag——标签的含义是「这份 Dockerfile 对应的镜像」，不是「某个字节快照」。
+
+# ---------------------------------------------------------------------------
+# 复用片段（点号开头 = 不会被当作 job 执行）
+# ---------------------------------------------------------------------------
+# 两个 job 都要「docker:cli 镜像 + 登录 registry」，抽一处。
+# ⚠️ extends 是深合并：job 里再写 before_script 会**整体替换**这里的三行，不是追加。
+.docker-cli:
+  image:
+    name: docker:cli
+    entrypoint: ['']
+  before_script:
+    - docker --version || true
+    - docker buildx version || true
+    - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
+
+# 三个 job 都不写 rules：本文件被引入 = 就该跑（见头部那段）。
+# 用 extends 而不是 !reference：要共用的片段抽一处，语义也更贴（!reference 适合取单条 script）
+# 也别用 YAML 锚点 &/*：锚点只在同文件内有效，跨 include 就断了。
+
+# ---------------------------------------------------------------------------
+# 三个 job
+# ---------------------------------------------------------------------------
+check-image:
+  stage: image
+  extends: .docker-cli
+  script:
+    - |
+      set -e
+      repo="$CI_REGISTRY_IMAGE/ci"
+      # 内容哈希：Dockerfile 一个字没改 → tag 一样 → 下面查到就整体跳过
+      tag=$(sha256sum .gitlab/ci/Dockerfile | cut -c1-12)
+      ref="$repo:sha-$tag"
+      needed=true
+      if docker buildx imagetools inspect "$ref" >/dev/null 2>&1; then
+        needed=false
+      fi
+      # 定时流水线强制重建：哈希只覆盖 Dockerfile 的字节，盖不住「基础镜像发布了新补丁」
+      # 和「apt-get install 今天拿到的包版本更新了」。这两种更新只有重新构建才会吃到。
+      if [ "$CI_PIPELINE_SOURCE" = "schedule" ]; then
+        echo "定时流水线：强制重建（刷新基础镜像与 apt 包版本）"
+        needed=true
+      fi
+      if [ "$CI_FORCE_REBUILD_IMAGE" = "true" ]; then needed=true; fi
+      echo "$ref 需要构建: $needed"
+      {
+        echo "IMAGE_TAG=$tag"
+        echo "IMAGE_REF=$ref"
+        echo "IMAGE_NEEDED=$needed"
+      } > build-image.env
+      cat build-image.env
+  artifacts:
+    reports:
+      dotenv: build-image.env
+    expire_in: 1 week
+  cache: {}
+  timeout: 10m
+
+# 用 GitLab 官方文档推荐的 rootless BuildKit：
+#   - 不需要 privileged、不需要 docker:dind，GitLab.com 的 hosted runner 开箱可用
+#   - Dockerfile 走本平台自己那份 .gitlab/ci/Dockerfile
+build-image:
+  stage: image
+  needs:
+    - job: check-image
+  image:
+    name: moby/buildkit:rootless
+    # 官方明确要求：不覆盖 entrypoint 会启动常驻 daemon 而不是执行构建，job 会挂到超时
+    entrypoint: ['']
+  variables:
+    BUILDKITD_FLAGS: --oci-worker-no-process-sandbox
+  # job 级 before_script 会整体替换 default 的，这里只保留 BuildKit 需要的 registry 凭据
+  before_script:
+    - mkdir -p ~/.docker
+    - echo "{\"auths\":{\"$CI_REGISTRY\":{\"username\":\"$CI_REGISTRY_USER\",\"password\":\"$CI_REGISTRY_PASSWORD\"}}}" >
+      ~/.docker/config.json
+  script:
+    - |
+      set -e
+      if [ "$IMAGE_NEEDED" != "true" ]; then
+        echo "$IMAGE_REF 已存在，跳过构建"
+        exit 0
+      fi
+      # ⚠️ --output 只写一个 tag：它的值按逗号切成多段 key=value，写 name=repo:a,repo:b 会报
+      #   `error: invalid value ...`。可读的 ci:latest 交给 merge-image 补。
+      # 不给 --opt platform：buildkit 默认按 runner 自身架构（amd64）原生构建。
+      #
+      # 定时流水线额外传 CACHE_BUST（见 Dockerfile 里那两行）：不传的话 registry cache 会让
+      # apt 那几层全部命中，重建看似成功、包版本一个字没变。用 $CI_PIPELINE_IID 而不是日期——
+      # 不需要额外的 date 算术，busybox 的 date 未必支持 ISO 周。
+      bust=""
+      if [ "$CI_PIPELINE_SOURCE" = "schedule" ]; then
+        bust="--opt build-arg:CACHE_BUST=$CI_PIPELINE_IID"
+        echo "定时重建：CACHE_BUST=$CI_PIPELINE_IID（整层缓存失效）"
+      fi
+      buildctl-daemonless.sh build \
+        --frontend dockerfile.v0 \
+        --local context=. \
+        --local dockerfile=.gitlab/ci \
+        --import-cache type=registry,ref=$CI_REGISTRY_IMAGE/ci:buildcache \
+        --export-cache type=registry,ref=$CI_REGISTRY_IMAGE/ci:buildcache \
+        $bust \
+        --output type=image,name=$IMAGE_REF,push=true
+      echo "已推送 $IMAGE_REF"
+  cache: {}
+  # 首次构建要装 GTK/WebKit + 全部 Go 工具链，留足余量；有 cache 时几分钟
+  timeout: 1h
+  tags:
+    - saas-linux-small-amd64
+
+# `docker buildx imagetools create` 是纯 registry API 操作，不需要 daemon / dind。
+# 它会**新建** index 覆盖目标 tag，反复跑不会把旧 manifest 叠加进去；本次没重建时也只是把
+# latest 重新指一遍（十几秒，顺带修好被误删的 latest）。
+merge-image:
+  stage: image
+  extends: .docker-cli
+  needs:
+    - job: check-image
+    - job: build-image
+  script:
+    - |
+      set -e
+      if ! docker buildx imagetools inspect "$IMAGE_REF" >/dev/null 2>&1; then
+        echo "registry 里没有 ${IMAGE_REF}，无法生成 latest"
+        exit 1
+      fi
+      echo "指向 → $CI_REGISTRY_IMAGE/ci:latest ← $IMAGE_REF"
+      docker buildx imagetools create -t "$CI_REGISTRY_IMAGE/ci:latest" "$IMAGE_REF"
+      docker buildx imagetools inspect "$CI_REGISTRY_IMAGE/ci:latest"
+  cache: {}
+  timeout: 10m

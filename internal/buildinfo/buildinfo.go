@@ -27,7 +27,7 @@ var BuildTime = "unknown"
 var BinaryName = "fnmusic-sync"
 
 // RepoSource 构建来源，标识当前二进制由哪个平台构建发布，由 Makefile 通过 -ldflags 注入。
-// 可选值: "cnb", "github"，默认空字符串表示未知来源。
+// 可选值: "cnb", "github", "gitlab"，默认空字符串表示未知来源（按 CNB 处理）。
 var RepoSource = ""
 
 // CnbToken CNB 访问令牌，由 Makefile 通过 -ldflags 注入。
@@ -37,6 +37,11 @@ var CnbToken = ""
 // GithubToken GitHub 访问令牌，由 Makefile 通过 -ldflags 注入。
 // GitHub API 在无 Token 时也可使用（有速率限制），因此可以为空。
 var GithubToken = ""
+
+// GitlabToken GitLab 访问令牌（read_api 权限），由 Makefile 通过 -ldflags 注入。
+// 公开项目的 releases API 可匿名读取；私有项目必须带 Token，否则返回 401/404。
+// 注意：Token 会被编进二进制，私有项目要自己权衡「可自动升级」与「令牌随包分发」。
+var GitlabToken = ""
 
 // UserAgent 返回上报给第三方服务的 User-Agent（含版本号）。
 func UserAgent() string {
@@ -51,6 +56,11 @@ func IsCNB() bool {
 // IsGitHub 返回当前二进制是否由 GitHub 平台构建发布。
 func IsGitHub() bool {
 	return RepoSource == "github"
+}
+
+// IsGitLab 返回当前二进制是否由 GitLab 平台构建发布。
+func IsGitLab() bool {
+	return RepoSource == "gitlab"
 }
 
 // DefaultListenSocket 飞牛音乐监听 Unix Socket 路径（固定值，不可自定义）。

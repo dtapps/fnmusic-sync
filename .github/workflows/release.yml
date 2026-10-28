@@ -17,23 +17,21 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: '请输入打包版本'
+        description: '版本号。预发布看后缀：1.2.3-rc.1 / 1.2.3-beta.1 / 1.2.3-alpha.1；没有后缀就是正式版'
         required: true
         type: string
-      prerelease:
-        description: '预发布版本'
-        required: false
-        type: boolean
-        default: false
 
 permissions:
   contents: write
   packages: read # 拉取 GHCR 上的 CI 镜像（公开镜像亦可匿名拉，写上以防仓库转私有）
 
 # 同一分支的多次运行取消旧的运行，避免排队浪费。
+# ⚠️ 但 release 这一步不能跟着被砍：它不是幂等的一次性动作（建 tag → 传 4 个附件 →
+# 写正文），取消在半路会留下一个只挂了两三个文件的 Release，比排队慢更贵。
+# 跟 GitLab 那份的 interruptible: false 是同一个理由。
 concurrency:
   group: release-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   prepare:
@@ -50,29 +48,26 @@ jobs:
       - name: 检出代码
         uses: actions/checkout@v7
 
-      - name: 处理版本号与预发布选项
+      - name: 解析版本号（预发布看后缀）
         id: gen
         shell: bash
+        env:
+          VERSION: ${{ inputs.version }}
         run: |
-          echo "原始 version: ${{ inputs.version }}"
+          set -eu
+          echo "原始 version: [${VERSION}]"
 
-          # 1. 如果输入没有 v 前缀，自动加上
-          VERSION="${{ inputs.version }}"
-          if ! echo "${VERSION}" | grep -qE '^v'; then
-            VERSION="v${VERSION}"
-          fi
+          # 归一化 / 格式校验 / 预发布判定只有一份实现，在 scripts/ci/resolve-prerelease.sh，
+          # 五个平台（CNB / GitHub / GitLab / Gitee / GitCode）都 source 它。
+          # 只传版本号：预发布由 `-rc.1` / `-beta.1` / `-alpha.1` 这类后缀决定。
+          # 以前那个 prerelease 布尔输入已经删掉 —— 它会跟版本号打架，而且打得毫无必要。
+          # shellcheck disable=SC1091
+          . scripts/ci/resolve-prerelease.sh
 
-          echo "处理 version: ${VERSION}"
-          echo "interior_version=${VERSION}" >> $GITHUB_OUTPUT
-
-          # 2. 预发布选项校验（由页面 switch 传入 prerelease，默认 false）
-          PRE_RELEASE="${{ inputs.prerelease }}"
-          if [ "$PRE_RELEASE" != "true" ] && [ "$PRE_RELEASE" != "false" ]; then
-            echo "警告：pre_release 值为 '${PRE_RELEASE}'，仅支持 true/false，已回落到 false"
-            PRE_RELEASE="false"
-          fi
-          echo "preRelease: $PRE_RELEASE"
-          echo "pre_release=${PRE_RELEASE}" >> $GITHUB_OUTPUT
+          echo "${PRE_NOTE}"
+          echo "interior_version=${TAG}" >> "$GITHUB_OUTPUT"
+          # 只在本 job 之间传，不再来自用户输入
+          echo "pre_release=${PRERELEASE}" >> "$GITHUB_OUTPUT"
 
   # 构建 + 打包 Linux 安装包（deb/fpk）
   build:
@@ -192,7 +187,12 @@ jobs:
           BUILD_TIME="$(date -u '+%Y-%m-%d %H:%M:%S UTC')"
 
           # 生成 changelog（取上一个 tag 到 HEAD 的提交摘要）
-          PREV_TAG=$(git tag --sort=-v:refname | head -2 | tail -1)
+          #
+          # 不能写 `git tag --sort=-v:refname | head -2 | tail -1`：那是「全仓库第二新的 tag」，
+          # 跟当前 HEAD 没有关系。重跑一次（tag 已经建过）就会把刚发的 tag 自己当成上一个版本，
+          # 段落直接变成空；分支上多了个更新的 tag 时也会指到别的线上去。
+          # HEAD^ 找的是「HEAD 之前最近的那个 tag」，与 GitLab 那份的 git describe 同一口径。
+          PREV_TAG=$(git describe --tags --abbrev=0 'HEAD^' 2>/dev/null || true)
           if [ -z "$PREV_TAG" ]; then
             CHANGES="首次发布"
           else

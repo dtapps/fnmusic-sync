@@ -233,12 +233,14 @@ Option       = Restart=always, RestartSec=5, KillSignal=SIGTERM
 
 ```text
 ① 检测包管理器（exec.LookPath("dpkg")）——只有 dpkg，其他发行版直接提示手动升级
-② 取最新 tag（internal/updater.FetchLatestTag）
-      构建来源 github → api.github.com/repos/dtapps/fnmusic-sync/releases/latest
+② 取最新 tag（internal/updater.FetchLatestTag）——都只挑正式版，tag 带 -rc/-beta 后缀的跳过
+      构建来源 github → api.github.com/repos/dtapps/fnmusic-sync/releases?per_page=20（取列表以读 prerelease/draft）
+      构建来源 gitlab → gitlab.com/api/v4/projects/dtapps%2Ffnmusic-sync/releases（倒序取首条正式版）
       构建来源 cnb（默认） → api.cnb.cool/dtapp/fnmusic-sync/-/releases?page=1&page_size=20
 ③ 版本比对（updater.HasUpdate）：tag 与当前版本不同即升级；当前版本是 dev 时强制升级
 ④ 拼下载地址：<repo>/releases/download/<tag>/fnmusic-sync_<arch>.deb
-      下载优先走中转域名（dl-stats.dtapp.net / .top），失败自动回退原始地址
+      gitlab 源为 <repo>/-/releases/<tag>/downloads/<file>（Release 直链，302 到通用包仓库）
+      下载优先走中转域名 dl-stats.dtapp.net（三个来源统一），失败自动回退原始地址
 ⑤ dpkg -i <临时文件>
 ⑥ 若服务在跑：nohup systemctl restart fnmusic-sync 异步重启（当前进程会被 SIGTERM 杀掉，所以必须脱离）
 ```

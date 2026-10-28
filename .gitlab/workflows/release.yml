@@ -1,0 +1,173 @@
+# 打包 + 上传 + 发布
+# 由根 .gitlab-ci.yml 的 include 引入；workflow / stages / variables / default 都在根文件里。
+# 本 job 用根文件的 default.image（$CI_IMAGE）与 default.before_script，这里一概不覆盖。
+#
+# 一个 job 走完（不像 CNB 那样拆 5 步）：拆开只会多几次 shell 启动和产物搬运，
+# 而镜像里 curl / jq / git 都有，构建产物当场就能上传并拼出 Release 正文。
+
+package-release:
+  stage: release
+  # 打包 + 双架构构建约 10 分钟；被新流水线打断会留下半个 release，所以不设 interruptible
+  interruptible: false
+  timeout: 1h
+  script:
+    # 1. 版本号归一化与预发布判定：只有一份实现，在 scripts/ci/resolve-prerelease.sh
+    #
+    # 本文件以前把这段内联抄了一遍（CNB、GitHub 那两份也是），改一处漏四处：
+    # 格式校验只在 GitLab / GitCode 这两份里、硬失败却在 CNB / GitHub / GitLab 三份里，
+    # 于是同一个「页面开关残留 true + 版本号没有后缀」在 Gitee 上能发、在 CNB 上直接红。
+    # 现在五个平台都 source 同一份，规则改了只需要动那一个文件。
+    #
+    # 变量的传递方式只有一种：export。
+    #   GitLab 把整个 job 的所有 script 行拼成一个 bash 脚本执行，所以这里 export 的变量
+    #   后面每一行都读得到（`VERSION="$TAG_NAME" make package-linux-all` 就是这么来的）。
+    # 这里**不再写 release.env 那份 dotenv**：dotenv 的语义是「把文件里的键值交给下游 job」，
+    # 本 job 自己就读不到；而本流水线里 package-release 是 release stage 里唯一的 job，
+    # 后面没有任何 job 会 needs 它 —— 那份文件写出来既没人读，也没有排查价值（值都打在日志里）。
+    # 将来真加了消费方（通知、回填 changelog 之类），再把 artifacts.reports.dotenv 加回来。
+    - |
+      set -eu
+      VERSION="${VERSION:-}"
+      export VERSION
+      # shellcheck disable=SC1091
+      . scripts/ci/resolve-prerelease.sh
+      echo "${PRE_NOTE}"
+      # 本 job 的行文里有自己的变量名，映射一次，别在下面到处改。
+      # PRE_RELEASE 不再是 CI/CD 变量，也不再是表单字段 —— 由版本号后缀算出来。
+      TAG_NAME="$TAG"
+      PRE_RELEASE="$PRERELEASE"
+      export TAG_NAME PKG_VERSION PRE_RELEASE
+      echo "TAG_NAME=${TAG_NAME}  PKG_VERSION=${PKG_VERSION}  PRE_RELEASE=${PRE_RELEASE}"
+    - pnpm config set store-dir "$PNPM_STORE_DIR"
+    - make deps
+    # VERSION 带 v（与 git tag 一致，进二进制与下载链接）；PKG_VERSION 由 Makefile 去掉 v
+    # GITLAB_TOKEN 可选：公开项目的 releases API 匿名可读，留空即可；私有项目在项目 CI/CD
+    # 变量里配一个 read_api 的 token 才会被编进二进制（令牌随包分发，私有项目自行权衡）
+    - VERSION="$TAG_NAME" REPO_SOURCE="$REPO_SOURCE" GITLAB_TOKEN="${GITLAB_TOKEN}" make package-linux-all
+    - make clean-archives
+    # 打包不出产物就直接失败：否则后面会上传 0 个文件、静默发出一个零附件的 Release，
+    # 看起来「成功」，实际用户点开什么都下不到
+    - |
+      set -eu
+      count=$(find bin -maxdepth 1 -type f \( -name '*.deb' -o -name '*.fpk' \) | wc -l)
+      if [ "$count" -eq 0 ]; then
+        echo "❌ 打包没有产出任何 deb/fpk，先看 make package-linux-all 的日志"
+        exit 1
+      fi
+      echo "✓ 产物 ${count} 个："
+      # 不用 find -printf：只有 GNU find 有，本机（macOS/BSD）跑同一段会报 unknown primary
+      find bin -maxdepth 1 -type f \( -name '*.deb' -o -name '*.fpk' \) | sort |
+        while read -r f; do echo "  ${f##*/}"; done
+    # 2. 上传安装包到通用包仓库（Generic Package Registry）：
+    #    Release 的下载链接指向这里，用户点开就能下，不依赖 job 产物（产物 30 天会过期）
+    - |
+      set -eu
+      for f in bin/*.deb bin/*.fpk; do
+        [ -e "$f" ] || continue
+        n=$(basename "$f")
+        echo "→ 上传 $n"
+        curl --fail --show-error --silent \
+          --header "JOB-TOKEN: $CI_JOB_TOKEN" \
+          --upload-file "$f" \
+          "$CI_API_V4_URL/projects/$CI_PROJECT_ID/packages/generic/$PACKAGE_NAME/$TAG_NAME/$n"
+      done
+      ls -lh bin
+    # 3. 生成 Release 正文（下载表 + 更新内容），与 CNB/GitHub 的正文结构保持一致
+    - |
+      set -eu
+      BASE="$CI_API_V4_URL/projects/$CI_PROJECT_ID/packages/generic/$PACKAGE_NAME/$TAG_NAME"
+      {
+        if [ "$PRE_RELEASE" = "true" ]; then
+          echo "## ⚠️ 预发布版本"
+          echo ""
+          echo "> 这是预发布版本，可能包含未充分测试的功能。"
+          echo "> 如需稳定版本，请使用 [正式发布]($CI_PROJECT_URL/-/releases)。"
+          echo ""
+        fi
+        echo "## 发布信息"
+        echo ""
+        echo "| 项目 | 内容 |"
+        echo "| --- | --- |"
+        echo "| 版本号 | ${TAG_NAME} |"
+        if [ "$PRE_RELEASE" = "true" ]; then
+          echo "| 发布类型 | 🚧 预发布版本 (Pre-release) |"
+        else
+          echo "| 发布类型 | ✅ 正式发布版本 (Stable) |"
+        fi
+        echo "| 是否预发布 | ${PRE_RELEASE} |"
+        echo "| 构建时间 | $(date -u '+%Y-%m-%d %H:%M:%S UTC') |"
+        echo ""
+        echo "## 下载"
+        echo ""
+        echo "| 平台 | 架构 | 文件 | 大小 | 说明 |"
+        echo "|------|------|------|------|------|"
+        for f in bin/*.deb bin/*.fpk; do
+          [ -e "$f" ] || continue
+          n=$(basename "$f")
+          size=$(ls -lh "$f" | awk '{print $5}')
+          arch="-"
+          desc="其它"
+          case "$n" in
+            *.deb) arch="${n#fnmusic-sync_}"; arch="${arch%.deb}"; desc="Debian/Ubuntu 安装包" ;;
+            *.fpk) arch="${n#fnmusic-sync-}"; arch="${arch%.fpk}"; desc="飞牛 fnOS 应用包" ;;
+          esac
+          echo "| Linux | ${arch} | [${n}](${BASE}/${n}) | ${size} | ${desc} |"
+        done
+        echo ""
+        echo "## 更新内容"
+        echo ""
+        prev=$(git describe --tags --abbrev=0 "${CI_COMMIT_SHA}^" 2>/dev/null || true)
+        if [ -z "$prev" ]; then
+          echo "首次发布"
+        else
+          git log --pretty=format:'- %s' "${prev}..${CI_COMMIT_SHA}" || echo "- 版本更新"
+          echo ""
+        fi
+      } > release_body.md
+      cat release_body.md
+    # 4. 创建 Release（附件链接指向包仓库，并给每个文件一个稳定的 direct_asset_path：
+    #    /-/releases/<tag>/downloads/<文件名>）。已存在则改为更新，方便失败后重跑。
+    - |
+      set -eu
+      BASE="$CI_API_V4_URL/projects/$CI_PROJECT_ID/packages/generic/$PACKAGE_NAME/$TAG_NAME"
+      links='[]'
+      for f in bin/*.deb bin/*.fpk; do
+        [ -e "$f" ] || continue
+        n=$(basename "$f")
+        links=$(printf '%s' "$links" | jq -c --arg n "$n" --arg u "$BASE/$n" '. + [{name:$n,url:$u,direct_asset_path:("/"+$n)}]')
+      done
+      jq -n --arg tag "$TAG_NAME" --arg ref "$CI_COMMIT_SHA" --arg body "$(cat release_body.md)" \
+        --argjson links "$links" \
+        '{tag_name:$tag,name:$tag,ref:$ref,description:$body,assets:{links:$links}}' > release.json
+      api="$CI_API_V4_URL/projects/$CI_PROJECT_ID/releases"
+      code=$(curl --silent --show-error --output resp.json --write-out '%{http_code}' \
+        --request POST --header "JOB-TOKEN: $CI_JOB_TOKEN" \
+        --header "Content-Type: application/json" --data @release.json "$api")
+      if [ "$code" = "409" ]; then
+        echo "Release $TAG_NAME 已存在，改为更新描述与附件"
+        code=$(curl --silent --show-error --output resp.json --write-out '%{http_code}' \
+          --request PUT --header "JOB-TOKEN: $CI_JOB_TOKEN" \
+          --header "Content-Type: application/json" --data @release.json "$api/$TAG_NAME")
+      fi
+      if [ "$code" != "201" ] && [ "$code" != "200" ]; then
+        # 变量后面紧跟全角字符时必须写 ${var}：bash 在部分 locale 下会把多字节字符
+        # 当成变量名的一部分，报 `code?: unbound variable`
+        echo "❌ 创建 Release 失败（HTTP ${code}）"
+        cat resp.json 2>/dev/null || true
+        exit 1
+      fi
+      echo "✓ Release $TAG_NAME 已发布：$CI_PROJECT_URL/-/releases/$TAG_NAME"
+  artifacts:
+    when: always
+    expire_in: 30 days
+    paths:
+      - bin/*.deb
+      - bin/*.fpk
+      - release_body.md
+      - release.json
+      # 这里本来有 reports.dotenv: release.env。删了：本 job 没有下游 job 会 needs 它，
+      # 那份文件既没人读也不进 artifacts 列表（下载不到），属于纯空转的配置。
+      # 变量靠上面的 export 在 job 内传递，那才是唯一真正被消费的通道。
+  # 只有「手动 Run pipeline 且填了 VERSION」才发布；留空则本 stage 为空，只维护镜像
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "web" && $VERSION != ""
