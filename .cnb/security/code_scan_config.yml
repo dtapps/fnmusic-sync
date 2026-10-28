@@ -1,18 +1,12 @@
 # CNB 代码安全扫描配置
-# 文档: https://docs.cnb.cool/zh/security/config-file.html
-#
-# 注意：排除项必须写成 ignoreFrom 引用的忽略文件，或 paths 中以 '!' 开头的取反规则。
-# '.scanignore' 与 'ignoreFrom' 指定的文件不会合并——一旦配置 ignoreFrom，
-# 该能力所需的全部忽略规则都要写进那个文件。
-# 别把这些规则直接塞进 scan.paths 冒充排除：paths 用的是 gitignore 语义，
-# 正向 pattern 是「纳入扫描」，只有 '!...' 才表示排除。
+# https://docs.cnb.cool/zh/security/intro.html
 
-# 公共忽略规则：Go 测试文件、测试数据、依赖与构建产物
+# 敏感信息扫描配置
 secrets:
   scan:
-    ignoreFrom: .cnb/security/scanignore/common
+    ignoreFrom: .scanignore
 
-# 软件成分分析（依赖漏洞扫描）
+# 开源组件扫描配置
 software-composition-analysis:
   scan:
-    ignoreFrom: .cnb/security/scanignore/common
+    ignoreFrom: .scanignore

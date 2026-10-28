@@ -1,5 +1,5 @@
 # 代码安全扫描配置自检
-# https://docs.cnb.cool/zh/security/config-file.html
+# https://docs.cnb.cool/zh/security/config-file.html#zai-cnb-liu-shui-xian-li-tiao-yong-tui-jian
 '**':
   pull_request:
     - stages:

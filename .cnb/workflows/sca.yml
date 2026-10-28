@@ -1,0 +1,65 @@
+# 开源组件漏洞扫描
+# https://docs.cnb.cool/zh/security/sca-vulnerability.html
+# License 扫描
+# https://docs.cnb.cool/zh/security/sca-license.html
+# SBOM 生成
+# https://docs.cnb.cool/zh/security/sca-sbom.html
+'**':
+  push:
+    - stages:
+        - name: 开源组件漏洞全量扫描
+          image: cnbcool/sca-vulnerability:latest
+          timeout: 15m
+          settings:
+            # 扫描模式：diff 为 PR 增量，full 为当前 CNB_COMMIT 全量
+            scanMode: full
+            # 触发门禁的最低漏洞等级：low、medium、high、critical；未配置时不执行门禁
+            # failOnSeverity: high
+            # 是否生成并上传报告附件
+            publish: true
+
+        - name: License 全量扫描
+          image: cnbcool/sca-license:latest
+          timeout: 15m
+          settings:
+            # 扫描模式：diff 为 PR 增量，full 为当前 CNB_COMMIT 全量
+            scanMode: full
+            # 触发门禁的最低 License 风险等级：low、medium、high；未配置时不执行门禁
+            # failOnSeverity: high
+            # 是否生成并上传报告附件
+            publish: true
+
+        - name: 生成完整 SBOM
+          image: cnbcool/sca-sbom:latest
+          timeout: 30m
+          settings:
+            # 扫描模式：diff 为 PR 组件变化，full 为当前 CNB_COMMIT 的全部组件
+            scanMode: full
+            # 报告格式
+            format: spdx
+            # 是否生成并上传报告附件
+            publish: true
+  pull_request.target:
+    - stages:
+        - name: 开源组件漏洞扫描
+          image: cnbcool/sca-vulnerability:latest
+          timeout: 15m
+          settings:
+            # 触发门禁的最低漏洞等级：low、medium、high、critical；未配置时不执行门禁
+            failOnSeverity: high
+
+        - name: License 扫描
+          image: cnbcool/sca-license:latest
+          timeout: 15m
+          settings:
+            # 扫描模式：diff 为 PR 增量，full 为当前 CNB_COMMIT 全量
+            scanMode: diff
+            # 触发门禁的最低 License 风险等级：low、medium、high；未配置时不执行门禁
+            failOnSeverity: high
+
+        - name: 扫描组件变化
+          image: cnbcool/sca-sbom:latest
+          timeout: 30m
+          settings:
+            # 扫描模式：diff 为 PR 组件变化，full 为当前 CNB_COMMIT 的全部组件
+            scanMode: diff

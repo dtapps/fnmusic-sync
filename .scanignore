@@ -1,0 +1,60 @@
+# CNB 代码安全扫描 · 公共忽略规则
+# https://docs.cnb.cool/zh/security/intro.html
+#
+# 语义（gitignore 风格）：本文件每一条都是「排除」；'!' 前缀才是重新纳入。
+# 对所有扫描能力生效。能力级差异才需要 .cnb/security/code_scan_config.yml，
+# 目前 secrets 与 software-composition-analysis 口径一致，统一写在这里。
+#
+# 原则：排除面保持最小。每多加一条，安全扫描面就少一块，按实际路径补，不要预先放宽。
+#
+# 路径写法注意：带斜杠的模式锚定仓库根，不是「任意层级子目录」。
+# 本仓库前端在 cmd/frontend/，不是根级 frontend/——写错前缀等于规则不存在。
+# 校验方法（改完必跑）：
+#   for f in $(git ls-files); do git -c core.excludesFile=.scanignore \
+#     check-ignore -q --no-index "$f" || echo "MISS $f"; done
+# 只看 MISS 里有没有测试路径，剩下的应当全是生产代码。
+
+# ── 测试文件 ──────────────────────────────────────────────────────────────
+# Go 测试：测试里写死假 Key、假凭证、自签证书是刻意为之，扫出来是噪音。
+# 口径对齐 .golangci.yml 中 gosec 对 _test.go 的文件级豁免——只豁免测试文件本身。
+**/*_test.go
+
+# 前端测试：当前 7 个（api / i18n / logger / stores / trim / types / utils）。
+# 用后缀通配而非逐条列举：vitest 默认 include 是 {test,spec}.?(c|m)[jt]s?(x)，
+# 手写清单永远漏一种（.js / .mjs / .cjs / .tsx 各一行就是六行），通配一次收口。
+**/*.test.*
+**/*.spec.*
+
+# 测试装置目录：src/test 下第 8 个文件是 setup.ts（localStorage / window /
+# navigator / document 内存桩，只读不写，无凭证）。它名字不带 .test，上面两条盖不到。
+# 路径必须带 cmd/ 前缀——写成 frontend/src/test/** 是死规则，匹配不到任何文件。
+cmd/frontend/src/test/**
+
+# ── 测试夹具 / 假数据目录（当前仓库全为 0）────────────────────────────────
+# 零成本占位：这些是凭据噪音的传统重灾区（假 token、自签证书、录制的 API 响应），
+# 目录一出现就该被排除，而不是等扫出几十条噪音再回来补。
+# **/testdata/** 是 Go 官方约定的测试数据目录。
+**/testdata/**
+**/fixtures/**
+**/testfixtures/**
+**/__mocks__/**
+**/__snapshots__/**
+
+# ── 依赖 ──────────────────────────────────────────────────────────────────
+# vendor：当前仓库没有（Go modules，未提交 vendored 依赖）。
+# 留一行是防哪天 go mod vendor 被提交，成本为零。
+vendor/**
+
+# ── 未被 git 跟踪、无需声明的路径（扫描器看不到，列在此处仅备查）──────────
+#   bin/                        构建产物，已在 .gitignore
+#   cmd/frontend/node_modules   依赖目录，已在 .gitignore
+#   cmd/frontend/dist           构建产物，已在 .gitignore
+#   cmd/frontend/coverage       vitest 覆盖率报告，已在 .gitignore
+#   cmd/frontend/.svelte-check  svelte-check 缓存（含生成的 *.svelte.ts），已在 .gitignore
+#   cmd/frontend/test-results.json / test-report.xml    测试报告，已在 .gitignore
+#   coverage.out / coverage-go.xml                      覆盖率产物，已在 .gitignore
+#   configs/config.yaml、configs/state.yaml             含真实凭证的本地配置，已在 .gitignore
+#   logs/                       运行日志，已在 .gitignore
+#   tests/                      本地测试脚本与日志罐，已在 .gitignore
+#
+# 仓库当前没有 Go 的 testdata/ 或 fixtures/ 目录；上面几条是对应规则的占位。
