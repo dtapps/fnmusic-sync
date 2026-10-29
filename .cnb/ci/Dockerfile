@@ -54,13 +54,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gnupg \
     git \
     make \
-    jq
+    jq \
+    && rm -rf /var/lib/apt/lists/*
 
-# 4. 安装 UPX 压缩工具
+# 4. 安装 UPX 工具
 RUN ARCH=$(uname -m) && \
     if [ "$ARCH" = "x86_64" ]; then UPX_ARCH="amd64"; \
     elif [ "$ARCH" = "aarch64" ]; then UPX_ARCH="arm64"; \
-    else echo "Unsupported architecture: $ARCH" && exit 1; fi && \
+    else echo "不支持的架构: $ARCH" && exit 1; fi && \
     \
     # 构建下载地址
     UPX_DIR="upx-${UPX_VERSION}-${UPX_ARCH}_linux" && \
@@ -73,44 +74,44 @@ RUN ARCH=$(uname -m) && \
     chmod +x /usr/local/bin/upx && \
     # 清理
     rm -rf upx.tar.xz ${UPX_DIR} && \
-    echo "--- UPX installed ---" && \
+    echo "--- UPX 安装的 ---" && \
     upx --version
 
-# 5. 安装 nfpm (用于打包 deb，一份配置三种格式)
+# 5. 安装 nfpm 工具
 RUN ARCH=$(uname -m) && \
     if [ "$ARCH" = "x86_64" ]; then NFPM_ARCH="x86_64"; \
     elif [ "$ARCH" = "aarch64" ]; then NFPM_ARCH="arm64"; \
-    else echo "Unsupported architecture: $ARCH" && exit 1; fi && \
+    else echo "不支持的架构: $ARCH" && exit 1; fi && \
     \
     NFPM_URL="${GITHUB_MIRROR}/github.com/goreleaser/nfpm/releases/download/v${NFPM_VERSION}/nfpm_${NFPM_VERSION}_Linux_${NFPM_ARCH}.tar.gz" && \
     \
     cd /tmp && \
     wget -q -O nfpm.tar.gz "${NFPM_URL}" && \
-    tar -xf nfpm.tar.gz && \
+    tar -xzf nfpm.tar.gz nfpm && \
     mv nfpm /usr/local/bin/nfpm && \
     chmod +x /usr/local/bin/nfpm && \
     rm -rf nfpm.tar.gz && \
-    echo "--- nfpm installed ---" && \
+    echo "--- nfpm 安装的 ---" && \
     nfpm --version
 
-# 6. 安装 fnpack
+# 6. 安装 fnpack 工具
 RUN ARCH=$(uname -m) && \
     if [ "$ARCH" = "x86_64" ]; then FNPACK_ARCH="amd64"; \
     elif [ "$ARCH" = "aarch64" ]; then FNPACK_ARCH="arm64"; \
-    else echo "Unsupported architecture: $ARCH" && exit 1; fi && \
+    else echo "不支持的架构: $ARCH" && exit 1; fi && \
     \
     FNPACK_URL="https://static2.fnnas.com/fnpack/fnpack-${FNPACK_VERSION}-linux-${FNPACK_ARCH}" && \
     \
     wget -q -O /usr/local/bin/fnpack "${FNPACK_URL}" && \
     chmod +x /usr/local/bin/fnpack && \
-    echo "--- fnpack installed ---" && \
+    echo "--- fnpack 安装的 ---" && \
     fnpack --help >/dev/null 2>&1 || true
 
 # 7. 安装 Node.js 工具
 RUN ARCH=$(uname -m) && \
     if [ "$ARCH" = "x86_64" ]; then NODE_ARCH="x64"; \
     elif [ "$ARCH" = "aarch64" ]; then NODE_ARCH="arm64"; \
-    else echo "Unsupported architecture: $ARCH" && exit 1; fi && \
+    else echo "不支持的架构: $ARCH" && exit 1; fi && \
     \
     # 构建下载地址
     NODE_DIR="node-v${NODE_VERSION}-linux-${NODE_ARCH}" && \
@@ -127,12 +128,13 @@ RUN ARCH=$(uname -m) && \
     pnpm config set ignore-scripts false && \
     \
     # 清理
-    rm -rf node.tar.xz && \
-    echo "--- Node.js installed ---" && \
+    rm -rf node.tar.xz /root/.npm /root/.cache/node && \
+    echo "--- Node.js 安装的 ---" && \
     node -v && npm -v && pnpm -v
 
-# 8 预安装 Go 工具链（版本已锁定）
-RUN echo "==> 预安装 Go 工具链（版本已锁定）..." \
+# 8. 预安装 Go 工具链
+# 同一层内 go install + 清缓存，避免 go-build 和 mod 缓存留在独立层里
+RUN echo "==> 预安装 Go 工具链..." \
     && go install github.com/sqlc-dev/sqlc/cmd/sqlc@${SQLC_VERSION} \
     && echo "==> sqlc 安装完成 (${SQLC_VERSION})" \
     && go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@${GOLANGCI_LINT_VERSION} \
@@ -152,9 +154,10 @@ RUN echo "==> 预安装 Go 工具链（版本已锁定）..." \
     && go install github.com/Kunde21/markdownfmt/v3/cmd/markdownfmt@${MARKDOWNFMT_VERSION} \
     && echo "==> markdownfmt 安装完成 (${MARKDOWNFMT_VERSION})" \
     && echo "--- Go 工具链安装完成 ---" \
-    && ls -l $GOPATH/bin
+    && ls -l $GOPATH/bin \
+    && rm -rf /root/.cache/go-build /go/pkg/mod
 
-# 10. 卸载不需要的工具，并清空所有 apt 缓存
+# 9. 卸载不需要的工具，并清空所有 apt 缓存
 RUN apt-get purge -y wget xz-utils \
     && apt-get autoremove -y \
     && apt-get clean \
