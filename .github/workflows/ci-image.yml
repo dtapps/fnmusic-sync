@@ -39,7 +39,7 @@ permissions:
   contents: read
   packages: write
 
-# 同一分支多次触发取消旧运行
+# 同一分支的多次运行取消旧的运行，避免排队浪费。
 concurrency:
   group: ci-image-${{ github.ref }}
   cancel-in-progress: true

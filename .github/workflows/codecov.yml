@@ -20,10 +20,10 @@ permissions:
   contents: read
   packages: read # 拉取 GHCR 上的 CI 镜像（公开镜像亦可匿名拉，写上以防仓库转私有）
 
-# 同一分支的多次 push 取消旧的运行，避免排队浪费。
+# 同一分支的多次运行不取消旧的运行。
 concurrency:
-  group: push-coverage-${{ github.ref }}
-  cancel-in-progress: true
+  group: codecov-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   coverage:

@@ -25,10 +25,7 @@ permissions:
   contents: write
   packages: read # 拉取 GHCR 上的 CI 镜像（公开镜像亦可匿名拉，写上以防仓库转私有）
 
-# 同一分支的多次运行取消旧的运行，避免排队浪费。
-# ⚠️ 但 release 这一步不能跟着被砍：它不是幂等的一次性动作（建 tag → 传 4 个附件 →
-# 写正文），取消在半路会留下一个只挂了两三个文件的 Release，比排队慢更贵。
-# 跟 GitLab 那份的 interruptible: false 是同一个理由。
+# 同一分支的多次运行不取消旧的运行。
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false

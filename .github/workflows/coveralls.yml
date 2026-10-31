@@ -25,9 +25,10 @@ permissions:
   contents: read
   packages: read # 拉取 GHCR 上的 CI 镜像
 
+# 同一分支的多次运行不取消旧的运行。
 concurrency:
   group: coveralls-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   coverage:

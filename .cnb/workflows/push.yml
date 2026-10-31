@@ -14,8 +14,8 @@
         - name: 安装所有依赖
           script: make deps
 
-        - name: 格式化（Go + 前端 + 配置 + 文档 + 脚本）
-          script: make format
+        # - name: 格式化（Go + 前端 + 配置 + 文档 + 脚本）
+        #   script: make format
 
         - name: 检查（Go + HTML/CSS/JS/TS/Svelte）
           script: make check
