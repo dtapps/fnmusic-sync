@@ -1,6 +1,8 @@
 # 打包 + 上传 + 发布
 # 由根 .gitlab-ci.yml 的 include 引入；workflow / stages / variables / default 都在根文件里。
-# 本 job 用根文件的 default.image（$CI_IMAGE）与 default.before_script，这里一概不覆盖。
+# 本 job 用根文件的 default.image（$CI_IMAGE，即统一预置镜像
+# registry.gitlab.com/dtapps/golang/fnpack:latest）与 default.before_script，这里一概不覆盖。
+# 工具链（Go / Node / pnpm / nfpm / fnpack / upx）都在该镜像里，别在这里临时装。
 #
 # 一个 job 走完（不像 CNB 那样拆 5 步）：拆开只会多几次 shell 启动和产物搬运，
 # 而镜像里 curl / jq / git 都有，构建产物当场就能上传并拼出 Release 正文。

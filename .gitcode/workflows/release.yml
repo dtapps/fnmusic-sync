@@ -2,9 +2,9 @@
 #
 # 和 GitHub / CNB / GitLab 是同一个角色 —— 构建方，不是转发方。
 # 差别只在环境来源：
-#   GitHub  用 ghcr.io/<repo>/ci:latest 预构建镜像（Go/Node/nfpm/fnpack 全烤好）
-#   CNB     用 .cnb/ci/Dockerfile 现场构建镜像
-#   GitLab  用 .gitlab/ci/Dockerfile 构建并推 registry
+#   GitHub  用 ghcr.io/dtapps/golang/fnpack:latest 统一预置镜像（Go/Node/nfpm/fnpack 全烤好）
+#   CNB     用 docker.cnb.cool/dtapp/golang/fnpack 统一预置镜像
+#   GitLab  用 registry.gitlab.com/dtapps/golang/fnpack:latest 统一预置镜像
 #   GitCode 没有「用自己的镜像跑 job」这个能力 → 每次现场装工具链
 # 现场安装的逻辑在 scripts/ci/build-linux-packages.sh，与 Gitee 共用同一份。
 #

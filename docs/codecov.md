@@ -17,7 +17,7 @@
 | 文件                                            | 作用                                                                                                                |
 |-------------------------------------------------|---------------------------------------------------------------------------------------------------------------------|
 | `.github/codecov.yml`                           | Codecov 规则：忽略 `internal/db`、`internal/datadb` 等 sqlc 生成代码、`flags`（go / node）、`status: informational` |
-| `.github/workflows/coverage.yml`                | GitHub Actions 流水线：装依赖 → 跑 Go/前端测试 → 构建前端 → 上传覆盖率 / 测试结果                                   |
+| `.github/workflows/codecov.yml`                 | GitHub Actions 流水线：装依赖 → 跑 Go/前端测试 → 构建前端 → 上传覆盖率 / 测试结果                                   |
 | `cmd/frontend/vite.config.ts`                   | 条件加载 `@codecov/vite-plugin`（仅当 `CODECOV_TOKEN` 存在时实例化）                                                |
 | `cmd/frontend/scripts/vitest-json-to-junit.mjs` | 零依赖脚本：Vitest JSON → JUnit XML                                                                                 |
 | `cmd/frontend/package.json`                     | `devDependencies`：`@codecov/vite-plugin` 等                                                                        |

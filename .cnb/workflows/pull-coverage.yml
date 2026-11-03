@@ -6,7 +6,7 @@
     - runner:
         tags: cnb:arch:amd64
       docker:
-        build: .cnb/ci/Dockerfile # 使用自定义 Dockerfile
+        image: docker.cnb.cool/dtapp/golang/fnpack
         volumes:
           - /root/.cache/go-build:copy-on-write # Go 构建缓存 - 加速编译
           - /root/.local/share/pnpm/store:copy-on-write # pnpm 全局存储 - 加速前端依赖安装
@@ -50,7 +50,7 @@
     - runner:
         tags: cnb:arch:amd64
       docker:
-        build: .cnb/ci/Dockerfile # 使用自定义 Dockerfile
+        image: docker.cnb.cool/dtapp/golang/fnpack
         volumes:
           - /root/.cache/go-build:copy-on-write # Go 构建缓存 - 加速编译
           - /root/.local/share/pnpm/store:copy-on-write # pnpm 全局存储 - 加速前端依赖安装

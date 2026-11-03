@@ -16,14 +16,13 @@
 
 ## 2. 涉及文件清单
 
-| 文件                              | 作用                                                                                                                |
-|-----------------------------------|---------------------------------------------------------------------------------------------------------------------|
-| `.github/workflows/coveralls.yml` | 唯一入口：装依赖 → 跑 Go/前端测试 → 分别上报 `flag=go` / `flag=node`                                                |
-| `.github/ci/Dockerfile`           | 提供 `ghcr.io/<repo>/ci:latest` 镜像（**与 coverage.yml 同一个**），已预装 `gotestsum v1.13.0`、`goveralls v0.0.12` |
-| `.github/workflows/ci-image.yml`  | 构建并推送上面的镜像；首次跑 coveralls.yml 前必须先执行一次                                                         |
-| `Makefile`（`deps` 目标）         | `go mod tidy` + `go mod download` + `pnpm --dir cmd/frontend install --frozen-lockfile`                             |
-| `coverage.out`                    | Go 原始覆盖率（路径带模块前缀）                                                                                     |
-| `cmd/frontend/coverage/lcov.info` | 前端覆盖率产物（`pnpm test:coverage` 生成）                                                                         |
+| 文件                              | 作用                                                                                                                                                             |
+|-----------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `.github/workflows/coveralls.yml` | 唯一入口：装依赖 → 跑 Go/前端测试 → 分别上报 `flag=go` / `flag=node`                                                                                             |
+| `dtapps/golang/fnpack` 镜像       | 提供 `ghcr.io/dtapps/golang/fnpack:latest`（**与 codecov.yml 同一个**），已预装 `gotestsum`、`gojq`、`goveralls` 等；本仓库不自建，见 [ci-image.md](ci-image.md) |
+| `Makefile`（`deps` 目标）         | `go mod tidy` + `go mod download` + `pnpm --dir cmd/frontend install --frozen-lockfile`                                                                          |
+| `coverage.out`                    | Go 原始覆盖率（路径带模块前缀）                                                                                                                                  |
+| `cmd/frontend/coverage/lcov.info` | 前端覆盖率产物（`pnpm test:coverage` 生成）                                                                                                                      |
 
 > **没有 `.github/coveralls.yml`**：与 Codecov 的 `.github/codecov.yml` 不同，Coveralls 的阈值 / PR 注释 / 徽章都在 Coveralls 后台仓库设置里配，仓库内不需要配置文件。
 
@@ -31,7 +30,7 @@
 
 ### 3.1 Go 覆盖率：goveralls
 
-- 与 Codecov **完全相同的口径**（`.github/codecov.yml` 与 `coverage.yml` 一致）：
+- 与 Codecov **完全相同的口径**（`.github/codecov.yml` 与 `codecov.yml` 一致）：
 
   ```
   gotestsum --junitfile go-test-report.xml -- -vet=off -coverpkg=$(go list ./... | grep -vE '/(db|datadb)$' | paste -sd, -) -coverprofile=coverage.out ./...
@@ -61,7 +60,7 @@
   - **`-service=github`**：让 goveralls 从 `GITHUB_*` 环境变量取分支 / commit / PR 元数据。
   - **`-flagname=go`**：与前端 `node` 配对，合并进同一 build。
 
-- **不要在工作流里 `go install goveralls`**：镜像已预装 `GOVERALLS_VERSION=v0.0.12`。升级改 Dockerfile 的 ARG，重推镜像；`go install ...@latest` 会拖慢 CI 并破坏可重现性。
+- **不要在工作流里 `go install goveralls`**：镜像已预装。版本由 `dtapps/golang/fnpack` 的 `GOVERALLS_VERSION` 钉死，升级在那边改 ARG 后重推镜像；`go install ...@latest` 会拖慢 CI 并破坏可重现性。
 - `gotestsum` 的 `go-test-report.xml` 只用于命令对齐 / 本地排查，Coveralls **不接收** JUnit（那是 Codecov Test Analytics 用的）。
 
 ### 3.2 前端覆盖率：coveralls action
@@ -103,7 +102,7 @@ Coveralls 以 **build** 为单位聚合报告，go / node 两份数据必须落�
 
 ## 5. 运行环境
 
-- `runs-on: ubuntu-latest` + `container: ghcr.io/${{ github.repository }}/ci:latest`，**与 `coverage.yml`（Codecov）完全同一个镜像**。
+- `runs-on: ubuntu-latest` + `container: ghcr.io/dtapps/golang/fnpack:latest`，**与 `codecov.yml`（Codecov）完全同一个镜像**。
 - 镜像基于 `golang:1.27.3-trixie`，内置 Node / pnpm，以及钉好版本的 Go 工具链：
 
 | 工具      | 版本       | 来源                                |
@@ -114,7 +113,7 @@ Coveralls 以 **build** 为单位聚合报告，go / node 两份数据必须落�
 
 - 因此工作流**不需要** `setup-go` / `setup-node` / `apt-get install`。
 - **本仓库非 Wails**：镜像不含 GTK/WebKit，Go 测试也不需要 CGO 链接系统库。
-- 镜像由 `ci-image.yml` 推送，**首次运行前必须先跑一次让镜像存在**，否则容器起不来。
+- 镜像由 `dtapps/golang/fnpack` 统一维护并推送到 GHCR，**首次运行不需要任何准备**（本仓库不再有 `ci-image.yml`）。
 
 ## 6. 验证与排错
 
@@ -143,7 +142,7 @@ goveralls -coverprofile=coverage.out -service=github -repotoken="$COVERALLS_REPO
 
 ## 7. 与 Codecov 的关系（同一口径，两条通道）
 
-| 维度          | Codecov（`coverage.yml` + `.github/codecov.yml`）                         | Coveralls（`coveralls.yml`）                                                           |
+| 维度          | Codecov（`codecov.yml` + `.github/codecov.yml`）                          | Coveralls（`coveralls.yml`）                                                           |
 |---------------|---------------------------------------------------------------------------|----------------------------------------------------------------------------------------|
 | Go 覆盖率命令 | 同一条（`./...` 排除 `db`/`datadb`）                                      | **相同**                                                                               |
 | flag 命名     | `go` / `node`                                                             | `go` / `node`（相同）                                                                  |
@@ -159,6 +158,6 @@ goveralls -coverprofile=coverage.out -service=github -repotoken="$COVERALLS_REPO
 ## 8. 注意事项
 
 - `flag` 名一旦定了别乱改，改了等于新建一条趋势线，历史会断档。
-- goveralls 版本由 `.github/ci/Dockerfile` 的 `GOVERALLS_VERSION`（当前 `v0.0.12`）钉死；升级改 ARG 后重推镜像，**不要**在工作流里 `go install`。
+- goveralls 版本由 `dtapps/golang/fnpack` 的 `GOVERALLS_VERSION` 钉死；升级改那边的 ARG 后重推镜像，**不要**在工作流里 `go install`。
 - 文档命名：`docs/*-*-*.md`（双横线）被 `.gitignore` 忽略，本文档用单横线（`docs/coveralls.md`）。
 - **Go 端可能为 0%**：本仓库 `.gitignore` 忽略 `*_test.go`，GitHub Actions checkout 后无 Go 测试可跑，`go test` / `gotestsum` 仍会产出全 0% 的 `coverage.out`（不会失败），Coveralls 收到 0%。要拿到真实 Go 数据，需先把测试文件纳入 git（从 `.gitignore` 移除 `*_test.go` 或 `git add -f`）。前端不受影响（测试已跟踪）。

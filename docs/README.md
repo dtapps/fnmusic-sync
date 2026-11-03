@@ -46,8 +46,8 @@
 ## 历史与专题文档
 
 - [ai.md](ai.md)：最早的需求与设计文档，保留作为设计溯源。其中一部分是**未落地的早期方案**（`--config` / `--state` / `--log-dir` 参数、`state.yaml`、`server.listen_socket` 可配置、顶层 `providers` 等），实际行为以本目录其余文档与源码为准。
-- [ci-image.md](ci-image.md)：CNB 与 GitHub 双平台 CI 镜像的分发模型与工具版本对应关系。
-- [gitlab-ci.md](gitlab-ci.md)：GitLab 流水线结构。
+- [ci-image.md](ci-image.md)：统一 CI 镜像 `dtapps/golang/fnpack` 的三处 registry 地址、工具清单与升级流程。
+- [gitlab-ci.md](gitlab-ci.md)：GitLab 流水线结构、统一的 CI 镜像、发布与排障。
 - [coverage-go.md](coverage-go.md)、[coverage-node.md](coverage-node.md)、[codecov.md](codecov.md)、[coveralls.md](coveralls.md)：覆盖率采集与上报。
 
 ## 文档约定

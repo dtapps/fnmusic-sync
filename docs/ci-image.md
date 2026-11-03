@@ -1,99 +1,71 @@
-# CI 镜像说明（fnmusic-sync）
+# CI 镜像（统一镜像 dtapps/golang/fnpack）
 
-本文件对比**两份互为镜像的 CI 环境定义**：`.cnb/ci/Dockerfile`（CNB 用）与 `.github/ci/Dockerfile`（GitHub Actions 用）。二者基于同一个基础镜像、装同一批工具、版本号逐一对应，**只在镜像的分发方式和网络加速上有差异**。改动任何一版的工具版本，必须同步改另一版。
+本文件说明各平台 CI 用的**同一个镜像**：镜像由 `dtapps/golang/fnpack` 项目统一构建、按平台推到各自的 registry，本仓库只消费，**仓库内不再有任何 CI Dockerfile**。
 
-仓库里还有第三份 `.gitlab/ci/Dockerfile`（GitLab 侧自建自存，工具版本同样要跟这两版对齐，但它多两行定时重建用的缓存失效锚点）。它的构建与分发模型见 [gitlab-ci.md](gitlab-ci.md) §4。
+`.cnb/ci/Dockerfile`、`.github/ci/Dockerfile`、`.gitlab/ci/Dockerfile` 与 `.github/workflows/ci-image.yml` 都已删除（`chore(ci): 统一改用共享 CI 镜像 fnpack，移除各仓库自建 Dockerfile`）。历史版本可从 git 历史取回。
 
-## 1. 两种分发模型（最重要的差异）
+## 1. 三处地址与消费方
 
-| 维度     | CNB（`.cnb/ci/Dockerfile`）                    | GitHub（`.github/ci/Dockerfile`）                                     |
-|----------|------------------------------------------------|-----------------------------------------------------------------------|
-| 分发方式 | **每次运行时构建**，由 CNB 平台自动完成并缓存  | **预构建推送**到 `ghcr.io/<owner>/<repo>/ci:latest`，复用             |
-| 构建声明 | 各工作流 `docker: build: .cnb/ci/Dockerfile`   | `.github/workflows/ci-image.yml` 手动触发构建                         |
-| 引用方式 | 工作流声明 `build:` 后，步骤直接在该容器内执行 | 工作流 `container: image: ghcr.io/${{ github.repository }}/ci:latest` |
-| 多架构   | 由 CNB 运行环境决定                            | `linux/amd64` 原生 + `linux/arm64` QEMU 模拟（buildx）                |
-| 首次使用 | 无需准备，随工作流自动构建                     | **必须先手动跑一次 `ci-image.yml`**，否则容器拉不到镜像               |
+| 平台            | 镜像地址                                          | 在哪里引用                                                                                       |
+|-----------------|---------------------------------------------------|--------------------------------------------------------------------------------------------------|
+| CNB             | `docker.cnb.cool/dtapp/golang/fnpack`             | `.cnb/workflows/*.yml` 的 `docker.image`（push / release / pull-coverage / push-coverage）       |
+| GitHub          | `ghcr.io/dtapps/golang/fnpack:latest`             | `push.yml` / `codecov.yml` / `coveralls.yml` / `release.yml` 的 `container.image`                |
+| GitLab          | `registry.gitlab.com/dtapps/golang/fnpack:latest` | `.gitlab-ci.yml` 的 `variables.CI_IMAGE` → `default.image`（见 [gitlab-ci.md](gitlab-ci.md) §4） |
+| GitCode / Gitee | 无                                                | 平台没有「用自定义镜像跑 job」的能力 → 每次现场装工具链（`scripts/ci/build-linux-packages.sh`）  |
 
-> 为什么 GitHub 侧要预构建：每次 `push.yml` / `coverage.yml` / `coveralls.yml` 都现装一遍 Go 工具链（`go install` 编译 golangci-lint 等大件）会拖慢每次 CI 且不可重现；CNB 平台自己做了按需构建 + 缓存，无需额外工作流。
+三个地址指向**同一份工具链**，只是分发渠道不同：CNB 用自家 registry（国内链路快），GitHub / GitLab 用平台自带 registry（同实例拉取不需要额外凭据）。
 
-### 消费方清单
+## 2. 镜像里有什么
 
-- **CNB**：`.cnb/workflows/` 里 `push.yml`、`release.yml`、`pull-coverage.yml`、`push-coverage.yml` 共 6 处 `build: .cnb/ci/Dockerfile`。
-- **GitHub**：`push.yml`、`coverage.yml`（Codecov）、`coveralls.yml`（Coveralls）三个工作流的 `container:`。
-- **GitLab**：`.gitlab-ci.yml` 的 `default.image`（`check-image` → `build-image` → `merge-image` 用 `.gitlab/ci/Dockerfile` 自建，存在 GitLab 自己的 registry；消费方只有 `package-release`）。
+基础镜像 `golang:1.27.3-trixie`，额外预装：
 
-> GitLab 这份 Dockerfile 比另外两版多两行（`ARG CACHE_BUST` + 一行 `RUN echo`），是给定时流水线丢 layer cache 用的，详见 [gitlab-ci.md](gitlab-ci.md) §4.1。**同步工具版本时不要把这两行带过去**——CNB / GitHub 没有对应的构建参数，多出来只会白白失效一次缓存。
+| 类别     | 工具                                                                                          | 谁用                                        |
+|----------|-----------------------------------------------------------------------------------------------|---------------------------------------------|
+| 运行时   | Node.js、pnpm                                                                                 | 前端构建、`make deps`                       |
+| 打包     | nfpm、fnpack、UPX                                                                             | deb / fpk 打包（`make package-linux-*`）    |
+| Go 工具  | sqlc、golangci-lint、govulncheck、shfmt、dockerfmt、yamlfmt、gojq、sql-formatter、markdownfmt | `make tool-deps` 的全部内容，无需 CI 现场装 |
+| 测试上报 | gotestsum、gocover-cobertura                                                                  | Codecov 的 JUnit / Cobertura 报告           |
+| 基础命令 | bash、make、git、curl、jq                                                                     | 流水线脚本本身                              |
 
-## 2. 工具清单（两版一致，版本号逐项对应）
+**版本以 `dtapps/golang/fnpack` 项目的 Dockerfile 为准**，本仓库不再声明 `ARG`。要查当前版本：
 
-基础镜像 `golang:1.27.3-trixie`（自带 Go 1.27 + git），额外安装：
+```bash
+docker run --rm --platform linux/amd64 ghcr.io/dtapps/golang/fnpack:latest \
+  bash -c 'go version && node -v && pnpm -v && nfpm --version && fnpack --help >/dev/null && golangci-lint version'
+```
 
-| 工具             | 版本       | 用途                                                                    |
-|------------------|------------|-------------------------------------------------------------------------|
-| UPX              | `5.2.1`    | 二进制压缩（release 打包用）                                            |
-| nfpm             | `2.48.0`   | 打包 deb/rpm/apk                                                        |
-| fnpack           | `1.2.3`    | 飞牛 fnOS fpk 打包                                                      |
-| Node.js          | `26.12.1`  | 前端构建                                                                |
-| pnpm             | `12.15.0`  | 前端包管理                                                              |
-| sqlc             | `v1.31.1`  | 生成 `internal/db`/`datadb`                                             |
-| golangci-lint    | `v2.15.0`  | Go lint（`make check`）                                                 |
-| govulncheck      | `v1.9.0`   | Go 漏洞扫描                                                             |
-| shfmt            | `v3.14.1`  | shell 格式化                                                            |
-| dockerfmt        | `v0.5.4`   | Dockerfile 格式化                                                       |
-| yamlfmt          | `v0.21.0`  | YAML 格式化                                                             |
-| gojq             | `v0.12.19` | JSON 处理                                                               |
-| go-sql-formatter | `v15.8.2`  | SQL 格式化                                                              |
-| markdownfmt      | `v3.1.0`   | Markdown 格式化（`Kunde21/markdownfmt/v3`，shurcooL 原版的维护中 fork） |
+## 3. 升级工具版本
 
-Go 工具经 `go install` 装到 `/go/bin`（`GOPATH=/go`，已在 PATH）。
+1. 在 `dtapps/golang/fnpack` 项目里改 Dockerfile 的 `ARG`。
+2. 重新构建并推到三个 registry（CNB / GHCR / GitLab Registry），tag 仍是 `latest`。
+3. **本仓库不需要改代码**：下一次流水线自动拉新的 `latest`。`latest` 是唯一 tag，没有 tag 级回滚手段——回滚 = 重新推一次旧版本。
 
-### 仅 GitHub 版有的工具
+各平台生效时机：
 
-| 工具      | 版本      | 用途                                                       |
-|-----------|-----------|------------------------------------------------------------|
-| gotestsum | `v1.13.0` | 跑测试 + JUnit 报告（`coverage.yml` / `coveralls.yml` 用） |
-| goveralls | `v0.0.12` | 上报 Coveralls（`coveralls.yml` 用）                       |
-
-> CNB 侧不需要它们：`.cnb/workflows/*-coverage.yml` 直接用 `go test -coverprofile=coverage.out`，覆盖率上报走 CNB 平台自己的流程，不经 gotestsum / goveralls。
-
-### 仅 CNB 版有的配置
-
-- **网络加速**（CNB 运行环境在国内，GitHub 侧不需要）：
-  - `ARG GITHUB_MIRROR="https://files.m.daocloud.io"`：UPX / nfpm 等从 GitHub Releases 下载走镜像。
-  - `GOPROXY=https://mirrors.cloud.tencent.com/go/,direct`：`go install` 拉模块。
-  - APT 源替换 `deb.debian.org` → `mirrors.cloud.tencent.com`。
-  - npm/pnpm registry 替换为腾讯云源，且 `pnpm config set ignore-scripts false`。
-- `GO111MODULE=on` 显式声明。
-
-## 3. 升级工具版本的流程
-
-1. **两份 Dockerfile 同步改**：`.cnb/ci/Dockerfile` 与 `.github/ci/Dockerfile` 对应的 `ARG`（两边的版本块逐一对应，找同名的改）。
-2. **触发重建**：
-   - GitHub：手动跑一次 `ci-image.yml`，推送新的 `ghcr.io/.../ci:latest`。**下一次 CI 才会用新镜像**；`latest` 是唯一 tag，无回滚手段，回滚 = 手动重跑旧版本的 `ci-image.yml`。
-   - CNB：无需操作，下次运行自动重建（平台有构建缓存）。
-   - GitLab：改动推上默认分支即自动重建（`workflow.rules` 的 `changes` 命中 `.gitlab/ci/Dockerfile`）；不推代码只想重刷，Run pipeline 勾 `CI_FORCE_REBUILD_IMAGE=true`。另外那条每周定时流水线会自己重建一次（见 gitlab-ci.md §4.1）。
-3. **同步检查工作流**：若涉及行为变化（如 goveralls 参数、gotestsum 的 JUnit 路径），检查 `coverage.yml` / `coveralls.yml` / `.cnb/workflows/*-coverage.yml` 是否需要跟进。
-
-> markdownfmt 用 `Kunde21/markdownfmt/v3`（shurcooL 原版已停更，fork 支持 GFM 全语法）；模块路径带 `/v3`，安装路径是 `.../v3/cmd/markdownfmt`。
-
-> gotestsum 的历史教训：`v1.12.0` 在 Go 1.27 下编译失败，必须钉 `v1.13.0`。升级前先在本地 `go install <path>@<new-version>` 验证编译通过。
+| 平台   | 生效方式                                                   |
+|--------|------------------------------------------------------------|
+| CNB    | 下次运行自动拉新镜像（平台侧有镜像缓存，可能要等缓存过期） |
+| GitHub | 下次 workflow 运行 `container.image` 拉新镜像              |
+| GitLab | 下次 Run pipeline 拉新镜像（`$CI_IMAGE` 固定为 `latest`）  |
 
 ## 4. 与运行环境的已知坑
 
-- **容器内 git 的 dubious ownership**：GHA `container:` 挂载的 workspace 属宿主 uid，git 2.35+ 会拒绝操作。这正是 `Makefile` 的 `BUILD_CMD` 加 `-buildvcs=false` 的原因（VCS stamping 在容器内拿不到 git 状态会 exit 128）。两份镜像都装了 git，此坑两边都适用。
-- **arm64 用 QEMU 模拟**（仅 GitHub 侧 `ci-image.yml`）：构建慢属正常，别因为超时去砍架构——`build-linux-arm64` 产物要在真实 arm64 环境验证。
-- **镜像内没有 GTK/WebKit**：本仓库非 Wails 应用，Go 测试不需要 CGO 链接系统库，不要照抄其他仓库往 Dockerfile 里加 `libwebkitgtk`。
-- **清理层**：两份 Dockerfile 末尾都 `apt-get purge wget xz-utils` 并清缓存，控制镜像体积；新增依赖时注意是否也要进清理名单。
+- **`entrypoint` 必须覆盖**：镜像 `CMD` 是 `bash`。GitHub 侧 `container:` 与 GitLab 侧 `default.image` 都显式写了 `entrypoint: ['']`，删了它 runner 起的 shell 会被镜像接管，`script` 一行都跑不出来。
+- **只出 linux/amd64**：Apple Silicon 上 `docker pull` 没问题，`docker run` 会 `exec format error`，要带 `--platform linux/amd64`（走 QEMU，慢）。CI 全跑在 amd64 runner 上，不受影响。
+- **私有镜像要授权**：GitLab Registry / GHCR 若是私有项目，得把消费方仓库加进 Token Access，否则拉镜像直接 `unauthorized`。
+- **容器内 git 的 dubious ownership**：workspace 属宿主 uid，git 2.35+ 会拒绝操作。这正是 `Makefile` 的 `BUILD_CMD` 加 `-buildvcs=false` 的原因，也是 GitLab 根文件里有 `git config --global --add safe.directory` 的原因。
+- **镜像内没有 GTK/WebKit 的额外依赖**：本仓库非 Wails 应用，Go 测试不需要 CGO 链接系统库，不要照抄其他仓库的 `libwebkitgtk`。
+- **不要在流水线里 `go install` 工具**：镜像已预装，现场装既拖慢 CI 又破坏可重现性。缺工具就去 `dtapps/golang/fnpack` 里补。
 
 ## 5. 本地验证镜像
 
 ```bash
-# 构建本地镜像（用 GitHub 版做示例；CNB 版同理）
-docker build -t fnmusic-sync-ci -f .github/ci/Dockerfile .github/ci
+# 拉统一镜像（Apple Silicon 记得加 --platform）
+docker pull --platform linux/amd64 ghcr.io/dtapps/golang/fnpack:latest
 
 # 验证关键工具可用
-docker run --rm fnmusic-sync-ci bash -c \
-  'go version && node -v && pnpm -v && sqlc version && golangci-lint version && gotestsum --version'
+docker run --rm --platform linux/amd64 ghcr.io/dtapps/golang/fnpack:latest bash -c \
+  'go version && node -v && pnpm -v && sqlc version && golangci-lint version && nfpm --version && fnpack --help >/dev/null && echo ok'
 ```
 
-注意构建上下文是 `.github/ci`（或 `.cnb/ci`）目录本身，不是仓库根——两份 Dockerfile 都没有 COPY 仓库文件，上下文给目录即可。
+镜像不需要把仓库挂进去：它没有任何 `COPY` 仓库文件，`/workspace` 由各平台在运行时挂载/检出。

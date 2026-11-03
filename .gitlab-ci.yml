@@ -2,7 +2,13 @@
 #
 #   手动触发 → 校验/归一化版本号 → make package-linux-all 产出 deb/fpk → 建 Release 挂附件
 #
-# 自成一套：GitLab 的 runner、GitLab registry 里由 .gitlab/ci/Dockerfile 构建的镜像、产物留在 GitLab。
+# 自成一套：GitLab 的 runner、GitLab 的 Release 与通用包仓库，产物留在 GitLab。
+#
+# CI 镜像：统一用预置镜像 registry.gitlab.com/dtapps/golang/fnpack:latest
+#   - 工具链（Go / Node / pnpm / nfpm / fnpack / upx 等）全在该镜像里，本仓库不再自建镜像
+#   - 原先「check-image → build-image → merge-image」那套自建方案已下线，
+#     .gitlab/workflows/image.yml 与 .gitlab/ci/Dockerfile 已删除
+#   - 换镜像不必改代码：用项目级变量覆盖 CI_IMAGE 即可
 #
 # ⚠️ 本文件不再跑覆盖率：GitLab 内建 coverage（百分比 + Cobertura）与其它平台口径不同
 # （语句 vs 行），也无消费方，多跑一遍纯属白烧 compute minutes。覆盖率见 docs/coverage-*.md。
@@ -10,9 +16,7 @@
 # 文件分工（include 在流水线创建时被展开合并成一份配置，没有运行时模块加载）：
 #   本文件（必须在仓库根，GitLab 只认这个路径）
 #                          workflow / stages / variables / default —— 全局只此一处
-#   .gitlab/workflows/image.yml    CI 镜像：check-image → build-image → merge-image
 #   .gitlab/workflows/release.yml  打包 + 上传 + 发布：package-release
-#   .gitlab/ci/Dockerfile         CI 镜像本身（release 的所有工具链都烤在里面）
 #
 # 入口固定在根 .gitlab-ci.yml：GitLab 允许在项目设置里改这个路径，但别改——设置藏在网页里，
 # 换个 fork 或镜像仓库就失效，读仓库的人根本看不出流水线从哪来。
@@ -26,62 +30,31 @@
 #       预发布把版本号写成 1.2.3-rc.1（或 -beta.1 / -alpha.1），没有后缀就是正式版。
 #       没有 PRE_RELEASE 变量了：预发布只由版本号后缀决定（规则只有一份，在
 #       scripts/ci/resolve-prerelease.sh）。
-#       刷镜像：Run pipeline 勾 CI_FORCE_REBUILD_IMAGE=true（VERSION 留空）；平时不用管定时那条。
-#
-# 两道闸，都在本文件里（下层文件不要自己再判一遍，两处判断一定会漂）：
-#   1. include:rules —— 镜像这组 job 进不进入流水线。不匹配时 image.yml **根本不被引入**，
-#      那三个 job 连定义都不存在。这是唯一能在配置层面把 job 彻底挡掉的地方
-#      （写在 job 的 rules 上只会建出流水线再把 job 过滤掉，那就撞 `jobs config should
-#      contain at least one visible job` 了）
-#   2. workflow:rules —— 这条流水线存不存在
-#
-# 结果就是「镜像只在需要动它的时候才出现」：
-#   动过 .gitlab/ci/Dockerfile 的 push / 定时流水线 / 手工勾 force → 有那三个 job
-#   Run pipeline 发布（没勾 force）→ 只有 package-release，镜像 stage 一个 job 都没有
 include:
-  - local: .gitlab/workflows/image.yml
-    rules:
-      # push 的 changes 用 $CI_COMMIT_BEFORE_SHA 相比；新分支首推 / force push 时
-      # GitLab 视为「全部文件都变了」→ 引入，失败方向安全
-      - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
-        changes:
-          paths:
-            - .gitlab/ci/Dockerfile
-      # 只认默认分支上的定时：别的分支跑起来会把那个分支的 Dockerfile 推成 ci:latest
-      - if: $CI_PIPELINE_SOURCE == "schedule" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
-      # 手工刷镜像的唯一入口：勾了 CI_FORCE_REBUILD_IMAGE 才会进流水线
-      - if: $CI_PIPELINE_SOURCE == "web" && $CI_FORCE_REBUILD_IMAGE == "true"
   - local: .gitlab/workflows/release.yml
 
 # 什么时候创建流水线——不匹配时流水线根本不存在，不会出现「有流水线但 job 全被过滤」。
 #
-#   1. 默认分支 push，且这次 push 动过 .gitlab/ci/Dockerfile → 只做镜像维护
-#   2. 定时流水线（Pipeline schedules）                        → 定期刷基础镜像的安全补丁
-#   3. Run pipeline：填了 VERSION（发布）或勾了 force（刷镜像）→ 至少有一件事可做才建
+#   只有 Run pipeline 且填了 VERSION（发布）才建：
+#   镜像已改为统一的预置镜像，不再需要「Dockerfile 变了就重建镜像」和「定时刷基础镜像」，
+#   所以 push / 定时这两条入口一并去掉。
 #
-# 其它（MR / 其它分支 / tag / 外部 API）一律不建。
-# Run pipeline 又留空 VERSION 又没勾 force 时什么都不建——本来也没有任何事要做，
+# 其它（push / 定时 / MR / 其它分支 / tag / 外部 API）一律不建。
+# Run pipeline 留空 VERSION 时什么都不建——本来也没有任何事要做，
 # 建出来只会是一条零 job 的流水线然后报错。
 workflow:
   rules:
-    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
-      changes:
-        paths:
-          - .gitlab/ci/Dockerfile
-    - if: $CI_PIPELINE_SOURCE == "schedule" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
     - if: $CI_PIPELINE_SOURCE == "web" && $VERSION != ""
-    - if: $CI_PIPELINE_SOURCE == "web" && $CI_FORCE_REBUILD_IMAGE == "true"
     - when: never
 
 stages:
-  - image
   - release
 
 variables:
   # Run pipeline 页面会把带 description 的变量列成表单，方便手填
   VERSION:
     value: ''
-    description: '要发布的版本号，可带或不带 v 前缀（如 0.1.31 / v0.1.31）。留空 = 不发布；此时只有勾了 CI_FORCE_REBUILD_IMAGE 才有事做。'
+    description: '要发布的版本号，可带或不带 v 前缀（如 0.1.31 / v0.1.31）。留空 = 不发布，也不建流水线。'
   # 二进制内嵌的构建来源标识（buildinfo.RepoSource）。
   # updater 只区分 github 与其它：非 github 一律走 CNB 升级链路，所以 gitlab 与 cnb 运行时等价，
   # 但 UI「构建来源」会如实显示 gitlab。要支持从 GitLab API 升级需另改 internal/updater。
@@ -93,17 +66,8 @@ variables:
   GOMODCACHE: $CI_PROJECT_DIR/.cache/go-mod
   GOBIN: $CI_PROJECT_DIR/.cache/bin
   PNPM_STORE_DIR: $CI_PROJECT_DIR/.cache/pnpm-store
-  # Run pipeline 页面可勾。它同时是两件事的开关：把 image.yml 带进流水线 + 强制重建
-  # （镜像这些 job 平时根本不进流水线，见文件顶部的 include:rules）
-  CI_FORCE_REBUILD_IMAGE:
-    value: ''
-    description: '勾 true = 把镜像维护的 3 个 job 带进这次 Run pipeline 并强制重建（首次接入、镜像被删、刷基础镜像时用）'
-  # CI 镜像：GitLab 自己构建、存在 GitLab 自己的 registry 里
-  #   - 构建：check-image 判要不要建 → build-image（amd64 原生）→ merge-image（指向 ci:latest）
-  #   - 只出 amd64：流水线全跑在 amd64 runner 上，arm64 镜像没有消费方
-  #   - 消费：release 直接拉这个地址
-  #   - 换 registry 不必改代码：用项目级变量覆盖本变量即可
-  CI_IMAGE: $CI_REGISTRY_IMAGE/ci:latest
+  # 统一 CI 镜像：在 dtapps/golang/fnpack 项目里维护，所有 job 都拉这一个
+  CI_IMAGE: registry.gitlab.com/dtapps/golang/fnpack:latest
   # 发布要跑 git describe / git log（CHANGELOG 取上一个 tag..HEAD），默认浅克隆拿不到 tag
   GIT_DEPTH: '0'
 

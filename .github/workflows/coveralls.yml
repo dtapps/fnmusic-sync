@@ -33,9 +33,9 @@ concurrency:
 jobs:
   coverage:
     runs-on: ubuntu-latest
-    # 复用预构建 CI 镜像
+    # 直接使用统一共享的 CI 镜像（由 dtapps 统一维护并推送，原 ci-image.yml 已删除）
     container:
-      image: ghcr.io/${{ github.repository }}/ci:latest
+      image: ghcr.io/dtapps/golang/fnpack:latest
     env:
       COVERALLS_REPO_TOKEN: ${{ secrets.COVERALLS_REPO_TOKEN }}
     steps:

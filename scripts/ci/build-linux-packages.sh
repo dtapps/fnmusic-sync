@@ -36,8 +36,10 @@ log() { printf '\n\033[1m>>> %s\033[0m\n' "$*"; }
 die() { printf '\n\033[1;31m错误：%s\033[0m\n' "$*" >&2; exit 1; }
 have() { command -v "$1" >/dev/null 2>&1; }
 
-# 与 .github/ci/Dockerfile / .cnb/ci/Dockerfile / .gitlab/ci/Dockerfile 的 ARG 保持一致。
-# 改版本时四处一起改，否则四个平台打出来的包装的不是同一个 Go。
+# 与 .github/ci/Dockerfile / .cnb/ci/Dockerfile 的 ARG 保持一致。
+# 改版本时几处一起改，否则各平台打出来的包装的不是同一个 Go。
+# （GitLab 侧不再有仓库内 Dockerfile：CI 统一用预置镜像
+#   registry.gitlab.com/dtapps/golang/fnpack:latest，工具版本由 dtapps/golang/fnpack 维护。）
 GO_VERSION="${GO_VERSION:-1.27.3}"
 NODE_MIN_MAJOR="${NODE_MIN_MAJOR:-20}"   # vite 8 要求 ^20.19.0 || >=22.12.0
 NODE_MIN_MINOR="${NODE_MIN_MINOR:-19}"

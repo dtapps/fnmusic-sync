@@ -328,7 +328,6 @@ format-docker:
 	@echo "[Format] 使用 dockerfmt 格式化 Dockerfile..."
 	@find .cnb -type f -name "Dockerfile*" -exec dockerfmt -w {} + || { echo "❌ dockerfmt 格式化失败"; exit 1; }
 	@find .github -type f -name "Dockerfile*" -exec dockerfmt -w {} + || { echo "❌ dockerfmt 格式化失败"; exit 1; }
-	@find .gitlab -type f -name "Dockerfile*" -exec dockerfmt -w {} + || { echo "❌ dockerfmt 格式化失败"; exit 1; }
 	@echo "[Format] Dockerfile 格式化完成（dockerfmt）。"
 
 # 检查（Go + HTML/CSS/JS/TS/Svelte + Linux 打包：含 fpk 与无 fpk 两种）
@@ -693,9 +692,9 @@ package-linux: package-linux-all
 
 # ==================== 更新 / 拉取 ====================
 
-# 拉取所有远程最新（先 CNB，后 GitHub 镜像）然后强制推送
+# 拉取所有远程最新（先 CNB，后 GitHub 镜像）然后推送
 .PHONY: sync
-sync: sync-cnb sync-github push-force 
+sync: sync-cnb sync-github push 
 
 # 拉取 CNB 最新并以 fast-forward 合并（保留本地未提交改动）
 .PHONY: sync-cnb

@@ -6,29 +6,29 @@
 
 ## 环境要求
 
-版本号不是拍脑袋写的，全部来自仓库里的三处硬证据：`go.mod`、`cmd/frontend/package.json`、CI 镜像 `Dockerfile` 的 `ARG`。
+版本号不是拍脑袋写的，全部来自两处仓库内的硬证据 `go.mod`、`cmd/frontend/package.json`，加上 CI 统一镜像 `dtapps/golang/fnpack` 的 `ARG`（该 Dockerfile 不在本仓库，见 [ci-image.md](ci-image.md)）。
 
-| 组件   | 仓库内要求的版本               | 依据                                                                           |
-|--------|--------------------------------|--------------------------------------------------------------------------------|
-| Go     | 1.27.3                         | `go.mod` 的 `go 1.27.3`；CI 基础镜像 `golang:1.27.3-trixie`                    |
-| Node   | 26.12.1（CI）／25.9.0（nvmrc） | `.cnb/ci/Dockerfile` 的 `ARG NODE_VERSION`；`cmd/frontend/.nvmrc`              |
-| pnpm   | 12.16.0（CI）／12.15.0（锁定） | `.cnb/ci/Dockerfile` 的 `ARG PNPM_VERSION`；`package.json` 的 `packageManager` |
-| sqlc   | v1.31.1                        | `.cnb/ci/Dockerfile` 的 `ARG SQLC_VERSION`；生成代码头部同样记录该版本         |
-| nfpm   | 2.48.0                         | `.cnb/ci/Dockerfile` 的 `ARG NFPM_VERSION`，仅 deb 打包需要                    |
-| fnpack | 1.2.3                          | `.cnb/ci/Dockerfile` 的 `ARG FNPACK_VERSION`，仅 fpk 打包需要                  |
-| UPX    | 5.2.1                          | `.cnb/ci/Dockerfile` 的 `ARG UPX_VERSION`，可选压缩                            |
+| 组件   | 仓库内要求的版本               | 依据                                                                                 |
+|--------|--------------------------------|--------------------------------------------------------------------------------------|
+| Go     | 1.27.3                         | `go.mod` 的 `go 1.27.3`；CI 基础镜像 `golang:1.27.3-trixie`                          |
+| Node   | 26.12.1（CI）／25.9.0（nvmrc） | `dtapps/golang/fnpack` 镜像的 `ARG NODE_VERSION`；`cmd/frontend/.nvmrc`              |
+| pnpm   | 12.16.0（CI）／12.15.0（锁定） | `dtapps/golang/fnpack` 镜像的 `ARG PNPM_VERSION`；`package.json` 的 `packageManager` |
+| sqlc   | v1.31.1                        | `dtapps/golang/fnpack` 镜像的 `ARG SQLC_VERSION`；生成代码头部同样记录该版本         |
+| nfpm   | 2.48.0                         | `dtapps/golang/fnpack` 镜像的 `ARG NFPM_VERSION`，仅 deb 打包需要                    |
+| fnpack | 1.2.3                          | `dtapps/golang/fnpack` 镜像的 `ARG FNPACK_VERSION`，仅 fpk 打包需要                  |
+| UPX    | 5.2.1                          | `dtapps/golang/fnpack` 镜像的 `ARG UPX_VERSION`，可选压缩                            |
 
-Node 与 pnpm 的版本在仓库里有**两份互相不一致的记录**：CI 镜像用 `ARG NODE_VERSION=26.12.1` / `PNPM_VERSION=12.16.0`，而 `cmd/frontend/.nvmrc` 写 `25.9.0`、`cmd/frontend/package.json` 的 `packageManager` 写 `pnpm@12.15.0`。本地装哪个都不会立刻出错，但遇到「本地过、CI 不过」时，先按 CI `Dockerfile` 的 `ARG` 对齐。
+Node 与 pnpm 的版本在仓库里有**两份互相不一致的记录**：CI 镜像用 `ARG NODE_VERSION=26.12.1` / `PNPM_VERSION=12.16.0`，而 `cmd/frontend/.nvmrc` 写 `25.9.0`、`cmd/frontend/package.json` 的 `packageManager` 写 `pnpm@12.15.0`。本地装哪个都不会立刻出错，但遇到「本地过、CI 不过」时，先按 CI 镜像里的实际版本对齐：`docker run --rm --platform linux/amd64 ghcr.io/dtapps/golang/fnpack:latest bash -c 'node -v && pnpm -v'`。
 
 ### 工具链从哪来
 
 仓库里没有任何 `tools.go` 或 `go:generate` 清单，工具只有两条来源：
 
-| 来源                             | 覆盖的工具                                                                       | 版本策略                 |
-|----------------------------------|----------------------------------------------------------------------------------|--------------------------|
-| `make tool-deps`（`Makefile`）   | sqlc、golangci-lint、govulncheck、gojq、yamlfmt、shfmt、sql-formatter、dockerfmt | 全部 `@latest`，不锁版本 |
-| 手工 `go install` / 系统包管理器 | markdownfmt、nfpm、fnpack、upx                                                   | 自行决定                 |
-| CI 镜像 `.cnb/ci/Dockerfile`     | 上述全部（含 markdownfmt、nfpm、fnpack、upx）+ Node + pnpm                       | 全部 `ARG` 锁死，可复现  |
+| 来源                               | 覆盖的工具                                                                       | 版本策略                                                  |
+|------------------------------------|----------------------------------------------------------------------------------|-----------------------------------------------------------|
+| `make tool-deps`（`Makefile`）     | sqlc、golangci-lint、govulncheck、gojq、yamlfmt、shfmt、sql-formatter、dockerfmt | 全部 `@latest`，不锁版本                                  |
+| 手工 `go install` / 系统包管理器   | markdownfmt、nfpm、fnpack、upx                                                   | 自行决定                                                  |
+| CI 统一镜像 `dtapps/golang/fnpack` | 上述全部（含 markdownfmt、nfpm、fnpack、upx）+ Node + pnpm                       | 全部 `ARG` 锁死，可复现（ARG 在镜像项目里，本仓不再声明） |
 
 `make tool-deps` 的实际安装清单（逐条对应 `Makefile` 的 `tool-deps` 目标）：
 
@@ -101,7 +101,7 @@ Node 与 pnpm 的版本在仓库里有**两份互相不一致的记录**：CI �
 | `format-markdown` | 全仓 `*.md`（排除 `node_modules`、`.git`、`.vscode`、`.idea`、`.codebuddy`、`.trae`、`.mimocode`）       | 缺 `markdownfmt` 时静默跳过                          |
 | `format-shell`    | **只有** `fpkg/cmd/*`，参数 `shfmt -w -i 2 -ci -bn -s -ln bash`                                          | `scripts/*.sh` 不在范围内                            |
 | `format-sql`      | `internal/db/*.sql`、`internal/datadb/*.sql`，`sql-formatter --fix -l sql`                               | 格式化会改写 SQL 排版                                |
-| `format-docker`   | `.cnb`、`.github`、`.gitlab` 下的 `Dockerfile*`                                                          | 先找 `dockerfmt`，找不到就跳过                       |
+| `format-docker`   | `.cnb`、`.github` 下的 `Dockerfile*`（GitLab 侧用外部统一镜像，仓内已无 Dockerfile）                     | 先找 `dockerfmt`，找不到就跳过                       |
 
 ### 新人最常用的 5 条命令
 
@@ -348,15 +348,15 @@ sudo tail -200 /var/log/fnmusic-sync/goroutine-dump.txt
 
 其他格式化器与其配置：
 
-| 工具                      | 配置来源                             | 覆盖                                                                           |
-|---------------------------|--------------------------------------|--------------------------------------------------------------------------------|
-| `gofmt`/`go fmt`/`go fix` | 标准                                 | 全部 Go                                                                        |
-| `prettier`                | `package.json` 的 `format` 脚本参数  | `cmd/frontend` + `internal/webui/www`                                          |
-| `oxlint`                  | `cmd/frontend/.oxlintrc.json`        | `no-unused-vars`（`_` 前缀豁免）、`no-explicit-any` 为 warn，`no-console` 关闭 |
-| `yamlfmt`                 | `.yamlfmt`（2 空格、120 列、单引号） | `.cnb`、`.github`、`.gitlab` 等 YAML                                           |
-| `markdownfmt`             | 无配置文件                           | 全仓 Markdown                                                                  |
-| `shfmt`                   | `-i 2 -ci -bn -s -ln bash`           | 仅 `fpkg/cmd/*`                                                                |
-| `sql-formatter`           | `--fix -l sql`                       | `internal/{db,datadb}/*.sql`                                                   |
-| `dockerfmt`               | 无配置文件                           | 三个 CI 目录下的 `Dockerfile*`                                                 |
+| 工具                      | 配置来源                             | 覆盖                                                                                  |
+|---------------------------|--------------------------------------|---------------------------------------------------------------------------------------|
+| `gofmt`/`go fmt`/`go fix` | 标准                                 | 全部 Go                                                                               |
+| `prettier`                | `package.json` 的 `format` 脚本参数  | `cmd/frontend` + `internal/webui/www`                                                 |
+| `oxlint`                  | `cmd/frontend/.oxlintrc.json`        | `no-unused-vars`（`_` 前缀豁免）、`no-explicit-any` 为 warn，`no-console` 关闭        |
+| `yamlfmt`                 | `.yamlfmt`（2 空格、120 列、单引号） | `.cnb`、`.github`、`.gitlab` 等 YAML                                                  |
+| `markdownfmt`             | 无配置文件                           | 全仓 Markdown                                                                         |
+| `shfmt`                   | `-i 2 -ci -bn -s -ln bash`           | 仅 `fpkg/cmd/*`                                                                       |
+| `sql-formatter`           | `--fix -l sql`                       | `internal/{db,datadb}/*.sql`                                                          |
+| `dockerfmt`               | 无配置文件                           | `.cnb`、`.github` 下的 `Dockerfile*`（镜像统一后仓库内已无 Dockerfile，新增时才生效） |
 
 CI 会跑什么、失败怎么读、覆盖率为何分 Go/Node 两个 key，统一写在 [contributing.md](contributing.md)，本文不重复。
