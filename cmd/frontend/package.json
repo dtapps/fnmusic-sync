@@ -22,7 +22,7 @@
     "@tailwindcss/postcss": "^4.3.3",
     "@trimjs/web-app": "^0.5.0",
     "@tsconfig/svelte": "^5.0.8",
-    "@types/node": "^26.6.5",
+    "@types/node": "^26.6.6",
     "@vitest/coverage-v8": "^5.0.5",
     "autoprefixer": "^10.6.2",
     "clsx": "^2.1.1",
