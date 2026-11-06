@@ -23,12 +23,17 @@ on:
 
 permissions:
   contents: read
-  packages: read # 拉取 GHCR 上的 CI 镜像
+  packages: read # 拉取 GHCR 上的 CI 镜像（公开镜像亦可匿名拉，写上以防仓库转私有）
 
-# 同一分支的多次运行不取消旧的运行。
+# 并发策略：同一分支的多次触发串行排队，绝不取消「正在运行」的旧运行。
+# cancel-in-progress: false 表示新运行进入 pending 等待，而非抢占/取消 in-progress。
+# queue: max 让同一 group 最多保留 100 个 pending（默认 queue: single 只留 1 个，
+# 新的会顶掉旧的 pending），按进入等待的先后 FIFO 依次执行，仅队列满的溢出运行被取消。
+# 注意：queue: max 不能与 cancel-in-progress: true 组合，否则 workflow 校验失败。
 concurrency:
   group: coveralls-${{ github.ref }}
   cancel-in-progress: false
+  queue: max
 
 jobs:
   coverage:
