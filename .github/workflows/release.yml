@@ -258,6 +258,14 @@ jobs:
           tag_name: ${{ needs.prepare.outputs.interior_version }}
           name: ${{ needs.prepare.outputs.interior_version }}
           draft: false
+          # 必须是**小写**的 true / false —— 别改成表达式或把输入直接透传过来。
+          # softprops/action-gh-release@v3 内部是
+          #   input_prerelease: env.INPUT_PRERELEASE ? env.INPUT_PRERELEASE == 'true' : undefined
+          # （src/util.ts，已对照 v3 源码与构建产物确认）：它按字面量 'true' 精确比较，
+          # 没有 trim、没有 toLowerCase。所以 "TRUE" / "True" / " true" 都会**静默变成 false**，
+          # 方向正好是危险的那一边：rc 会被当成正式版发布出去，稳定用户直接被推到预发布上。
+          # 现在能保证小写，只因为 resolve-prerelease.sh 的 case 里写死的就是这两个值；
+          # 任何人把它「简化」成从表单/开关透传，这条约定当场就破。
           prerelease: ${{ needs.prepare.outputs.pre_release }}
           body_path: release_body.md
           files: release/*

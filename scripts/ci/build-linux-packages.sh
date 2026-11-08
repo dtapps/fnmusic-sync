@@ -466,8 +466,14 @@ else
 fi
 BUILD_TIME="$(date -u '+%Y-%m-%d %H:%M:%S UTC')"
 
-# 上一个 tag 到 HEAD 的提交摘要；浅克隆或首个 tag 时退化成最近提交/固定文案
-PREV_TAG="$(git tag --sort=-v:refname 2>/dev/null | head -n2 | tail -n1 || true)"
+# 上一个 tag 到 HEAD 的提交摘要；浅克隆或首个 tag 时退化成最近提交/固定文案。
+#
+# 不能用 `git tag --sort=-v:refname | head -n2 | tail -n1`：那是「全仓库第二新的 tag」，
+# 而它假设了「最新的 tag 就是这次要发的那个」。事实相反 —— 本脚本是在**发布之前**跑的，
+# 这次要发的 tag 还没建出来，于是 head -2|tail -1 取到的是「上一个版本的上一个版本」，
+# 每次发版都会把上一版的提交再列一遍（发 v0.1.32 时从 v0.1.30 开始列，漏掉 v0.1.31 那一段）。
+# 与 GitHub / GitLab 两份流水线同一口径：git describe 找「HEAD 之前最近的那个 tag」。
+PREV_TAG="$(git describe --tags --abbrev=0 'HEAD^' 2>/dev/null || true)"
 if [ -z "$PREV_TAG" ]; then
   CHANGES="$(git log --pretty=format:'- %s' -20 2>/dev/null || true)"
 else

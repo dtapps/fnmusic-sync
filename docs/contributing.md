@@ -96,7 +96,10 @@ PR 描述建议包含四段（照这个写，评审就能直接看）：
 | 共享镜像  | `dtapps/golang/fnpack`（CNB / GHCR / GitLab Registry 三处）                 | 由镜像项目自己构建推送                | 所有平台的 CI 环境来源；本仓库不再有 Dockerfile，见 [ci-image.md](ci-image.md)                                                                                               |
 | GitLab    | `.gitlab-ci.yml` + `.gitlab/workflows/release.yml`                          | 网页手动 Run pipeline（填 `VERSION`） | 发布（`package-release`），跑在统一预置镜像 `registry.gitlab.com/dtapps/golang/fnpack:latest` 里，**不跑覆盖率**                                                             |
 
-再加两个「转发壳」：`.gitcode/workflows/release.yml` 与 `.workflow/release.yml` 不构建，只把 GitHub Release 的产物转发到 GitCode / Gitee。
+另有两条**角色不同**的发布流水线，别混为一谈：
+
+- `.gitcode/workflows/release.yml` 是**构建方**：GitCode 没有「用自定义镜像跑 job」的能力，所以它现场装工具链、自己编出四个安装包（逻辑在 `scripts/ci/build-linux-packages.sh`，与 Gitee 共用同一份），再发 GitCode Release。
+- `.workflow/release.yml`（Gitee Go）是**转发壳**：只搬不建，从 CNB / GitHub 的 Release 取已编好的安装包，再发到 Gitee。
 
 ### 失败怎么定位
 
