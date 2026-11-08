@@ -2,3 +2,46 @@ allowBuilds:
   es5-ext: true
   esbuild: true
 minimumReleaseAge: 0
+
+# 安全修复 GHSA-g3hv-75wg-m249 / CVE-2026-118764
+# minimatch < 11.0.1 在 optimizationLevel>=2 下存在 globparts 放大导致的 DoS
+# （**/../ 克隆条目 + 二阶两两比较 -> 二次复杂度）。
+# 10.x 无修复版本（10.2.6 已是 10.x 末版），只能 >= 11.0.1。
+# glob@13 的内联产物里带着 minimatch 10 的漏洞代码，故一并抬到 glob@14（内联已修复版本）。
+#
+# 安全修复 GHSA-mrhx-c7xc-m3w5 / CVE-2023-54404
+# zod < 4.6.6 的 $ZodArray 在 handleArrayResult 里为每个失败元素累积 issue，
+# 无上限也不提前终止：传入超大数组（元素全部校验失败）即可让内存与数组长度成正比，最终 OOM。
+# 引入路径仅 @codecov/vite-plugin -> @codecov/bundler-plugin-core 的构建期依赖（声明 ^3.22.4），
+# 本项目源码不使用 zod；且该库只校验 vite.config.ts 里的 bundleName/uploadToken 等开发者输入，
+# 外部用户不可达。仍抬到 4.6.6 以满足告警。
+# 兼容性已实测：codecov 用的 safeParse / error.issues / z.record(jsonSchema) / z.lazy / z.enum 在 v4 均可用；
+# v4 会忽略 invalid_type_error 参数（降级为默认文案，不抛错），校验失败判定逻辑不受影响。
+#
+# 安全修复 GHSA-67mh-4wv8-2f99
+# esbuild < 0.25.0 的 dev server 对所有请求回 Access-Control-Allow-Origin: *，
+# 任意网站可向本地 dev server 发请求并读取响应。
+# 引入路径仅 svelte-i18n 声明的 esbuild ^0.19.2（其 dist/ 里完全没有 import esbuild，
+# 只有本项目未使用的 CLI 才需要；本项目 vite 8 走 rolldown，不经过 esbuild）。
+# 用限定作用域的 override 只抬 svelte-i18n 名下的 esbuild，避免改写 vite 的 optional peer
+# 解析结果（vite 声明的 esbuild peer 是 ^0.27||^0.28，全局 override 会连带重解析整个 vite 依赖图）。
+#
+# 安全修复 GHSA-gcqx-w48m-w2h4 / CVE-2026-93753（deepmerge，low / CVSS 5.3）
+# deepmerge <= 4.3.1 的 mergeObject() 在拷贝 target 自有键时不校验 key，
+# 若 target 自身带自有 __proto__ 键，`destination[key] = ...` 会走原型 setter 而非定义属性，
+# 使返回对象的原型被注入攻击者控制的属性（原型污染，影响返回对象）。
+# 上游自 2023-03 的 4.3.1 后再无发布，npm 上 deepmerge@latest 即 4.3.1，
+# 依赖方 svelte-i18n@4.0.1（^4.2.2）与 @sveltejs/vite-plugin-svelte@7.3.1（^4.3.1）都已是 latest，
+# 无任何可升级版本，无法用 override 抬到修复版。
+# 处置：用 pnpm patch 直接修复漏洞代码——新增 setKey() 对 '__proto__' 键改用
+# Object.defineProperty 定义自有属性，避免触发原型 setter。补丁见 patches/deepmerge@4.3.1.patch，
+# 由下方 patchedDependencies 登记。正常合并行为不变，已实测：原型污染校验、i18n 静态字典合并、数组合并均正常。
+# 注：补丁不改版本号，OSV/Dependabot 仍会按 4.3.1 报该 GHSA，但代码层面漏洞已消除。
+overrides:
+  minimatch: 11.0.5
+  glob: 14.0.4
+  zod: 4.6.6
+  svelte-i18n>esbuild: 0.25.12
+
+patchedDependencies:
+  deepmerge@4.3.1: patches/deepmerge@4.3.1.patch

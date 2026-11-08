@@ -1,0 +1,88 @@
+diff --git a/dist/cjs.js b/dist/cjs.js
+index 7c36cbdd06cc22c92d590be3f87a08a91ca06b40..00d83f2eed1e2919e21dec536ec5761375e44101 100644
+--- a/dist/cjs.js
++++ b/dist/cjs.js
+@@ -76,11 +76,28 @@ function propertyIsUnsafe(target, key) {
+ 			&& Object.propertyIsEnumerable.call(target, key)) // and also unsafe if they're nonenumerable.
+ }
+ 
++// Assigns an own data property. A plain `destination[key] = value` invokes the prototype
++// `__proto__` setter when key is '__proto__', mutating the returned object's prototype
++// instead of defining a property. This is the prototype-poisoning vector (GHSA-gcqx-w48m-w2h4);
++// use defineProperty so '__proto__' is treated as an ordinary data key.
++function setKey(destination, key, value) {
++	if (key === '__proto__') {
++		Object.defineProperty(destination, '__proto__', {
++			value: value,
++			enumerable: true,
++			configurable: true,
++			writable: true
++		});
++		return
++	}
++	destination[key] = value
++}
++
+ function mergeObject(target, source, options) {
+ 	var destination = {};
+ 	if (options.isMergeableObject(target)) {
+ 		getKeys(target).forEach(function(key) {
+-			destination[key] = cloneUnlessOtherwiseSpecified(target[key], options);
++			setKey(destination, key, cloneUnlessOtherwiseSpecified(target[key], options));
+ 		});
+ 	}
+ 	getKeys(source).forEach(function(key) {
+@@ -89,9 +106,9 @@ function mergeObject(target, source, options) {
+ 		}
+ 
+ 		if (propertyIsOnObject(target, key) && options.isMergeableObject(source[key])) {
+-			destination[key] = getMergeFunction(key, options)(target[key], source[key], options);
++			setKey(destination, key, getMergeFunction(key, options)(target[key], source[key], options));
+ 		} else {
+-			destination[key] = cloneUnlessOtherwiseSpecified(source[key], options);
++			setKey(destination, key, cloneUnlessOtherwiseSpecified(source[key], options));
+ 		}
+ 	});
+ 	return destination
+diff --git a/dist/umd.js b/dist/umd.js
+index 4071e7c56ec8e5273fe166f6e723ac460fab8b72..3ead77a7c3ff47f64cc8e705114726eaca84d1d6 100644
+--- a/dist/umd.js
++++ b/dist/umd.js
+@@ -80,11 +80,24 @@
+ 				&& Object.propertyIsEnumerable.call(target, key)) // and also unsafe if they're nonenumerable.
+ 	}
+ 
++	function setKey(destination, key, value) {
++		if (key === '__proto__') {
++			Object.defineProperty(destination, '__proto__', {
++				value: value,
++				enumerable: true,
++				configurable: true,
++				writable: true
++			});
++			return
++		}
++		destination[key] = value
++	}
++
+ 	function mergeObject(target, source, options) {
+ 		var destination = {};
+ 		if (options.isMergeableObject(target)) {
+ 			getKeys(target).forEach(function(key) {
+-				destination[key] = cloneUnlessOtherwiseSpecified(target[key], options);
++				setKey(destination, key, cloneUnlessOtherwiseSpecified(target[key], options));
+ 			});
+ 		}
+ 		getKeys(source).forEach(function(key) {
+@@ -93,9 +106,9 @@
+ 			}
+ 
+ 			if (propertyIsOnObject(target, key) && options.isMergeableObject(source[key])) {
+-				destination[key] = getMergeFunction(key, options)(target[key], source[key], options);
++				setKey(destination, key, getMergeFunction(key, options)(target[key], source[key], options));
+ 			} else {
+-				destination[key] = cloneUnlessOtherwiseSpecified(source[key], options);
++				setKey(destination, key, cloneUnlessOtherwiseSpecified(source[key], options));
+ 			}
+ 		});
+ 		return destination

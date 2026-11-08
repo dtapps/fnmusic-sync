@@ -692,7 +692,7 @@ package-linux: package-linux-all
 
 # ==================== 更新 / 拉取 ====================
 
-# 拉取所有远程最新（先 CNB，后 GitHub 镜像）然后推送
+# 拉取所有远程最新（先 CNB 后 GitHub 镜像）然后推送
 .PHONY: sync
 sync: sync-cnb sync-github push 
 
