@@ -1,3 +1,24 @@
+
+# 环境变量优先级高于 .env：include 的赋值会覆盖环境值，先暂存一份
+ifeq ($(origin GIT_REMOTE),environment)
+    GIT_REMOTE_ENV := $(GIT_REMOTE)
+endif
+
+# 加载 .env 文件（如果存在）
+ifneq (,$(wildcard ./.env))
+    include .env
+    export
+endif
+
+ifneq ($(GIT_REMOTE_ENV),)
+    GIT_REMOTE := $(GIT_REMOTE_ENV)
+endif
+
+# 同步/推送目标远程，逗号分隔：GIT_REMOTE=origin,github,gitlab
+# 可通过 .env / 环境变量 / 命令行覆盖，未配置时默认 origin。
+GIT_REMOTE ?= origin
+export GIT_REMOTE
+
 # 名称
 BINARY := fnmusic-sync
 
@@ -692,42 +713,25 @@ package-linux: package-linux-all
 
 # ==================== 更新 / 拉取 ====================
 
-# 拉取所有远程最新（先 CNB 后 GitHub 镜像）然后推送
+# 按 GIT_REMOTE 顺序先全部拉取合并，再统一推送（保留本地未提交改动）
 .PHONY: sync
-sync: sync-cnb sync-github push 
-
-# 拉取 CNB 最新并以 fast-forward 合并（保留本地未提交改动）
-.PHONY: sync-cnb
-sync-cnb:
-	git fetch origin
-	git merge --ff-only origin/main
-	@echo "已同步 origin/main 最新代码，本地未提交改动已保留"
-
-# 拉取 GitHub 最新并以 fast-forward 合并（保留本地未提交改动）
-.PHONY: sync-github
-sync-github:
-	git fetch github
-	git merge --ff-only github/main
-	@echo "已同步 github/main 最新代码，本地未提交改动已保留"
+sync:
+	@IFS=,; for r in $$GIT_REMOTE; do \
+		git fetch "$$r" && git merge --ff-only "$$r/main" || exit 1; \
+	done
+	@IFS=,; for r in $$GIT_REMOTE; do git push "$$r" HEAD || exit 1; done
+	@echo "同步完成！"
 
 # ==================== 推送 ====================
 
 # 推送到所有远程仓库
 .PHONY: push
 push:
-	git push origin HEAD
-	git push gitee HEAD
-	git push gitcode HEAD
-	git push github HEAD
-	git push gitlab HEAD
+	@IFS=,; for r in $$GIT_REMOTE; do git push "$$r" HEAD || exit 1; done
 	@echo "推送完成！"
 
 # 强制推送到所有远程仓库（忽略冲突）
 .PHONY: push-force
 push-force:
-	git push --force origin HEAD
-	git push --force gitee HEAD
-	git push --force gitcode HEAD
-	git push --force github HEAD
-	git push --force gitlab HEAD
+	@IFS=,; for r in $$GIT_REMOTE; do git push --force "$$r" HEAD || exit 1; done
 	@echo "强制推送完成！"
