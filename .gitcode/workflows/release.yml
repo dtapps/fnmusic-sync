@@ -104,16 +104,26 @@ jobs:
           export VERSION="$TAG"
           # shellcheck disable=SC1091
           . scripts/ci/resolve-prerelease.sh
+          # source 只带进函数，必须显式调用才会算出 PRERELEASE（以及统一后的 TAG）
+          resolve_version "$TAG" || exit 1
           VER="${TAG#v}"
           PRE="$PRERELEASE"
           echo "预发布: ${PRE}"
 
           # 后续步骤共用的变量写进文件，不依赖平台的跨 step 变量机制
+          # 标题统一带项目名前缀（与另外四个平台的 release.yml 同口径，改名字要一起改）。
+          # 用驼峰产品名而不是仓库 slug，更容易被用户认成产品名。
+          if [ "$PRE" = "true" ]; then
+            TITLE="FnMusicSync ${TAG} (预发布)"
+          else
+            TITLE="FnMusicSync ${TAG}"
+          fi
           {
             echo "TAG=${TAG}"
             echo "VER=${VER}"
             echo "PRE=${PRE}"
             echo "REPO_PATH=${REPO_PATH}"
+            echo "TITLE=\"${TITLE}\""
           } > .ci-release.env
 
           git log --oneline -3 || true
@@ -132,6 +142,12 @@ jobs:
           export PRERELEASE="$PRE"
           export REPO_SOURCE=gitcode
           export DL_BASE="https://gitcode.com/${REPO_PATH}/releases/download/${TAG}"
+          # 正文里「提交」那一行与预发布时的「最新正式版」链接：平台路径由调用方传，
+          # scripts/ci/render-release-body.sh 不猜（GitHub 是 /commit，CNB 是 /-/commit）
+          export REPO_URL="https://gitcode.com/${REPO_PATH}"
+          export COMMIT_URL="${REPO_URL}/commit"
+          export COMMIT_SHA="$(git rev-parse HEAD)"
+          export STABLE_URL="${REPO_URL}/releases"
 
           bash scripts/ci/build-linux-packages.sh
 
@@ -168,7 +184,7 @@ jobs:
 
           PAYLOAD=$(jq -n \
             --arg tag "$TAG" \
-            --arg name "$TAG" \
+            --arg name "$TITLE" \
             --rawfile body "$BODY_FILE" \
             --arg tc "main" \
             --arg st "$STATUS" \
@@ -187,7 +203,7 @@ jobs:
           echo "✓ release 已创建"
 
           # 逐个文件：先要预签名上传地址，再 PUT 文件本体
-          for f in bin/*.deb bin/*.fpk; do
+          for f in bin/*.deb bin/*.fpk bin/SHA256SUMS; do
             [ -f "$f" ] || continue
             NAME=$(basename "$f")
             ENC=$(printf '%s' "$NAME" | jq -sRr @uri)
@@ -218,7 +234,7 @@ jobs:
           echo ""
           echo "校验正文里的下载链接："
           BAD=0
-          for f in bin/*.deb bin/*.fpk; do
+          for f in bin/*.deb bin/*.fpk bin/SHA256SUMS; do
             [ -f "$f" ] || continue
             NAME=$(basename "$f")
             ENC=$(printf '%s' "$NAME" | jq -sRr @uri)

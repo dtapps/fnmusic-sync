@@ -113,13 +113,19 @@ if (longest > 200) {
   throw new Error('正文分段后仍有 ' + longest + ' 字节的片段，会被插件当超长文件名');
 }
 
-// VERSION / PRERELEASE 由平台插值给下游 release-stage，正文走参数通道。
-// 三个键必须在同一次写入里落盘，缺一个下游就是空值。
+// VERSION / PRERELEASE / RELEASE_NAME 由平台插值给下游 release-stage，正文走参数通道。
+// 四个键必须在同一次写入里落盘，缺一个下游就是空值。
 const version = (process.env.VERSION || '').trim();
 const pre = (process.env.PRERELEASE || 'false').trim() === 'true' ? 'true' : 'false';
 
+// 标题统一带项目名前缀，预发布再加后缀（与另外四个平台的 release.yml 同口径）：
+// 项目名是驼峰产品名 FnMusicSync，不是仓库 slug。括号用半角，
+// 避免个别平台对全角括号做额外转义。
+const releaseName = 'FnMusicSync ' + version + (pre ? ' (预发布)' : '');
+
 fs.appendFileSync(PARAMS, 'VERSION=' + version + '\n', 'utf8');
 fs.appendFileSync(PARAMS, 'PRERELEASE=' + pre + '\n', 'utf8');
+fs.appendFileSync(PARAMS, 'RELEASE_NAME=' + releaseName + '\n', 'utf8');
 fs.appendFileSync(PARAMS, 'RELEASE_BODY=' + oneLine + '\n', 'utf8');
 
 console.log(
@@ -133,4 +139,4 @@ console.log(
     longest +
     ' 字节）'
 );
-console.log('写入参数文件：VERSION=' + version + ' PRERELEASE=' + pre);
+console.log('写入参数文件：VERSION=' + version + ' PRERELEASE=' + pre + ' RELEASE_NAME=' + releaseName);

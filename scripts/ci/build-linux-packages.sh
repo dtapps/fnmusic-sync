@@ -24,9 +24,13 @@
 #
 # 环境变量（都可不传，有默认值）：
 #   VERSION        版本号，带不带 v 都行；为空时回落到 git describe
-#   DL_BASE        正文下载表里的链接前缀，指向本平台本 tag 的 releases/download
+#   DL_BASE        正文下载表里的链接前缀，指向本平台本 tag 的 releases/download（必填）
 #   REPO_SOURCE    写进二进制的构建来源标识（buildinfo.RepoSource），如 gitcode / gitee
 #   TOOLCHAIN_DIR  工具链落地目录，默认 /tmp/fnmusic-build-tools
+#   REPO_URL       仓库地址（正文里「完整记录」链接用），选填
+#   COMMIT_URL     提交链接前缀（拼成 ${COMMIT_URL}/<sha>），选填
+#   COMMIT_SHA     提交 SHA；有则正文「发布信息」里多一行提交链接，选填
+#   STABLE_URL     正式版列表页 URL，预发布时正文提示用户去哪找稳定版，选填
 #
 # 没有 PRERELEASE 这个入参了：预定写在正文里的「是否预发布」由 VERSION 的后缀决定
 # （v0.1.32-rc.1 是预发布，v0.1.31 不是），判定在 scripts/ci/resolve-prerelease.sh。
@@ -161,11 +165,15 @@ fi
 # 版本号归一化与预发布判定只此一份（scripts/ci/resolve-prerelease.sh）：只看后缀。
 # source 而不是自己写 case —— 五个平台的 yml 也 source 同一个文件；各写一遍的话，
 # 改一处的语义会在另一处悄悄失守（Gitee 曾经完全不看后缀，把 v0.1.32-rc.1 当正式版发了）。
-# 下面那句格式检查是双保险：脚本已经判过并 exit 2，这里只在被别的方式绕过时兜底。
+# source 只带进函数，必须显式调用 resolve_version 才会算出 TAG / PRERELEASE；
+# 少了这一句，下面的 ${PRERELEASE} 在 set -u 下就是 unbound variable。
 export VERSION="$RAW"
 # shellcheck source=scripts/ci/resolve-prerelease.sh
 . "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/resolve-prerelease.sh"
+resolve_version "$RAW" || die "版本号解析失败：${RAW:-<空>}"
 PRE="$PRERELEASE"
+# PKG_VERSION（去 v 的包版本）也由 resolve_version 算出并导出，
+# 与 Makefile 的 PKG_VERSION = $(patsubst v%,%,$(VERSION)) 同一条规则。
 
 printf '%s' "$PKG_VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+' \
   || die "版本号格式不对：${RAW}（期望 0.1.31 / v0.1.31 / v0.1.32-rc.1）"
@@ -452,77 +460,48 @@ done
 log "产物清单"
 ls -lh bin/
 
+# ============================== 校验文件 ==============================
+# 正文的「校验」一节只在 bin/SHA256SUMS 存在时才写，所以这一步不能省。
+log "生成校验文件 bin/SHA256SUMS"
+(
+  cd bin
+  : > SHA256SUMS
+  for f in *.deb *.fpk; do
+    [ -e "$f" ] || continue
+    sha256sum "$f" >> SHA256SUMS
+  done
+  cat SHA256SUMS
+)
+
 # ============================== Release 正文 ==============================
-# 与 .github/workflows/release.yml / .cnb/workflows/release.yml 的正文生成保持一致：
-# 同四行「发布信息」表 + 同五列「下载」表 + 同「更新内容」。
-# DL_BASE 是唯一随平台变的东西（各平台的下载路径前缀不同）。
+# 正文与更新内容都只有一份实现：
+#   scripts/ci/render-release-body.sh   表格/标题/下载链接/校验说明
+#   scripts/ci/release-changelog.sh     按发布渠道选对比基准的提交摘要
+# 另外四个平台的流水线（CNB / GitHub / GitLab / Gitee）调用的也是这两个脚本，
+# 别在这里另写一套表格 —— 改一处忘一处就是这么来的。
 DL_BASE="${DL_BASE:-}"
 [ -n "$DL_BASE" ] || die "DL_BASE 未传，正文里的下载链接没有前缀"
 
-if [ "$PRE" = "true" ]; then
-  RELEASE_TYPE="🚧 预发布版本 (Pre-release)"
-else
-  RELEASE_TYPE="✅ 正式发布版本 (Stable)"
-fi
-BUILD_TIME="$(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+SELF_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
-# 上一个 tag 到 HEAD 的提交摘要；浅克隆或首个 tag 时退化成最近提交/固定文案。
-#
-# 不能用 `git tag --sort=-v:refname | head -n2 | tail -n1`：那是「全仓库第二新的 tag」，
-# 而它假设了「最新的 tag 就是这次要发的那个」。事实相反 —— 本脚本是在**发布之前**跑的，
-# 这次要发的 tag 还没建出来，于是 head -2|tail -1 取到的是「上一个版本的上一个版本」，
-# 每次发版都会把上一版的提交再列一遍（发 v0.1.32 时从 v0.1.30 开始列，漏掉 v0.1.31 那一段）。
-# 与 GitHub / GitLab 两份流水线同一口径：git describe 找「HEAD 之前最近的那个 tag」。
-PREV_TAG="$(git describe --tags --abbrev=0 'HEAD^' 2>/dev/null || true)"
-if [ -z "$PREV_TAG" ]; then
-  CHANGES="$(git log --pretty=format:'- %s' -20 2>/dev/null || true)"
-else
-  CHANGES="$(git log --pretty=format:'- %s' "${PREV_TAG}..HEAD" 2>/dev/null || true)"
-fi
-[ -n "$CHANGES" ] || CHANGES="- 版本更新"
+log "生成更新内容（按渠道选对比基准）"
+# 挑不出基准时脚本会 exit 1（而不是谎报「首次发布」）：宁可在这里失败，
+# 也不要把一份错误的正文发出去。
+CHANGELOG="$(REPO_URL="${REPO_URL:-}" COMMIT_URL="${COMMIT_URL:-}" \
+  sh "$SELF_DIR/release-changelog.sh" "$TAG")"
 
 log "生成 release_body.md"
-{
-  if [ "$PRE" = "true" ]; then
-    echo "## ⚠️ 预发布版本"
-    echo ""
-    echo "> 这是预发布版本，可能包含未充分测试的功能。"
-    echo ""
-  fi
+VERSION="$TAG" \
+  PRERELEASE="$PRE" \
+  DL_BASE="$DL_BASE" \
+  STABLE_URL="${STABLE_URL:-}" \
+  REPO_URL="${REPO_URL:-}" \
+  COMMIT_URL="${COMMIT_URL:-}" \
+  COMMIT_SHA="${COMMIT_SHA:-}" \
+  BUILD_TIME="$(date -u '+%Y-%m-%d %H:%M:%S UTC')" \
+  ARTIFACT_DIR=bin \
+  OUT_FILE=release_body.md \
+  CHANGELOG="$CHANGELOG" \
+  sh "$SELF_DIR/render-release-body.sh"
 
-  echo "## 发布信息"
-  echo ""
-  echo "| 项目 | 内容 |"
-  echo "| --- | --- |"
-  echo "| 版本号 | ${TAG} |"
-  echo "| 发布类型 | ${RELEASE_TYPE} |"
-  echo "| 是否预发布 | ${PRE} |"
-  echo "| 构建时间 | ${BUILD_TIME} |"
-  echo ""
-  echo "## 下载"
-  echo ""
-  echo "| 平台 | 架构 | 文件 | 大小 | 说明 |"
-  echo "|------|------|------|------|------|"
-
-  for f in bin/*; do
-    [ -f "$f" ] || continue
-    fname="$(basename "$f")"
-    fsize="$(ls -lh "$f" | awk '{print $5}')"
-    ARCH="-"
-    DESC="其它"
-    case "$fname" in
-      *.deb) ARCH="${fname#fnmusic-sync_}"; ARCH="${ARCH%.deb}"; DESC="Debian/Ubuntu 安装包" ;;
-      *.fpk) ARCH="${fname#fnmusic-sync-}"; ARCH="${ARCH%.fpk}"; DESC="飞牛 fnOS 应用包" ;;
-    esac
-    echo "| Linux | ${ARCH} | [${fname}](${DL_BASE}/${fname}) | ${fsize} | ${DESC} |"
-  done
-
-  echo ""
-  echo "## 更新内容"
-  echo ""
-  echo "${CHANGES}"
-} > release_body.md
-
-cat release_body.md
-
-log "完成：bin/ 下 4 个安装包 + release_body.md"
+log "完成：bin/ 下 4 个安装包 + SHA256SUMS + release_body.md"

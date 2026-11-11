@@ -44,6 +44,7 @@ jobs:
       image: ghcr.io/dtapps/golang/fnpack:latest
     outputs:
       interior_version: ${{ steps.gen.outputs.interior_version }}
+      interior_release_title: ${{ steps.gen.outputs.interior_release_title }}
       pre_release: ${{ steps.gen.outputs.pre_release }}
     steps:
       - name: 检出代码
@@ -64,11 +65,29 @@ jobs:
           # 以前那个 prerelease 布尔输入已经删掉 —— 它会跟版本号打架，而且打得毫无必要。
           # shellcheck disable=SC1091
           . scripts/ci/resolve-prerelease.sh
+          # source 只带进函数，必须显式调用才会算出 TAG / PKG_VERSION / PRERELEASE
+          resolve_version "${VERSION}"
 
           echo "${PRE_NOTE}"
-          echo "interior_version=${TAG}" >> "$GITHUB_OUTPUT"
-          # 只在本 job 之间传，不再来自用户输入
-          echo "pre_release=${PRERELEASE}" >> "$GITHUB_OUTPUT"
+
+          # 标题统一带项目名前缀（与另外四个平台的 release.yml 同口径，改名字要一起改）。
+          # 用驼峰产品名而不是仓库 slug：Release 列表里「FnMusicSync v0.1.32」比
+          # 「fnmusic-sync v0.1.32」更像一次发布，也更容易被用户认成产品名。
+          PROJECT_NAME="FnMusicSync"
+
+          # 预发布版本在标题上带个后缀，便于在 Release 列表里一眼区分
+          if [ "${PRERELEASE}" = "true" ]; then
+            RELEASE_TITLE="${PROJECT_NAME} ${TAG} (预发布)"
+          else
+            RELEASE_TITLE="${PROJECT_NAME} ${TAG}"
+          fi
+
+          {
+            echo "interior_version=${TAG}"
+            echo "interior_release_title=${RELEASE_TITLE}"
+            # 只在本 job 之间传，不再来自用户输入
+            echo "pre_release=${PRERELEASE}"
+          } >> "$GITHUB_OUTPUT"
 
   # 构建 + 打包 Linux 安装包（deb/fpk）
   build:
@@ -142,6 +161,20 @@ jobs:
         shell: bash
         run: make clean-archives
 
+      # 附件校验文件：用户下载后总要能核对一遍包没被篡改/没下坏。
+      # 正文的「校验」一节只在 bin/SHA256SUMS 存在时才写，所以这一步不能省。
+      - name: 生成校验文件
+        shell: bash
+        run: |
+          set -eu
+          cd bin
+          : > SHA256SUMS
+          for f in *.deb *.fpk; do
+            [ -e "${f}" ] || continue
+            sha256sum "${f}" >> SHA256SUMS
+          done
+          cat SHA256SUMS
+
       - name: 上传产物
         uses: actions/upload-artifact@v7
         with:
@@ -170,93 +203,76 @@ jobs:
           name: fnmusic-sync-release
           path: release
 
+      # 发版前先把版本号这件事验干净。这几件事出错都不会让构建失败，
+      # 但会发出一个「看起来成功、内容是错的」Release。
+      - name: 校验版本号与 tag
+        shell: bash
+        env:
+          VERSION: ${{ needs.prepare.outputs.interior_version }}
+          PRERELEASE: ${{ needs.prepare.outputs.pre_release }}
+        run: |
+          set -eu
+          echo "版本号: ${VERSION}"
+
+          # checkout 已带 fetch-depth: 0，这里再补一次兜底
+          git fetch --tags --quiet --force || true
+          count=$(git tag -l 'v*' | wc -l | tr -d ' ')
+          echo "本地版本 tag: ${count} 个"
+          if [ "$count" -eq 0 ]; then
+            echo "❌ 一个版本 tag 都没有，changelog 会退化成「首次发布」"
+            exit 1
+          fi
+
+          if git rev-parse -q --verify "refs/tags/${VERSION}" >/dev/null; then
+            echo "❌ tag ${VERSION} 已存在，不能重复发布"
+            exit 1
+          fi
+          echo "✅ tag ${VERSION} 不存在，可以发布"
+
+          if [ "${PRERELEASE}" = "false" ]; then
+            latest=$(git tag -l 'v*' | grep -Ev -- '-(rc|beta|alpha)' | grep -v '\.rc' | sort -V | tail -n 1 || true)
+            if [ -n "$latest" ] && [ "$(printf '%s\n%s\n' "$latest" "${VERSION}" | sort -V | tail -n 1)" != "${VERSION}" ]; then
+              echo "❌ 版本号 ${VERSION} 比已有的正式版 ${latest} 旧"
+              exit 1
+            fi
+            echo "✅ 比上一个正式版 ${latest:-（无）} 新"
+          fi
+
+      # 正文只有一份实现（scripts/ci/render-release-body.sh），另外四个平台也调用它，
+      # 避免各写一遍表格/标题/下载链接，改一处忘一处。
       - name: 生成 Release 正文
         shell: bash
         env:
-          INTERIOR_VERSION: ${{ needs.prepare.outputs.interior_version }}
-          PRE_RELEASE: ${{ needs.prepare.outputs.pre_release }}
+          VERSION: ${{ needs.prepare.outputs.interior_version }}
+          PRERELEASE: ${{ needs.prepare.outputs.pre_release }}
+          REPO_URL: https://github.com/${{ github.repository }}
+          COMMIT_SHA: ${{ github.sha }}
+          ARTIFACT_DIR: release
+          OUT_FILE: release_body.md
         run: |
-          REPO="${{ github.repository }}"
-          DL_BASE="https://github.com/${REPO}/releases/download/${INTERIOR_VERSION}"
+          set -eu
 
-          if [ "${PRE_RELEASE}" = "true" ]; then
-            RELEASE_TYPE="🚧 预发布版本 (Pre-release)"
-          else
-            RELEASE_TYPE="✅ 正式发布版本 (Stable)"
-          fi
-          BUILD_TIME="$(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+          # 下载基址在脚本里拼，不写进 env：整条 URL 太长，yamlfmt 会把表达式折行
+          DL_BASE="${REPO_URL}/releases/download/${VERSION}"
+          STABLE_URL="${REPO_URL}/releases/latest"
+          export DL_BASE STABLE_URL
 
-          # 生成 changelog（取上一个 tag 到 HEAD 的提交摘要）
-          #
-          # 不能写 `git tag --sort=-v:refname | head -2 | tail -1`：那是「全仓库第二新的 tag」，
-          # 跟当前 HEAD 没有关系。重跑一次（tag 已经建过）就会把刚发的 tag 自己当成上一个版本，
-          # 段落直接变成空；分支上多了个更新的 tag 时也会指到别的线上去。
-          # HEAD^ 找的是「HEAD 之前最近的那个 tag」，与 GitLab 那份的 git describe 同一口径。
-          PREV_TAG=$(git describe --tags --abbrev=0 'HEAD^' 2>/dev/null || true)
-          if [ -z "$PREV_TAG" ]; then
-            CHANGES="首次发布"
-          else
-            CHANGES=$(git log --pretty=format:"- %s" "${PREV_TAG}..HEAD" 2>/dev/null || echo "- 版本更新")
-          fi
+          # 更新内容：按渠道选对比基准（rc 对 rc、beta 对 beta、正式版对正式版；
+          # 首次发某渠道则回退到上一个正式版）。实现见 scripts/ci/release-changelog.sh，
+          # 五个平台共用一份，避免判定口径跑偏。
+          # GitHub 的提交路径是 /commit/<sha>，和 CNB 的 /-/commit 不同，前缀显式传
+          CHANGELOG=$(COMMIT_URL="${REPO_URL}/commit" sh scripts/ci/release-changelog.sh "${VERSION}")
+          # 直接 export 给同一步的脚本：写 $GITHUB_ENV 只对**后续** step 生效，
+          # 本 step 里读不到，之前那样写 CHANGELOG 会是空的。
+          export CHANGELOG
 
-          {
-            if [ "${PRE_RELEASE}" = "true" ]; then
-              echo "## ⚠️ 预发布版本"
-              echo ""
-              echo "> 这是预发布版本，可能包含未充分测试的功能。"
-              echo "> 如需稳定版本，请使用 [正式发布](https://github.com/${REPO}/releases)。"
-              echo ""
-            fi
-
-            echo "## 发布信息"
-            echo ""
-            echo "| 项目 | 内容 |"
-            echo "| --- | --- |"
-            echo "| 版本号 | ${INTERIOR_VERSION} |"
-            echo "| 发布类型 | ${RELEASE_TYPE} |"
-            echo "| 是否预发布 | ${PRE_RELEASE} |"
-            echo "| 构建时间 | ${BUILD_TIME} |"
-            echo ""
-            echo "## 下载"
-            echo ""
-            echo "| 平台 | 架构 | 文件 | 大小 | 说明 |"
-            echo "|------|------|------|------|------|"
-
-            for f in release/*; do
-              [ -e "$f" ] || continue
-              [ -d "$f" ] && continue
-              fname=$(basename "$f")
-              [ "$fname" = "SHA256SUMS" ] && continue
-              fsize=$(ls -lh "$f" | awk '{print $5}')
-
-              PLAT="Linux"
-              ARCH="-"
-              DESC="其它"
-              case "$fname" in
-                *.deb)
-                  ARCH="${fname#fnmusic-sync_}"; ARCH="${ARCH%.deb}"
-                  DESC="Debian/Ubuntu 安装包" ;;
-                *.fpk)
-                  ARCH="${fname#fnmusic-sync-}"; ARCH="${ARCH%.fpk}"
-                  DESC="飞牛 fnOS 应用包" ;;
-              esac
-
-              echo "| ${PLAT} | ${ARCH} | [${fname}](${DL_BASE}/${fname}) | ${fsize} | ${DESC} |"
-            done
-
-            echo ""
-            echo "## 更新内容"
-            echo ""
-            echo "${CHANGES}"
-          } > release_body.md
-
-          cat release_body.md
+          sh scripts/ci/render-release-body.sh
 
       - name: 发布 Release
         uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ needs.prepare.outputs.interior_version }}
-          name: ${{ needs.prepare.outputs.interior_version }}
+          name: ${{ needs.prepare.outputs.interior_release_title }}
           draft: false
           # 必须是**小写**的 true / false —— 别改成表达式或把输入直接透传过来。
           # softprops/action-gh-release@v3 内部是

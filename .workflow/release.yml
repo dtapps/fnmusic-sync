@@ -79,12 +79,14 @@ strategy:
 ref_variable:
   - DOWNLOAD_SOURCE
   - VERSION
-  # 下面两个**不是**仓库级全局参数，也不该由人去配：下载阶段算出来后写进 GITEE_PARAMS，
-  # 下游 release@gitee 的 description / prerelease 从这里插值取值。
+  # 下面三个**不是**仓库级全局参数，也不该由人去配：下载阶段算出来后写进 GITEE_PARAMS，
+  # 下游 release@gitee 的 description / prerelease / releaseName 从这里插值取值。
   # 仍然要在这里声明一次 —— 平台只对声明过的变量做插值，漏了就是空字符串。
-  #   PRERELEASE  不是「预发布开关」：它是版本号后缀算出来的结果，页面上没有这个参数了。
+  #   PRERELEASE   不是「预发布开关」：它是版本号后缀算出来的结果，页面上没有这个参数了。
+  #   RELEASE_NAME 带项目名前缀的标题，与另外四个平台的 release.yml 同口径。
   - PRERELEASE
   - RELEASE_BODY
+  - RELEASE_NAME
 
 stages:
   # 必须分成两个 stage：stage 之间才算「按配置顺序串行执行」，且上游失败不触发下游 ——
@@ -133,6 +135,8 @@ stages:
             export VERSION="${RAW_VERSION}"
             # shellcheck disable=SC1091
             . scripts/ci/resolve-prerelease.sh
+            # source 只带进函数，必须显式调用才会算出 TAG / PKG_VERSION / PRERELEASE
+            resolve_version "${VERSION}" || exit 1
             PRE="${PRERELEASE}"
             echo "版本号: ${TAG}  预发布: ${PRE}"
 
@@ -142,6 +146,51 @@ stages:
             export PRERELEASE="${PRE}"
             export OUT_DIR=bin
             node scripts/ci/gitee-download-assets.js
+
+            # 正文与校验文件都用与另外四个平台同一份实现：
+            #   scripts/ci/render-release-body.sh   表格 / 标题 / 下载链接 / 校验说明
+            #   scripts/ci/release-changelog.sh     按渠道选对比基准的更新内容
+            # 上游（CNB / GitHub）的正文不直接透传：下载链接要指向 Gitee 自己的附件，
+            # 校验节也必须与其它平台逐字一致。上游正文只在本地生成失败时兜底。
+            cp release_body.md release_body.upstream.md
+
+            (
+              cd bin
+              if command -v sha256sum >/dev/null 2>&1; then
+                : > SHA256SUMS
+                for f in *.deb *.fpk; do
+                  [ -e "$f" ] || continue
+                  sha256sum "$f" >> SHA256SUMS
+                done
+              else
+                # 插件镜像不一定带 coreutils，但一定有 node（本步骤就是 build@nodejs）。
+                # 格式与 sha256sum 一致：「哈希 + 两个空格 + 文件名」，否则正文里的
+                # sha256sum -c SHA256SUMS 会校验不过。
+                node -e '
+                  const fs = require("fs"), crypto = require("crypto");
+                  const lines = fs.readdirSync(".").filter(function (f) {
+                    return /\.(deb|fpk)$/.test(f);
+                  }).sort().map(function (f) {
+                    const h = crypto.createHash("sha256").update(fs.readFileSync(f)).digest("hex");
+                    return h + "  " + f;
+                  });
+                  fs.writeFileSync("SHA256SUMS", lines.join("\n") + "\n");
+                '
+              fi
+              cat SHA256SUMS
+            )
+
+            # Gitee Go 的检出通常不带 tag，先补一次；补不到时 changelog 会退化成「首次发布」
+            git fetch --tags --quiet --force origin 2>/dev/null || true
+            CHANGELOG="$(sh scripts/ci/release-changelog.sh "${TAG}" 2>/dev/null || true)"
+            if ! VERSION="${TAG}" PRERELEASE="${PRE}" \
+              DL_BASE="https://gitee.com/dtapps/fnmusic-sync/releases/download/${TAG}" \
+              STABLE_URL="https://gitee.com/dtapps/fnmusic-sync/releases" \
+              ARTIFACT_DIR=bin OUT_FILE=release_body.md CHANGELOG="${CHANGELOG}" \
+              sh scripts/ci/render-release-body.sh; then
+              echo "⚠ 正文生成失败，回退到上游正文"
+              cp release_body.upstream.md release_body.md
+            fi
 
             # 正文转单行 HTML 并写进 GITEE_PARAMS。marked 只在这里用一次，装到独立
             # prefix 里，不碰仓库的 package.json（在仓库根 npm install 有改写 manifest
@@ -192,7 +241,8 @@ stages:
         displayName: 创建 Gitee Release 并上传附件
         # tag 直接用 VERSION 原文（下载阶段已归一化成带 v 的形式）。
         # 这里不能写 v${VERSION}：VERSION 已带 v 时会拼成 vv0.1.31。
-        releaseName: ${VERSION}
+        # 标题用带项目名前缀 + 「(预发布)」后缀的 RELEASE_NAME，与另外四个平台同口径。
+        releaseName: ${RELEASE_NAME}
         tagName: ${VERSION}
         # 正文取自全局参数 RELEASE_BODY：下载阶段把 release_body.md 转成 HTML，
         # 处理掉 = 和超长分量后写成单行，经 GITEE_PARAMS 到这里插值。
@@ -202,14 +252,15 @@ stages:
           - REL_ASSETS
         # 必须逐个列文件名。插件不支持目录：填 bin 会把整个目录压成
         # bin.tar.gz 去上传，然后 400 失败。
-        # 这四个就是 CNB / GitHub Release 里的全部产物，名字不带版本段，
-        # 与下载阶段的落盘名逐字一致。上游增减产物时要同步加行，
-        # 少列一个不会报错，只是那个文件不会出现在 Gitee Release 里。
+        # 前四个是 CNB / GitHub 的产物（名字不带版本段，与下载阶段的落盘名逐字一致），
+        # 最后一个是下载阶段本地算出的校验文件（没有 sha256sum 时不会存在，见上）。
+        # 上游增减产物时要同步加行，少列一个不会报错，只是那个文件不会出现在 Gitee Release 里。
         assertFiles:
           - bin/fnmusic-sync_amd64.deb
           - bin/fnmusic-sync_arm64.deb
           - bin/fnmusic-sync-amd64.fpk
           - bin/fnmusic-sync-arm64.fpk
+          - bin/SHA256SUMS
         # 预发布：值由下载阶段判定后写进 GITEE_PARAMS，这里插值取 true / false。
         prerelease: ${PRERELEASE}
         # 同 tag 已存在时覆盖，代替手写的「先删旧 Release」
