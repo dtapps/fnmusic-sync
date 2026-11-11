@@ -386,7 +386,7 @@ make clean-archives        # clean bare binaries + tar.gz, keep packages
 
 The version number is determined by `git describe --tags` and injected into the `internal/buildinfo` package via `-ldflags -X`, so `fnmusic-sync version` shows the real version; a local `go build` without ldflags shows `dev`.
 
-CI (`.cnb/workflows/release.yml`) builds and publishes a Release when a tag is cut, supports a `pre_release` switch, and the Release body uses a table to mark version number, release type and whether it is a pre-release.
+CI (the release workflows on all five platforms share `scripts/ci/render-release-body.sh`) builds and publishes a Release when a tag is cut; the Release body contains a release info table, download table, `SHA256SUMS` verification notes and changelog grouped by channel. **Pre-release status is determined solely by the version suffix** (`v1.2.3-rc.1` / `-beta.1` / `-alpha.1` / `-nightly.20260101`); the pipeline takes only a version number, with no pre-release switch.
 
 ## Directory structure
 

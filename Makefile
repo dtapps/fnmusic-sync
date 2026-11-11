@@ -321,7 +321,7 @@ format-shell:
 		exit 0 ; \
 	}
 	@echo "[Format] 使用 shfmt 格式化 Shell..."
-	@shfmt -w -i 2 -ci -bn -s -ln bash $(FPKG_DIR)/cmd/* || { echo "❌ shfmt 格式化失败"; exit 1; }
+	@shfmt -w -i 2 -ci -bn -s -ln bash scripts/ $(FPKG_DIR)/cmd/* || { echo "❌ shfmt 格式化失败"; exit 1; }
 	@echo "[Format] Shell 格式化完成（shfmt）。"
 
 # 格式化 SQL 文件

@@ -65,7 +65,7 @@ CI 镜像**不再由本仓库构建**：所有 job 统一拉预置镜像 `regist
 
 `VERSION` 留空时**什么都不建**——没有事可做，建一条零 job 的流水线只会报错。以前那个用来「只刷镜像不发版」的 `CI_FORCE_REBUILD_IMAGE` 开关已随自建镜像方案删除。
 
-版本处理与另外两个平台一致：
+版本处理与另外四个平台一致：
 
 | 变量          | 值                               | 用途                                                                                                                         |
 |---------------|----------------------------------|------------------------------------------------------------------------------------------------------------------------------|
@@ -73,9 +73,9 @@ CI 镜像**不再由本仓库构建**：所有 job 统一拉预置镜像 `regist
 | `TAG_NAME`    | `v` + 去 v 后的版本              | git tag / Release 名 / 包仓库里的版本目录                                                                                    |
 | `PKG_VERSION` | 去 v 后的版本                    | 进 fpk manifest 与前端 package.json；deb 元数据用它的 `~` 变体（`DEB_VERSION`），否则 `0.1.32-rc.1` 在 dpkg 里比 `0.1.32` 新 |
 
-`VERSION` 会先过一遍正则（`^\d+\.\d+\.\d+` 起头），打错直接红在第一步，不会建出乱七八糟的 tag。
+`VERSION` 先在 `scripts/ci/resolve-prerelease.sh` 里过字符白名单（只允许字母、数字、`. _ + -`），空值或带引号/分号直接失败；`^\d+\.\d+\.\d+` 起头的形态检查在打包阶段的 `scripts/ci/build-linux-packages.sh`，不通过同样终止，不会建出乱七八糟的 tag。
 
-**预发布版本必须在版本号里带 semver 后缀**（`0.1.32-rc.1` / `-beta.1` / `-alpha.1`）：GitLab 的 Release 没有 prerelease 字段，tag 里的后缀是客户端 `FetchLatestTag` 判断预发布的唯一依据。判定与另外四个平台共用 `scripts/ci/resolve-prerelease.sh`：带后缀是预发布，不带是正式版 —— 流水线没有「是否预发布」这个入参。
+**预发布版本必须在版本号里带 semver 后缀**（`0.1.32-rc.1` / `-beta.1` / `-alpha.1` / `-nightly.20260101`）：GitLab 的 Release 没有 prerelease 字段，tag 里的后缀是客户端 `FetchLatestTag` 判断预发布的唯一依据。判定与另外四个平台共用 `scripts/ci/resolve-prerelease.sh`：带后缀是预发布，不带是正式版 —— 流水线没有「是否预发布」这个入参。
 
 产物（`make clean-archives` 之后剩下的就是这些）：
 

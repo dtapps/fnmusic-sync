@@ -316,7 +316,9 @@ const CNB_FILES = [
   { name: 'fnmusic-sync-arm64.fpk', arch: 'arm64', desc: '飞牛 fnOS' },
 ];
 
-// 正文格式与 CNB / GitHub 那份 release_body.md 保持一致（同四行发布信息 + 同五列下载表）
+// ⚠ 这份正文只是兜底：.workflow/release.yml 在下载之后会调用
+// scripts/ci/render-release-body.sh 覆盖它（那是五个平台共用的唯一实现，
+// 含校验节与提交行）。只有那个脚本在 Gitee 环境里跑不起来时，才会用到这份。
 function localBody(sizes) {
   const pre = (process.env.PRERELEASE || 'false').trim() === 'true';
   const dl = 'https://gitee.com/dtapps/fnmusic-sync/releases/download/' + TAG;
@@ -328,7 +330,6 @@ function localBody(sizes) {
   lines.push('## 发布信息', '', '| 项目 | 内容 |', '| --- | --- |');
   lines.push('| 版本号 | ' + TAG + ' |');
   lines.push('| 发布类型 | ' + (pre ? '🚧 预发布版本 (Pre-release)' : '✅ 正式发布版本 (Stable)') + ' |');
-  lines.push('| 是否预发布 | ' + (pre ? 'true' : 'false') + ' |');
   lines.push('| 构建时间 | ' + now + ' |');
   lines.push('', '## 下载', '', '| 平台 | 架构 | 文件 | 大小 | 说明 |', '|------|------|------|------|------|');
   for (const f of CNB_FILES) {

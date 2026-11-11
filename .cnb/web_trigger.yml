@@ -2,11 +2,13 @@
 #
 # **只有一个输入：version。没有 pre_release 开关了。**
 # 预发布由版本号自己带着走（唯一规则，五个平台共用 scripts/ci/resolve-prerelease.sh）：
-#   v1.2.3          → 正式版
-#   v1.2.3-rc.1     → 预发布
-#   v1.2.3-beta.1   → 预发布
-#   v1.2.3-alpha.1  → 预发布
+#   v1.2.3                    → 正式版
+#   v1.2.3-rc.1               → 预发布（rc 渠道）
+#   v1.2.3-beta.1             → 预发布（beta 渠道）
+#   v1.2.3-alpha.1            → 预发布（alpha 渠道）
+#   v1.2.3-nightly.20260101   → 预发布（nightly 渠道）
 # 也就是 semver 的 `-<prerelease>` 段：有就是预发布，没有就是正式版。
+# 后缀还决定 changelog 对比基准：同渠道之间互相对比（今天的 nightly 对昨天的 nightly）。
 #
 # 开关是删掉的，不是藏起来的。它以前能把整条流水线卡死在第一步：实测点这个按钮时
 # default: 'false' 没有生效，传进来的是 true，「版本号 v0.1.31 + pre_release=true」
@@ -16,7 +18,7 @@
 branch:
   - buttons:
       - name: 打包 Go 项目
-        description: 打包 Go 项目并发布 Release（预发布看版本号后缀：-rc.1 / -beta.1 / -alpha.1）
+        description: 打包 Go 项目并发布 Release（预发布看版本号后缀：-rc.1 / -beta.1 / -alpha.1 / -nightly.20260101）
         event: web_trigger_build_go_project # 触发的 CI 事件名
         permissions:
           roles:
@@ -27,7 +29,7 @@ branch:
           version:
             # 输入框
             name: 版本号
-            description: 要发布的版本号，可带或不带 v（1.2.3 / v1.2.3 / v1.2.3-rc.1 / v1.2.3-beta.1 / v1.2.3-alpha.1）
+            description: 要发布的版本号，可带或不带 v（1.2.3 / v1.2.3 / v1.2.3-rc.1 / v1.2.3-beta.1 / v1.2.3-alpha.1 / v1.2.3-nightly.20260101）
             required: true # 是否必填
             type: input
             default: ''

@@ -181,15 +181,18 @@ sudo sh /tmp/install.sh upgrade --version v0.0.32
 
 这套规则**依赖发布时的 tag 命名**，所以发版流水线里**只有一个参数：版本号**。五个平台（CNB / GitHub / GitLab / Gitee / GitCode）共用同一份判定（`scripts/ci/resolve-prerelease.sh`），没有开关、没有「是否预发布」字段可填：
 
-| 版本号形态               | 判定     | 说明                                                   |
-|--------------------------|----------|--------------------------------------------------------|
-| `v1.2.3`                 | 正式版   | `PRERELEASE=false`                                     |
-| `v1.2.3-rc.1`            | 预发布   | 带 semver 的 `-<prerelease>` 段就是预发布              |
-| `v1.2.3-beta.1`          | 预发布   | 同上                                                   |
-| `v1.2.3-alpha.1`         | 预发布   | 同上（`-dev` / `-pre` 之类也一样，判法与客户端一致）   |
-| 空 / `v` / `1.2` / `abc` | 直接失败 | `+build` 元数据也挡：deb 与 fpk 的版本段没为它做过处理 |
+| 版本号形态                 | 判定     | 说明                                                   |
+|----------------------------|----------|--------------------------------------------------------|
+| `v1.2.3`                   | 正式版   | `PRERELEASE=false`                                     |
+| `v1.2.3-rc.1`              | 预发布   | rc 渠道，changelog 对比上一个 rc                       |
+| `v1.2.3-beta.1`            | 预发布   | beta 渠道，changelog 对比上一个 beta                   |
+| `v1.2.3-alpha.1`           | 预发布   | alpha 渠道，changelog 对比上一个 alpha                 |
+| `v1.2.3-nightly.20260101`  | 预发布   | nightly 渠道，changelog 对比昨天的 nightly             |
+| 空 / `v` / `1.2` / `abc`   | 直接失败 | `+build` 元数据也挡：deb 与 fpk 的版本段没为它做过处理 |
 
-判法与客户端 `internal/updater.isPrereleaseTag` 逐字对齐 —— 两边不一致的后果是「发出去的版本没人能升上去」或者「稳定用户被推到 rc 上」，两种都撤不回来。
+后缀同时也是 **changelog 的渠道**：`scripts/ci/release-changelog.sh` 按 `rc / beta / alpha / nightly / stable` 分别找同渠道的上一个 tag，首次发某渠道（含 nightly）则回退到上一个正式版。正式版的对比基准永远只看正式版 tag，不会被 nightly 污染。
+
+判法与客户端 `internal/updater.isPrereleaseTag` 逐字对齐（客户端认的是任意 `-<prerelease>` 段，不枚举渠道名）—— 两边不一致的后果是「发出去的版本没人能升上去」或者「稳定用户被推到 rc / nightly 上」，两种都撤不回来。
 
 为什么把那个开关彻底删掉：它跟版本号会打架，而打架的时候必然是在用户什么都没做错的时候打。CNB 的 `switch` 踩过：`web_trigger.yml` 里写死 `default: 'false'`，实际传进来仍是 `true`，「`v0.1.31` + 预发布」撞上硬失败，red 在第一步，页面上没有任何东西能让用户看出这个 `true` 从哪来。版本号里已经写了 `-rc.1`，再让人勾一遍只是多一个出错的地方。
 

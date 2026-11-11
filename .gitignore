@@ -73,3 +73,5 @@ coverage-go.xml
 /.ci-release.env
 /GITEE_PARAMS
 /release.env
+
+AGENTS.md

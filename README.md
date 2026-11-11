@@ -389,7 +389,7 @@ make clean-archives        # 清理裸二进制 + tar.gz，保留安装包
 
 版本号由 `git describe --tags` 决定，通过 `-ldflags -X` 注入到 `internal/buildinfo` 包，所以 `fnmusic-sync version` 能显示真实版本；本地 `go build` 不带 ldflags 时显示为 `dev`。
 
-CI（`.cnb/workflows/release.yml`）在打 tag 时构建并发布 Release，Release 正文用表格标注版本号、发布类型与是否为预发布。**预发布只由版本号后缀决定**（`v1.2.3-rc.1` / `-beta.1` / `-alpha.1`），流水线只有一个版本号入参，没有预发布开关。
+CI（五个平台的 release 流水线共用 `scripts/ci/render-release-body.sh`）在打 tag 时构建并发布 Release，正文含发布信息表、下载表、`SHA256SUMS` 校验说明与按渠道对比的更新内容。**预发布只由版本号后缀决定**（`v1.2.3-rc.1` / `-beta.1` / `-alpha.1` / `-nightly.20260101`），流水线只有一个版本号入参，没有预发布开关。
 
 ## 目录结构
 

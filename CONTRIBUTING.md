@@ -75,12 +75,12 @@ git switch -c feat/lb-playlist-range
 
 ## CI 门禁
 
-仓库同时挂 CNB、GitHub Actions、GitLab CI 三套流水线，职责不同：
+仓库同时挂 CNB、GitHub Actions、GitLab CI 三套 CI 流水线，负责构建与门禁；发布另有 GitCode（自己构建）与 Gitee（只转发）两条，见 [docs/contributing.md](docs/contributing.md)：
 
 | 平台   | 跑什么                                                      |
 |--------|-------------------------------------------------------------|
 | CNB    | 构建、测试、代码评审、SCA / 许可证 / SBOM、CodeWiki、覆盖率 |
-| GitHub | 构建、Codecov、Coveralls、CI 镜像构建                       |
+| GitHub | 构建、Codecov、Coveralls                                    |
 | GitLab | 构建与打包发布（刻意不跑覆盖率）                            |
 
 分工、失败定位与覆盖率上报方式见 [docs/contributing.md](docs/contributing.md)；CI 镜像的工具版本对应关系见 [docs/ci-image.md](docs/ci-image.md)。

@@ -176,7 +176,9 @@ func fetchLatestTagGitHub(client *http.Client) (string, error) {
 }
 
 // isPrereleaseTag 判断 tag 是不是预发布，依据是 semver 的 `-<prerelease>` 段：
-// v1.2.3-rc.1 / v1.2.3-beta / 1.2.4-pre 都算，v1.2.3 不算。
+// v1.2.3-rc.1 / v1.2.3-beta / v1.2.3-nightly.20260101 / 1.2.4-pre 都算，v1.2.3 不算。
+// 这里刻意不枚举渠道名：CI 侧新增 nightly 之类的后缀时，客户端无需跟着改，
+// 否则稳定用户会被推到还没认出来的预发布版本上。
 //
 // 为什么靠 tag 而不是平台字段：GitHub 的 releases API 自带 prerelease 标记、
 // releases/latest 会直接排除它们；CNB 有 prerelease 字段；而 GitLab 的 Release

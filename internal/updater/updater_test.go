@@ -467,6 +467,8 @@ func TestIsPrereleaseTag(t *testing.T) {
 		{tag: "v1.2.3-rc.1", want: true},
 		{tag: "1.2.3-beta", want: true},
 		{tag: "v1.2.4-pre", want: true},
+		{tag: "v1.2.3-nightly.20260101", want: true}, // CI 侧 nightly 渠道，客户端必须一致
+		{tag: "v1.2.3-nightly", want: true},
 		{tag: "v1.2.3-", want: false}, // 空的预发布段不算
 		{tag: "v1.2.3.4-rc1", want: true},
 		{tag: "dev", want: false},
