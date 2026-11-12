@@ -154,8 +154,8 @@ VALUES
     ?10,
     ?11,
     ?12
-  ) ON CONFLICT (feiniu_guid) DO
-UPDATE
+  )
+ON CONFLICT (feiniu_guid) DO UPDATE
 SET
   file_path = excluded.file_path,
   title = excluded.title,
@@ -167,7 +167,9 @@ SET
   artist_mbid = excluded.artist_mbid,
   work_mbid = excluded.work_mbid,
   matched_by = excluded.matched_by,
-  updated_at = excluded.updated_at RETURNING feiniu_guid, file_path, title, artist, album, recording_mbid, release_mbid, release_group_mbid, artist_mbid, work_mbid, matched_by, updated_at
+  updated_at = excluded.updated_at
+RETURNING
+  feiniu_guid, file_path, title, artist, album, recording_mbid, release_mbid, release_group_mbid, artist_mbid, work_mbid, matched_by, updated_at
 `
 
 type UpsertTrackMBIDParams struct {

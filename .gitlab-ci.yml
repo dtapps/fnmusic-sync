@@ -54,7 +54,8 @@ variables:
   # Run pipeline 页面会把带 description 的变量列成表单，方便手填
   VERSION:
     value: ''
-    description: '要发布的版本号，可带或不带 v 前缀（如 0.1.31 / v0.1.31 / v0.1.32-rc.1 / v0.1.32-beta.1 / v0.1.32-alpha.1 / v0.1.32-nightly.20260101）。留空 = 不发布，也不建流水线。'
+    description: '要发布的版本号，可带或不带 v 前缀（如 0.1.31 / v0.1.31 / v0.1.32-rc.1 / v0.1.32-beta.1 / v0.1.32-alpha.1 / v0.1.32-nightly.20260101）。留空
+      = 不发布，也不建流水线。'
   # 二进制内嵌的构建来源标识（buildinfo.RepoSource）。
   # updater 只区分 github 与其它：非 github 一律走 CNB 升级链路，所以 gitlab 与 cnb 运行时等价，
   # 但 UI「构建来源」会如实显示 gitlab。要支持从 GitLab API 升级需另改 internal/updater。

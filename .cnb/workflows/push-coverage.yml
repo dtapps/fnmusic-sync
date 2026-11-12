@@ -1,12 +1,10 @@
 '**':
   push:
     # Go 单元测试覆盖率（全量红线）。
-    # 复用同一 Dockerfile 构建环境与 Go 模块/构建缓存（不需要 pnpm 缓存，不构建前端）。
-    # 参考 CNB 官方示例 examples/ecosystem/testing-go-demo 的 testing:coverage 内置任务。
     - runner:
         tags: cnb:arch:amd64
       docker:
-        image: docker.cnb.cool/dtapp/golang/fnpack:latest
+        image: docker.cnb.cool/dtapp/golang/fnpack:latest # 统一使用预构建的 CI 环境镜像
         volumes:
           - /root/.cache/go-build:copy-on-write # Go 构建缓存 - 加速编译
           - /root/.local/share/pnpm/store:copy-on-write # pnpm 全局存储 - 加速前端依赖安装
@@ -16,15 +14,7 @@
           script: make deps
 
         - name: 生成测试覆盖率
-          # 命令按本项目实际编写（非从其他项目照抄）：
-          # - 本项目无 internal/ent；生成代码是 sqlc 的 internal/db、internal/datadb
-          #   （占约 11% 语句，计入分母会稀释指标，故排除）。
-          # - webui 包带 //go:build fpk 标签，默认构建不参与测试。
-          # -vet=off：i18n.T() 作 printf 参数会触发 vet non-constant format 报错。
-          script:
-            - go test -vet=off -coverpkg=$(go list ./... | grep -vE '/(db|datadb)$' | paste -sd, -) -coverprofile=coverage.out
-              ./...
-            - go tool cover -func=coverage.out
+          script: make cover-go # 产出 coverage.out
 
         - name: 上报覆盖率（全量红线）
           # https://docs.cnb.cool/zh/build/internal-steps/testing/coverage.html
@@ -43,12 +33,11 @@
         - name: 输出覆盖率
           script: 'echo "coverage: lines=$COVERAGE_LINES diff=$COVERAGE_DIFF_PCT"'
 
-    # Node 单元测试覆盖率（全量红线）。
-    # 前端为 Svelte 5 + vitest（node 环境 + 环境桩）。
+    # 前端单元测试覆盖率（全量红线）。
     - runner:
         tags: cnb:arch:amd64
       docker:
-        image: docker.cnb.cool/dtapp/golang/fnpack:latest
+        image: docker.cnb.cool/dtapp/golang/fnpack:latest # 统一使用预构建的 CI 环境镜像
         volumes:
           - /root/.cache/go-build:copy-on-write # Go 构建缓存 - 加速编译
           - /root/.local/share/pnpm/store:copy-on-write # pnpm 全局存储 - 加速前端依赖安装
@@ -58,10 +47,11 @@
           script: make deps
 
         - name: 生成前端测试覆盖率
-          script: pnpm --dir cmd/frontend test:coverage # 产出 cmd/frontend/coverage/lcov.info
+          script: make cover-node # 产出 cmd/frontend/coverage/lcov.info
 
         - name: 上报覆盖率（全量红线）
           # https://docs.cnb.cool/zh/build/internal-steps/testing/coverage.html
+          # lcov 格式由插件自动识别，无需指定 lang（lang=go 仅 golang 格式报告需要）
           type: testing:coverage
           options:
             key: node # 多报告数据键：与 Go 侧（key: go）区分，各自写入 meta map 互不覆盖

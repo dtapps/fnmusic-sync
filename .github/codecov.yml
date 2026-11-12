@@ -2,8 +2,8 @@
 # 官方文档：https://docs.codecov.com/docs/codecov-yaml
 #
 # 本仓库 Go 后端 + Node(Svelte) 前端两套覆盖率，用 flags 区分（go / node）。
-# 数据由 GitHub Actions 的覆盖率工作流（.github/workflows/coverage.yml，
-# 使用 codecov/codecov-action@v5）生成并上传：
+# 数据由 GitHub Actions 的覆盖率工作流（.github/workflows/codecov.yml，
+# 使用 codecov/codecov-action@v7）生成并上传：
 #   - Go 后端    → coverage.out                    （flag: go）
 #   - 前端 Svelte → cmd/frontend/coverage/lcov.info（flag: node）
 # 两份报告用不同 flag 区分，各自独立统计、互不覆盖。

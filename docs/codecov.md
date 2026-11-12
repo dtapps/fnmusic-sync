@@ -4,37 +4,38 @@
 
 ## 1. 总览：三个支柱 + 职责分离
 
-| 支柱                     | 内容            | 本仓库实现                                                                                                         | Codecov 里看什么                      |
-|--------------------------|-----------------|--------------------------------------------------------------------------------------------------------------------|---------------------------------------|
-| 覆盖率 Coverage          | 代码行覆盖率    | `codecov/codecov-action` 上传 Go `coverage.out` 与前端 `lcov.info`                                                 | Coverage 面板、PR 评论、patch 状态    |
-| 打包体积 Bundle Analysis | 前端 chunk 体积 | `@codecov/vite-plugin`（构建时上传）                                                                               | Bundle 面板（体积趋势 / 回归）        |
-| 测试结果 Test Analytics  | 单测运行结果    | Go：`gotestsum --junitfile`；前端(Svelte)：Vitest `json` → 脚本转 JUnit；合并由 `codecov/test-results-action` 上传 | Tests 面板（时长 / flaky / 失败分析） |
+| 支柱                     | 内容            | 本仓库实现                                                                                                                                      | Codecov 里看什么                      |
+|--------------------------|-----------------|-------------------------------------------------------------------------------------------------------------------------------------------------|---------------------------------------|
+| 覆盖率 Coverage          | 代码行覆盖率    | `codecov/codecov-action` 上传 Go `coverage.out` 与前端 `lcov.info`                                                                              | Coverage 面板、PR 评论、patch 状态    |
+| 打包体积 Bundle Analysis | 前端 chunk 体积 | `@codecov/vite-plugin`（构建时上传）                                                                                                            | Bundle 面板（体积趋势 / 回归）        |
+| 测试结果 Test Analytics  | 单测运行结果    | Go：`gotestsum --junitfile`；前端(Svelte)：Vitest 内置 `junit` reporter；合并由 `codecov/codecov-action@v7` 的 `report_type: test_results` 上传 | Tests 面板（时长 / flaky / 失败分析） |
 
 > **职责分离（重要）**：CNB 流水线（`testing:coverage`）负责**硬性红线门禁**（`lines` / `diffLines`），会阻断低覆盖率合并；GitHub Actions 只负责**把数据上报到 Codecov** 做可视化（PR 评论、徽章、patch 状态）。因此 `.github/codecov.yml` 里的 `status` 全部设为 `informational`，避免与 CNB 双重门禁。
 
 ## 2. 涉及文件清单
 
-| 文件                                            | 作用                                                                                                                |
-|-------------------------------------------------|---------------------------------------------------------------------------------------------------------------------|
-| `.github/codecov.yml`                           | Codecov 规则：忽略 `internal/db`、`internal/datadb` 等 sqlc 生成代码、`flags`（go / node）、`status: informational` |
-| `.github/workflows/codecov.yml`                 | GitHub Actions 流水线：装依赖 → 跑 Go/前端测试 → 构建前端 → 上传覆盖率 / 测试结果                                   |
-| `cmd/frontend/vite.config.ts`                   | 条件加载 `@codecov/vite-plugin`（仅当 `CODECOV_TOKEN` 存在时实例化）                                                |
-| `cmd/frontend/scripts/vitest-json-to-junit.mjs` | 零依赖脚本：Vitest JSON → JUnit XML                                                                                 |
-| `cmd/frontend/package.json`                     | `devDependencies`：`@codecov/vite-plugin` 等                                                                        |
+| 文件                            | 作用                                                                                                                |
+|---------------------------------|---------------------------------------------------------------------------------------------------------------------|
+| `.github/codecov.yml`           | Codecov 规则：忽略 `internal/db`、`internal/datadb` 等 sqlc 生成代码、`flags`（go / node）、`status: informational` |
+| `.github/workflows/codecov.yml` | GitHub Actions 流水线：装依赖 → 跑 Go/前端测试 → 构建前端 → 上传覆盖率 / 测试结果                                   |
+| `cmd/frontend/vite.config.ts`   | 条件加载 `@codecov/vite-plugin`（仅当 `CODECOV_TOKEN` 存在时实例化）                                                |
+| `Makefile`（`测试覆盖率` 一节） | 覆盖率命令与扫描 / 排除清单的唯一来源：`cover-go` / `junit-go` / `cover-node` / `junit-node`                        |
+| `cmd/frontend/vitest.config.ts` | 读取 Makefile 注入的 `VITEST_TEST_INCLUDE` / `VITEST_COVER_INCLUDE` / `VITEST_COVER_EXCLUDE`                        |
+| `cmd/frontend/package.json`     | `devDependencies`：`@codecov/vite-plugin` 等                                                                        |
 
 ## 3. 各功能详解
 
 ### 3.1 覆盖率（Coverage）
 
-- Go：复用 CNB 的同款口径
+- Go：复用 CNB 的同款口径，命令收敛在 Makefile 的 `cover-go` 目标
 
   ```
-  go test -vet=off -coverpkg=$(go list ./... | grep -vE '/(db|datadb)$' | paste -sd, -) -coverprofile=coverage.out ./...
+  make cover-go     # = go test -vet=off -coverpkg=$(go list ./... | grep -vE '/(db|datadb)$' | paste -sd, -) -coverprofile=coverage.out ./...
   ```
   - 本项目**无 ent**；生成代码是 sqlc 的 `internal/db`、`internal/datadb`（合计约占 11% 语句块），计入分母会稀释指标，故从 `-coverpkg` 排除。
   - 其余口径见 `docs/coverage-go.md`（范围 `./...`、`-vet=off` 原因等）。
-- 前端：`pnpm test:coverage`（Vitest v8 覆盖率，产出 `cmd/frontend/coverage/lcov.info`）。
-- 上传：`codecov/codecov-action@v5`，分别带 `flags: go` / `flags: node`（对应 `docs/coverage-go.md` / `docs/coverage-node.md` 的 CNB key）。
+- 前端：`make cover-node`（Vitest v8 覆盖率，产出 `cmd/frontend/coverage/lcov.info`；扫描 / 排除清单由 Makefile 注入 vitest）。
+- 上传：`codecov/codecov-action@v7`，分别带 `flags: go` / `flags: node`（对应 `docs/coverage-go.md` / `docs/coverage-node.md` 的 CNB key）。
 
 ### 3.2 打包体积（Bundle Analysis）
 
@@ -53,73 +54,52 @@
   ```
 - 上传发生在 `pnpm build`（= `vite build`）这一步。
 - ⚠️ **兼容性注意**：该插件 peer 仅声明支持 Vite `4/5/6`，而本仓库为 **Vite 8.3.5**。因此特意用「条件数组」而非无条件 `import`——CNB 生产构建与本地构建都**没有** `CODECOV_TOKEN`，插件根本不会实例化，绝不影响主构建。若日后插件更新支持 Vite 8，逻辑无需改动。
-- 构建步骤设了 `continue-on-error: true`：万一插件与 Vite 8 不兼容导致 `vite build` 崩溃，也**不会拖垮**上面的覆盖率上传。
+- 构建步骤（`make build-frontend`）排在两次覆盖率上传**之后**：插件与 Vite 8 不兼容导致 `vite build` 崩溃时，覆盖率 / 测试结果已经上传完毕，只是 job 会被标红。
 - 与 certflow 不同，本仓库前端 `vite build` 的产物写到 **`internal/webui/www`**（Go embed 目录，而非 `dist/`），这是有意设计，不影响 Bundle 上报。
 
 ### 3.3 测试结果（Test Analytics）
 
-Go 与前端(Svelte) 都不原生产出 JUnit，分别用不同方式转换后**合并上传**到同一个 `codecov/test-results-action@v1`：
+Go 与前端(Svelte) 的 JUnit 由**两个 Makefile 目标**产出，再**合并上传**到同一步 `codecov/codecov-action@v7`（`report_type: test_results`）：
+
+> `codecov/test-results-action@v1` 已弃用：它固定跑在 Node 20 上，GitHub runner 强制提升到 Node 24 会报 deprecation 警告；官方迁移路径是 `codecov/codecov-action`（v5 起新增 `report_type` 输入）为覆盖率与测试结果各跑至少一次。本工作流里覆盖率跑两次（`flags: go` / `flags: node`），测试结果跑一次，并设 `disable_search: true` 只上传显式列出的两份 JUnit。
+>
+> **别丢掉 `github-actions` reporter**：Vitest 的默认 reporters = `[default, github-actions]`（`GITHUB_ACTIONS=true` 时追加），它写 `$GITHUB_STEP_SUMMARY` 的「Vitest Test Report / Summary」并输出失败注解。**一旦显式传 `--reporter` 就会整体替换这个列表**，所以 `make cover-node` 刻意不传 `--reporter`（注解与 Summary 区块由它产出）；`make junit-node` 必须显式传 `--reporter=junit` 才能出 XML，那一次没有该 reporter，注解由前一步提供。`github-actions` reporter 在非 GHA 环境安全空转（无 `GITHUB_STEP_SUMMARY` 即跳过写文件），CNB 侧不受影响。
 
 - **Go**：`go test` 不原生产 JUnit，用 `gotestsum` 包裹（参数原样透传，`coverage.out` 照常产出），额外生成 `go-test-report.xml`：
 
   ```
-  go install gotest.tools/gotestsum@v1.13.0
-  export PATH="$(go env GOPATH)/bin:$PATH"
-  gotestsum --junitfile go-test-report.xml -- -vet=off -coverpkg=$(go list ./... | grep -vE '/(db|datadb)$' | paste -sd, -) -coverprofile=coverage.out ./...
+  make junit-go     # = gotestsum --junitfile go-test-report.xml -- <cover-go 的参数>
   ```
   - ⚠️ `gotestsum` 必须固定为 **v1.13.0**：v1.12.0 依赖的旧版 `golang.org/x/tools` 无法在 Go 1.27 上编译（`invalid array length`），v1.13.0 升到 x/tools v0.36.0 后正常。
-- **前端(Svelte / Vitest 5.0.5)**：无内置 junit reporter（社区 `@vitest/junit` 包在 npm 也已不可得），改用内置 `json` reporter 产出 `test-results.json`，再由零依赖脚本转 JUnit：
-  1. 测试步骤额外挂内置 `json` reporter 产出 `test-results.json`：
+- **前端(Svelte / Vitest 5.1)**：vitest 5.1 **已内置 `junit` reporter**，直接产出 `cmd/frontend/coverage/junit.xml`：
 
-     ```
-     pnpm test:coverage --reporter=default --reporter=json --outputFile=test-results.json
-     ```
+  ```
+  make junit-node    # = vitest run --reporter=junit --outputFile=<abs>/cmd/frontend/coverage/junit.xml
+  ```
 
-     （`coverage/lcov.info` 仍正常产出，不受影响。）
-  2. 转换步骤用 `node scripts/vitest-json-to-junit.mjs` 把 JSON 转成 `test-report.xml`（JUnit 格式）。
-- 上传步骤的 `files` 已合并两份报告：`cmd/frontend/test-report.xml,./go-test-report.xml`。
+  （`coverage/lcov.info` 由 `make cover-node` 单独产出，两者互不影响。）
+- 上传步骤的 `files` 已合并两份报告：`./go-test-report.xml,./cmd/frontend/coverage/junit.xml`。
 - 最终 Codecov 的 **Tests** 面板同时包含 Go 与前端(Svelte) 的测试结果。
 
 #### classname 必须是「仓库相对 + `/` 分隔」
 
 Codecov Test Analytics **只用 `testcase` 的 `classname` 属性**定位用例归属文件（官方 Jest 示例即 `JEST_JUNIT_CLASSNAME="{filepath}"`；`file` / `filepath` 属性文档未提及，不可依赖）。`classname` 同时决定文件分组、跨 run 关联（flaky 判定）与失败位置跳转。
 
-差异来自各自默认产出：
+两个产出方的 `classname`：
 
 - gotestsum（Go）：`classname` = 包导入路径 `cnb.cool/dtapp/fnmusic-sync/internal/auth` → 天然稳定 ✅
-- Vitest `json` reporter：`testResults[].name` 是**测试文件绝对路径**，直接写进 `classname` 就带上 runner 前缀 ❌
+- Vitest 内置 `junit` reporter：`classname` = **相对 vitest root 的测试文件路径**（`src/test/api.test.ts`），不带 runner 前缀 ✅
 
-runner 前缀**随 CI 执行形态变化**，同一仓库前后两次 run 就会把同一条用例记成两条（`…/a.test.ts > 用例A` 与 `/__w/…/a.test.ts > 用例B`）：
+> ⚠️ 注意：vitest 的 `classname` 相对的是 **vitest root**（本项目为 `cmd/frontend`），所以是 `src/test/x.test.ts` 而不是 `cmd/frontend/src/test/x.test.ts`。Codecov 按路径后缀匹配文件，能正常对上；若将来发现匹配不上，用 `.github/codecov.yml` 的 `fixes:` 补前缀即可（属覆盖率侧路径修补，不影响 `classname` 语义）。
 
-| 执行形态                                               | 典型 checkout 路径                |
-|--------------------------------------------------------|-----------------------------------|
-| GitHub Actions 裸 runner（`runs-on:` 无 `container:`） | `/home/runner/work/<repo>/<repo>` |
-| GitHub Actions 容器 job（`container:`）                | `/__w/<repo>/<repo>`              |
-| GitLab CI                                              | `/builds/<group>/<repo>`          |
-| CNB / 常见容器默认 workdir                             | `/workspace/<repo>`               |
-| 本地                                                   | `/Users/<me>/<repo>`              |
-
-因此 `vitest-json-to-junit.mjs` 在写 XML 前做了**两层**归一化，结果与具体前缀无关：
-
-1. 从**脚本自身位置**（`import.meta.url`）向上找 `go.mod` / `.git` 得到仓库根；
-2. **第 1 层（常规，覆盖 99% 场景）**：JSON 与脚本在同一份 checkout 树内，直接 `path.relative(repoRoot, abs)` 再 `split(path.sep).join("/")`；
-3. **第 2 层（兜底）**：路径不在这棵树里（测试在容器内跑 `/__w/…`、转换在宿主上跑；或本机复现别的 CI 产出的 JSON）时，从尾部取最长的「在仓库里真实存在」的后缀。认不出来就原样返回，绝不编造路径。
-
-四个坑：
-
-- **不要用 `process.cwd()` 推仓库根**：转换步骤的 `working-directory` 是 `cmd/frontend`，cwd 不是仓库根，会算出 `../src/...`。
-- **不要用 `codecov.yml` 的 `fixes:` 兜底**：`fixes` 属覆盖率侧路径修补，对 Test Analytics 无效；即便生效也只能写死某个 CI 的前缀，换个 runner 形态（无容器的 `/home/runner/work/...`）立刻失效。
-- **历史数据不会迁移**：已上传的绝对路径记录保留到 Codecov 60 天保留期满才自然淘汰。UI 上还能看到旧记录 ≠ 修复没生效，要看最新一次 run。
-- **兜底层不能用 `existsSync`**：会命中 `cmd/frontend/src/test` 这类同名目录，必须 `statSync(...).isFile()`；循环上限也保留 `i >= 2`，避免误命中仓库根的 `go.mod` / `package.json`。
+> 历史包袱：早期用 Vitest `json` reporter + 自写脚本转 JUnit，脚本拿到的 `testResults[].name` 是**绝对路径**，会把 `/__w/<repo>/<repo>/...` 之类的 runner 前缀写进 `classname`，导致同一用例跨 run 无法关联（flaky 判定失效、失败位置跳不过去）。换成 vitest 内置 `junit` reporter 后，`classname` 天然是相对路径，这类归一化逻辑连同 `cmd/frontend/scripts/vitest-json-to-junit.mjs` 一起删掉了。已上传的脏历史数据不会迁移（Codecov 侧保留 60 天自然淘汰），要看最新一次 run。
 
 自查：
 
 ```bash
-grep -o 'classname="[^"]*"' cmd/frontend/test-report.xml | sort -u | head
-# 期望 cmd/frontend/src/test/x.test.ts；出现以 / 或 C:\ 开头即为此问题
+grep -o 'classname="[^"]*"' cmd/frontend/coverage/junit.xml | sort -u | head
+# 期望 src/test/x.test.ts；出现以 / 或 C:\ 开头即为此问题
 ```
-
-脚本在两层都失败时（文件确实不在当前 checkout）会打 `⚠️` 警告，而不是静默产出坏数据。
 
 ### 3.4 Components 面板
 
@@ -149,10 +129,11 @@ grep -o 'classname="[^"]*"' cmd/frontend/test-report.xml | sort -u | head
 
 在 Codecov 项目页应能看到三个面板：**Coverage / Bundle / Tests**。
 
-- **Go 覆盖率 / Tests 上报 0% 或空**：本项目 `*_test.go` 被 `.gitignore` 忽略，GitHub Actions checkout 后**无 Go 测试可跑**，`go test`/`gotestsum` 仍会产出全 0% 的 `coverage.out` 与（空）`go-test-report.xml`（不会因 `breakIfNoCoverage` 失败）。要拿到真实 Go 数据，需先把测试文件纳入 git（从 `.gitignore` 移除 `*_test.go` 或 `git add -f`）。前端不受影响（测试已跟踪）。
-- **Bundle 面板空白**：检查「构建前端」步骤是否真的上传成功；插件与 Vite 8 不兼容时该步骤会 `continue-on-error` 失败但不阻断。
-- **Tests 面板空白**：检查 `test-results.json` 与 `go-test-report.xml` 是否生成、`vitest-json-to-junit.mjs` 是否产出 `test-report.xml`、`codecov/test-results-action` 是否拿到 token。
-- **Tests 面板用例名带 `/__w/...`、`/home/runner/work/...` 等前缀**：JUnit 里 `classname` 是绝对路径，跨 run 无法关联（详见 3.3「classname 必须是仓库相对」）。用 `grep -o 'classname="[^"]*"' cmd/frontend/test-report.xml | sort -u` 自查；脚本已在生成端归一化，并会在仍有绝对路径时打 `⚠️` 警告。注意已污染的历史数据不会迁移，只有新 run 才正确。
+- **Go 覆盖率 / Tests 上报 0% 或空**：Go 测试文件已全部纳入 git（`.gitignore` 只忽略 `/internal/reqlog/*_test.go`），若仍为 0% 先本地跑 `make cover-go` 对照（当前基线约 16.5%）。注意 `go test -coverprofile` 即使一个测试文件都没有也会产出全 0% 的 `coverage.out`，不会因 `breakIfNoCoverage` 报错。
+- **Bundle 面板空白**：检查「构建前端」步骤（`make build-frontend`）是否真的上传成功；插件与 Vite 8 不兼容时该步骤会失败并把 job 标红（覆盖率上传在其之前，不受影响）。
+- **Tests 面板空白**：检查 `go-test-report.xml` 与 `cmd/frontend/coverage/junit.xml` 是否生成、`codecov/codecov-action` 的测试结果上传步骤（`report_type: test_results`）是否拿到 token。
+- **Job Summary 里没有 Vitest 测试报告区块 / 没有失败注解**：多半是给 `make cover-node` 加了 `--reporter`（显式传会整体替换 vitest 的默认 reporters 列表，`github-actions` 就没了）；`cover-node` 保持不传即可。
+- **Tests 面板用例名带 `/__w/...`、`/home/runner/work/...` 等前缀**：说明用的是旧版 JSON→JUnit 脚本的产物；当前用 vitest 内置 `junit` reporter，`classname` 天然相对，用 `grep -o 'classname="[^"]*"' cmd/frontend/coverage/junit.xml | sort -u` 自查。已污染的历史数据不会迁移，只有新 run 才正确。
 - **覆盖率双份/互相覆盖**：确认 `.github/codecov.yml` 的 `flags` 已区分 `go` / `node`，且 `status` 为 `informational`。
 
 ## 7. 注意事项

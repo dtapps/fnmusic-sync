@@ -2,19 +2,17 @@
 #
 # 为什么独立：
 #   - 与 Codecov 解耦：Coveralls 侧故障 / token 失效不会拖垮 Codecov 上传与测试 job；
-#   - 凭证隔离：只用内置 GITHUB_TOKEN，不扩散到 Codecov 流程；
-#   - Codecov 那条（.github/workflows/coverage.yml）已经跑通，不动它。
-#
-# 代价：本工作流会把测试再跑一遍（与 coverage.yml 重复）。这是「独立」换来的隔离性。
-#
-# 为什么是单个 job（而不是 go / node 拆两个 job）：
-#   Coveralls 以 build 为单位聚合报告，go / node 两份报告必须落在同一个 build 里，
-#   再靠 flag 合并；同一个 job 上传天然同 build。拆成两个 job 需要完整的
-#   parallel + parallel-finished 协议，两侧混用不同上传器容易踩坑，
-#   故这里保持单 job 顺序执行，换取确定性。
+#   - 凭证隔离：只用内置 GITHUB_TOKEN + COVERALLS_REPO_TOKEN，不扩散到 Codecov 流程；
+#   - Codecov 那条（.github/workflows/codecov.yml）已经跑通，不动它。
 #
 # 参考：
 #   https://github.com/coverallsapp/github-action
+#
+# https://github.com/actions/runner-images
+# https://github.com/actions/checkout
+# https://github.com/actions/cache
+# https://github.com/coverallsapp/github-action
+# https://github.com/dtapps/golang
 name: Coveralls
 
 on:
@@ -37,8 +35,8 @@ concurrency:
 
 jobs:
   coverage:
-    runs-on: ubuntu-latest
-    # 直接使用统一共享的 CI 镜像（由 dtapps 统一维护并推送，原 ci-image.yml 已删除）
+    runs-on: ubuntu-26.04
+    # 统一使用预构建的 CI 基础镜像（含 Go/Node/pnpm + 全部 Go 工具链）
     container:
       image: ghcr.io/dtapps/golang/fnpack:latest
     env:
@@ -85,9 +83,8 @@ jobs:
       - name: 安装所有依赖
         run: make deps
 
-      - name: 生成 Go 测试覆盖率
-        run: |
-          gotestsum --junitfile go-test-report.xml -- -vet=off -coverpkg=$(go list ./... | grep -vE '/(db|datadb)$' | paste -sd, -) -coverprofile=coverage.out ./...
+      - name: 生成 Go 测试覆盖率（Cobertura）
+        run: make cover-go-cobertura
 
       - name: 上传 Go 覆盖率到 Coveralls
         if: env.COVERALLS_REPO_TOKEN != ''
@@ -95,13 +92,12 @@ jobs:
         uses: coverallsapp/github-action@v2
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          file: coverage.out
-          format: golang
+          file: coverage.xml
+          format: cobertura
           flag-name: go
 
       - name: 生成前端测试覆盖率
-        working-directory: cmd/frontend
-        run: pnpm test:coverage
+        run: make cover-node # 产出 cmd/frontend/coverage/lcov.info
 
       - name: 上传前端覆盖率到 Coveralls
         if: env.COVERALLS_REPO_TOKEN != ''

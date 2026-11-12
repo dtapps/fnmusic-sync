@@ -1,3 +1,5 @@
+# 设置默认目标
+.DEFAULT_GOAL := setup
 
 # 环境变量优先级高于 .env：include 的赋值会覆盖环境值，先暂存一份
 ifeq ($(origin GIT_REMOTE),environment)
@@ -161,30 +163,66 @@ tool-deps: ## 工具依赖
 	-dockerfmt version
 	@echo "==> dockerfmt 工具安装或更新完成"
 
-# 安装依赖
+# 一键设置项目（默认执行）
+setup: deps
+	@echo "🎉 Project setup completed!"
+
+# 安装全部依赖
 .PHONY: deps
-deps: 
-	@echo "[Deps] 安装依赖..."
-	go mod tidy
-	go mod download
-	@echo "[Deps] 安装前端依赖..."
-	pnpm --dir $(FRONTEND_DIR) install --frozen-lockfile --prefer-offline
+deps: deps-go deps-node
 	@echo "[Deps] 完成。"
 
-# 更新依赖
+# 安装全部Go依赖
+.PHONY: deps-go
+deps-go:
+	@echo "[Deps] 安装 Go 模块依赖..."
+	go mod tidy
+	go mod download
+
+# 安装全部前端依赖
+# --frozen-lockfile (冻结锁文件)
+# --prefer-offline (优先使用离线缓存)
+.PHONY: deps-node
+deps-node:
+	@echo "[Deps] 安装前端依赖..."
+	pnpm --dir $(FRONTEND_DIR) install --frozen-lockfile --prefer-offline
+
+# 更新全部依赖
+# --latest (无视版本限制，强制升最新)
 .PHONY: update-deps
-update-deps:
-	@echo "[Deps] 更新依赖..."
-	go version
+update-deps: update-deps-go update-deps-node
+	@echo "[Deps] 完成。"
+
+# 更新全部Go依赖
+.PHONY: update-deps-go
+update-deps-go:
+	@echo "[Deps] 更新 Go 模块依赖..."
 	go get -u ./...
 	go mod tidy
-	
+
+# 更新全部前端依赖
+# --latest (无视版本范围，强制升最新，并改写 package.json 的版本范围)
+.PHONY: update-deps-node
+update-deps-node:
 	@echo "[Deps] 更新前端依赖..."
-	pnpm --version
-	pnpm --dir $(FRONTEND_DIR) self-update
-# 	pnpm --dir $(FRONTEND_DIR) update
 	pnpm --dir $(FRONTEND_DIR) update --latest
-	@echo "[Deps] 完成。"
+	pnpm --dir $(FRONTEND_DIR) prune
+
+# 更新 pnpm 自身的版本锁定（package.json 的 packageManager 字段）
+.PHONY: update-deps-pnpm
+update-deps-pnpm:
+	@echo "[Deps] 更新 pnpm 版本锁定..."
+	@latest="$$(npm view pnpm version)"; \
+	echo "[Deps] packageManager → pnpm@$${latest}"; \
+	pnpm --dir $(FRONTEND_DIR) pkg set packageManager=pnpm@$${latest}
+
+# 删除未使用的依赖：knip --fix 把它们从 package.json 摘掉，
+.PHONY: deps-clean
+deps-clean:
+	@echo "[Deps] 删除未使用的依赖..."
+	pnpm --dir $(FRONTEND_DIR) run deps:clean
+	pnpm --dir $(FRONTEND_DIR) install --lockfile-only
+	pnpm --dir $(FRONTEND_DIR) prune
 
 # 生成 sqlc 持久化代码（需要 sqlc：go install github.com/sqlc-dev/sqlc/cmd/sqlc@latest）
 # internal/db 生成运营状态表（state.db），internal/datadb 生成数据表（data.db，MBID 映射）。
@@ -196,6 +234,10 @@ sqlc:
 	@echo "[SQLC] 生成 internal/datadb 持久化代码 (data.db)..."
 	cd $(CURDIR)/internal/datadb && sqlc generate
 	@echo "[SQLC] 完成。"
+
+#####################
+## 开发 相关
+#####################
 
 # 启动本地开发后端（模拟飞牛网关 + API，监听 :8080）
 .PHONY: dev-server
@@ -209,7 +251,7 @@ dev-frontend:
 	@echo "[Frontend] 启动 Vite dev server..."
 	@echo "  API proxy: /app/fnmusic-sync/api -> http://localhost:8080"
 	@echo "  请确保 Go 后端在 8080 端口运行"
-	@cd $(FRONTEND_DIR) && pnpm dev
+	pnpm --dir $(FRONTEND_DIR) dev
 
 # 同时启动前端和后端开发服务器（需要两个终端，或用 tmux）
 .PHONY: dev
@@ -225,159 +267,9 @@ dev:
 	@echo "║ 后端 API 也可直接访问 http://localhost:8080/app/fnmusic-sync/"
 	@echo "╚══════════════════════════════════════════════════════════════"
 
-# ==================== 工具 ====================
-
-# 格式化（Go + 前端 + 配置 + 文档 + 脚本 + SQL + Docker）
-.PHONY: format
-format: format-go format-frontend format-yaml format-json format-markdown format-shell format-sql format-docker
-
-# 格式化 Go 代码
-.PHONY: format-go
-format-go:
-	@echo "[Format] 格式化后端文件 (GO)..."
-	gofmt -w -s .
-	go fmt ./...
-	go fix ./...
-
-# 格式化前端文件（HTML/CSS/JS/TS/Svelte）
-.PHONY: format-frontend
-format-frontend:
-	@echo "[Format] 格式化前端文件 (HTML/CSS/JS/TS/Svelte)..."
-	@cd $(FRONTEND_DIR) && pnpm run format \
-		|| echo "⚠️  prettier 格式化失败，请确认已运行 pnpm install"
-	@echo "[Format] 前端格式化完成。"
-
-# 格式化 JSON 文件
-.PHONY: format-json
-format-json:
-	@echo "[Format] 格式化 JSON 文件..."
-	@command -v gojq >/dev/null 2>&1 || { \
-		echo "⚠️  gojq 未安装，跳过 JSON 格式化。" ; \
-		echo "   提示: 可通过运行 'go install github.com/itchyny/gojq/cmd/gojq@latest' 安装" ; \
-		exit 0 ; \
-	}
-	@echo "[Format] 使用 gojq 格式化 JSON..."
-	@for f in $(FPKG_DIR)/wizard/* $(FPKG_DIR)/app/ui/config $(FPKG_DIR)/config/privilege $(FPKG_DIR)/config/resource; do \
-		[ -f "$$f" ] || continue; \
-		if gojq . "$$f" > "$$f.tmp" 2>/dev/null; then \
-			mv "$$f.tmp" "$$f"; \
-		else \
-			echo "❌ gojq 格式化失败: $$f"; rm -f "$$f.tmp"; exit 1; \
-		fi; \
-	done
-	@echo "[Format] JSON 格式化完成（gojq）。"
-
-# 格式化 YAML 文件
-.PHONY: format-yaml
-format-yaml:
-	@echo "[Format] 格式化配置文件 (YAML)…"
-	@command -v yamlfmt >/dev/null 2>&1 || { \
-		echo "⚠️  yamlfmt 未安装，跳过 YAML 格式化。" ; \
-		echo "   提示: 可通过运行 'go install github.com/google/yamlfmt/cmd/yamlfmt@latest' 安装" ; \
-		exit 0 ; \
-	}
-	@echo "[Format] 使用 yamlfmt 格式化 YAML..."
-	@yamlfmt -conf .yamlfmt \
-		".cnb" \
-		".github" \
-		".gitlab" \
-		".cnb.yml" \
-		".nfpm.yaml" \
-		"internal/db" \
-		".golangci.yml" \
-		".gitlab-ci.yml" || { echo "❌ yamlfmt 格式化失败"; exit 1; }
-	@echo "[Format] YAML 格式化完成（yamlfmt）。"
-
-# 格式化 Markdown 文件
-.PHONY: format-markdown
-format-markdown:
-	@echo "[Format] 格式化文档 (Markdown)…"
-	@command -v markdownfmt >/dev/null 2>&1 || { \
-		echo "⚠️  markdownfmt 未安装，跳过 Markdown 格式化。" ; \
-		echo "   提示: 可通过运行 'go install github.com/Kunde21/markdownfmt/v3/cmd/markdownfmt@latest' 安装" ; \
-		exit 0 ; \
-	}
-	@echo "[Format] 使用 markdownfmt 格式化 Markdown..."
-	@for f in $(shell find . -type f -name '*.md' \
-		-not -path '*/node_modules/*' \
-		-not -path './.git/*' \
-		-not -path './.vscode/*' \
-		-not -path './.idea/*' \
-		-not -path './.codebuddy/*' \
-		-not -path './.trae/*' \
-		-not -path './.mimocode/*'); do \
-		[ -f "$$f" ] || continue; \
-		markdownfmt -w "$$f" || { echo "❌ markdownfmt 格式化失败: $$f"; exit 1; }; \
-	done
-	@echo "[Format] Markdown 格式化完成（markdownfmt）。"
-
-# 格式化 Shell 脚本
-.PHONY: format-shell
-format-shell:
-	@echo "[Format] 格式化脚本 (Shell)…"
-	@command -v shfmt >/dev/null 2>&1 || { \
-		echo "⚠️  shfmt 未安装，跳过 Shell 格式化。" ; \
-		echo "   提示: 可通过运行 'go install mvdan.cc/sh/v3/cmd/shfmt@latest' 安装" ; \
-		exit 0 ; \
-	}
-	@echo "[Format] 使用 shfmt 格式化 Shell..."
-	@shfmt -w -i 2 -ci -bn -s -ln bash scripts/ $(FPKG_DIR)/cmd/* || { echo "❌ shfmt 格式化失败"; exit 1; }
-	@echo "[Format] Shell 格式化完成（shfmt）。"
-
-# 格式化 SQL 文件
-.PHONY: format-sql
-format-sql:
-	@echo "[Format] 格式化 SQL 文件 (sql-formatter)..."
-	@if command -v sql-formatter >/dev/null 2>&1; then \
-		echo "[Format] 使用 sql-formatter 格式化 SQL..."; \
-		sql-formatter --fix -l sql internal/db/*.sql internal/datadb/*.sql || { echo "❌ sql-formatter 格式化失败"; exit 1; }; \
-	else \
-		echo "⚠️  sql-formatter 未安装，跳过 SQL 格式化。"; \
-		echo "   提示: 可通过运行 'go install github.com/wasilibs/go-sql-formatter/v15/cmd/sql-formatter@latest' 安装"; \
-	fi
-	@echo "[Format] SQL 格式化完成（sql-formatter）。"
-
-# 格式化 Dockerfile 文件
-.PHONY: format-docker
-format-docker:
-	@echo "[Format] 格式化 Dockerfile..."
-	@command -v dockerfmt >/dev/null 2>&1 || { \
-		echo "⚠️  dockerfmt 未安装，跳过 Dockerfile 格式化。" ; \
-		echo "   提示: 可通过运行 'go install github.com/reteps/dockerfmt@latest' 安装" ; \
-		exit 0 ; \
-	}
-	@echo "[Format] 使用 dockerfmt 格式化 Dockerfile..."
-	@find .cnb -type f -name "Dockerfile*" -exec dockerfmt -w {} + || { echo "❌ dockerfmt 格式化失败"; exit 1; }
-	@find .github -type f -name "Dockerfile*" -exec dockerfmt -w {} + || { echo "❌ dockerfmt 格式化失败"; exit 1; }
-	@echo "[Format] Dockerfile 格式化完成（dockerfmt）。"
-
-# 检查（Go + HTML/CSS/JS/TS/Svelte + Linux 打包：含 fpk 与无 fpk 两种）
-.PHONY: check
-check: lint-go lint-go-fix lint-frontend package-linux
-
-# Go 代码检查（有 issue 即停止）
-.PHONY: lint-go
-lint-go:
-	@echo "[Lint] Go 代码检查 (go vet + golangci-lint)..."
-	go vet ./...
-	golangci-lint run ./...
-
-# Go 代码检查（自动修复）
-.PHONY: lint-go-fix
-lint-go-fix:
-	@echo "[Lint] Go 代码检查（自动修复）..."
-	golangci-lint run --fix ./...
-
-# 前端代码检查（类型 + ESLint + 格式只读校验，错误即停止）
-.PHONY: lint-frontend
-lint-frontend:
-	@echo "[Lint] 前端代码检查 (svelte-check + eslint + prettier)..."
-	@test -d $(FRONTEND_DIR)/node_modules || { echo "⚠️  前端依赖未安装，请先运行: make deps"; exit 1; }
-	@cd $(FRONTEND_DIR) && pnpm run lint
-	@cd $(FRONTEND_DIR) && pnpm run format:check
-	@echo "✓ 前端代码检查通过。"
-
-# ==================== 构建 ====================
+#####################
+## 构建 相关
+#####################
 
 # ==================== 版本备份 / 还原 ====================
 
@@ -420,7 +312,7 @@ build-frontend:
 	@echo "│ [构建] Svelte 前端"
 	@echo "└────────────────────────────────────────────────────────────"
 	@cd $(FRONTEND_DIR) && sed -i.bak -E 's#("version"[[:space:]]*:[[:space:]]*")[^"]*(")#\1$(PKG_VERSION)\2#' package.json && rm -f package.json.bak
-	@cd $(FRONTEND_DIR) && pnpm build
+	pnpm --dir $(FRONTEND_DIR) build
 	@echo "✓ 构建完成。"
 
 # 定义压缩逻辑：参数 $(1) 为文件路径
@@ -711,7 +603,131 @@ package-linux-all: package-linux-deb package-linux-fpk
 .PHONY: package-linux
 package-linux: package-linux-all
 
-# ==================== 更新 / 拉取 ====================
+#####################
+## 格式化 相关
+#####################
+
+# 格式化后端文件
+.PHONY: format-go
+format-go:
+	@echo "[Format] 格式化后端文件 (GO)..."
+	gofmt -w -s .
+	go fmt ./...
+	go fix ./...
+
+# 格式前端文件
+.PHONY: format-node
+format-node:
+	@echo "[Format] 格式化前端文件 (PNPM)..."
+	pnpm --dir $(FRONTEND_DIR) format
+
+# 格式化 YAML 文件
+.PHONY: format-yaml
+format-yaml:
+	@bash scripts/format.sh yaml
+
+# 格式化 JSON 文件
+.PHONY: format-json
+format-json:
+	@bash scripts/format.sh json
+
+# 格式化 SQL 文件
+.PHONY: format-sql
+format-sql:
+	@bash scripts/format.sh sql
+
+# 格式化 Markdown 文件
+.PHONY: format-markdown
+format-markdown:
+	@bash scripts/format.sh markdown
+
+# 格式化 Dockerfile 文件
+.PHONY: format-docker
+format-docker:
+	@bash scripts/format.sh docker
+
+# 格式化 Shell 脚本
+.PHONY: format-shell
+format-shell:
+	@bash scripts/format.sh shell
+
+# 格式化
+.PHONY: format
+format: format-node format-go format-yaml format-json format-sql format-markdown format-docker format-shell
+
+#####################
+## 检查 / 测试 相关
+#####################
+
+# 统一定义构建命令
+# CGO_ENABLED=0: 禁用 CGO，实现完全静态链接
+# CGO_ENABLED=1: 启用 CGO，实现动态链接
+LINT_ENV = CGO_ENABLED=0
+
+# 定义 Lint 过程中需要激活的 Go Build Tags
+LINT_TAGS = goolm,stdjson
+
+# Lint 扫描的目标平台，默认当前平台；CI 通过 LINT_PLATFORMS=... 覆盖为全平台
+LINT_PLATFORMS ?= $(shell go env GOOS)/$(shell go env GOARCH)
+
+# 检查后端代码
+.PHONY: check-go
+check-go:
+	@echo "[Check] 运行 go vet 静态检查..."
+	go vet ./...
+
+	@echo "[Check] 运行 golangci-lint 扫描 (平台: $(LINT_PLATFORMS), Tags: $(LINT_TAGS))..."
+	@for os_arch in $(LINT_PLATFORMS); do \
+		os=$$(echo $$os_arch | cut -d'/' -f1); \
+		arch=$$(echo $$os_arch | cut -d'/' -f2); \
+		echo "  -> $$os 平台 ($$arch)"; \
+		$(LINT_ENV) GOOS=$$os GOARCH=$$arch golangci-lint fmt; \
+		$(LINT_ENV) GOOS=$$os GOARCH=$$arch golangci-lint run --build-tags $(LINT_TAGS); \
+	done
+
+	@echo "[Check] 自动修复代码风格问题..."
+	$(LINT_ENV) golangci-lint run --fix --build-tags $(LINT_TAGS)
+
+	@echo "[Check] 运行 Go 单元测试..."
+	go test $(GO_COVER_TEST_FLAGS) $(GO_COVER_SCAN)
+
+	@echo "[Check] 运行 Go 赖漏洞检查..."
+	govulncheck -show verbose ./...
+
+	@echo "[Check] 完成。"
+
+
+# 检查前端代码
+.PHONY: check-node
+check-node:
+	@echo "[Check] 检查前端依赖与质量..."
+	@echo "  -> 同步依赖 (确保环境一致)..."
+	pnpm --dir $(FRONTEND_DIR) install --frozen-lockfile --prefer-offline
+
+	@echo "  -> 检查安全漏洞 (仅高危阻断)..."
+	pnpm --dir $(FRONTEND_DIR) audit --production --audit-level high --registry=https://registry.npmjs.org
+
+	@echo "  -> 检查过时依赖..."
+	pnpm --dir $(FRONTEND_DIR) outdated
+
+	@echo "  -> 检查代码风格 (Lint)..."
+	pnpm --dir $(FRONTEND_DIR) run lint
+
+	@echo "  -> 检测未使用的依赖 (knip)..."
+	pnpm --dir $(FRONTEND_DIR) run lint:unused
+
+	@echo "  -> 运行前端单元测试..."
+	pnpm --dir $(FRONTEND_DIR) exec vitest run
+
+	@echo "[Check] 前端检查完成。"
+
+# 检查代码
+.PHONY: check
+check: check-node check-go
+
+#####################
+## 更新 / 拉取 / 推送 相关
+#####################
 
 # 按 GIT_REMOTE 顺序先全部拉取合并，再统一推送（保留本地未提交改动）
 .PHONY: sync
@@ -721,8 +737,6 @@ sync:
 	done
 	@IFS=,; for r in $$GIT_REMOTE; do git push "$$r" HEAD || exit 1; done
 	@echo "同步完成！"
-
-# ==================== 推送 ====================
 
 # 推送到所有远程仓库
 .PHONY: push
@@ -735,3 +749,74 @@ push:
 push-force:
 	@IFS=,; for r in $$GIT_REMOTE; do git push --force "$$r" HEAD || exit 1; done
 	@echo "强制推送完成！"
+
+#####################
+## 测试覆盖率 相关
+#####################
+
+# ── 清单配置：新增目录 / 生成代码只改这里，下面的命令不散落路径 ──────────────
+# Go 扫描范围：用 ./...（不是 ./internal/...）——cmd/fnmusic-sync 下也有测试文件
+# （goroutine_diag_test.go），只扫 internal/ 会漏掉这部分分母。
+# internal/webui 带 //go:build fpk 标签，默认构建不参与测试，无需额外排除。
+GO_COVER_SCAN = ./...
+# Go 排除目录（包路径前缀，空格分隔）：sqlc 生成代码占约 11% 语句
+# （实测全量 13088 → 排除后 11672），计入会稀释指标。
+# 注意：本项目没有 internal/ent（那是别的项目的结构），照抄 ent 排除项在这里是空转。
+GO_COVER_EXCLUDE = /internal/db /internal/datadb
+# -vet=off：i18n.T() 这类函数作 printf 参数会触发 vet 的 non-constant format 报错。
+GO_COVER_TEST_FLAGS = -vet=off
+
+# 前端目录与产物（相对仓库根）
+NODE_DIR = $(FRONTEND_DIR)
+NODE_COVER_DIR = $(NODE_DIR)/coverage
+NODE_COVER_LCOV = $(NODE_COVER_DIR)/lcov.info
+NODE_JUNIT_XML = $(NODE_COVER_DIR)/junit.xml
+# 前端扫描 / 排除清单（glob 相对 vitest root=cmd/frontend，由 cmd/frontend/vitest.config.ts 读取）：
+#   NODE_TEST_SCAN      测试用例
+#   NODE_COVER_SCAN     计入覆盖率的源码
+#   NODE_COVER_EXCLUDE  不计入的源码（测试自身、入口文件、类型声明）
+# 多个 glob 用空格或逗号分隔；留空则回退到配置文件里的默认值。
+NODE_TEST_SCAN = src/test/**/*.test.ts
+NODE_COVER_SCAN = src/**/*.ts
+NODE_COVER_EXCLUDE = src/test/** src/app.ts src/**/*.d.ts
+NODE_VITEST_ENV = VITEST_TEST_INCLUDE="$(NODE_TEST_SCAN)" VITEST_COVER_INCLUDE="$(NODE_COVER_SCAN)" VITEST_COVER_EXCLUDE="$(NODE_COVER_EXCLUDE)"
+
+# -coverpkg 只收「扫描范围内且不在排除列表」的包。用 $$(...) 让 go list 在配方执行时才跑，
+# 避免任何 make 目标都触发一次包扫描；grep 参数由排除列表生成，加目录不用改命令。
+GO_COVER_EXCLUDE_ARGS = $(foreach d,$(GO_COVER_EXCLUDE),-e '$(d)')
+GO_COVER_PKGS = $$(go list $(GO_COVER_SCAN) | grep -v $(GO_COVER_EXCLUDE_ARGS) | paste -sd, -)
+GO_COVER_ARGS = $(GO_COVER_TEST_FLAGS) -coverpkg=$(GO_COVER_PKGS) -coverprofile=coverage.out $(GO_COVER_SCAN)
+
+# Go 覆盖率（golang 格式）→ coverage.out；CNB 的 testing:coverage 与 Codecov 都读这份
+.PHONY: cover-go
+cover-go:
+	@echo "[Coverage] Go 测试覆盖率 → coverage.out"
+	go test $(GO_COVER_ARGS)
+	go tool cover -func=coverage.out
+
+# Go 覆盖率 + JUnit（Codecov Test Analytics 用），依赖 CI 镜像预装的 gotestsum
+.PHONY: junit-go
+junit-go:
+	@echo "[Coverage] Go 测试 → coverage.out + go-test-report.xml"
+	gotestsum --junitfile go-test-report.xml -- $(GO_COVER_ARGS)
+	go tool cover -func=coverage.out
+
+# Coveralls 的 golang parser 会把包前缀压成 basename，改用 Cobertura 保留完整 filename 路径。
+# gocover-cobertura 由统一 CI 镜像预装；-strict 让「包/模块信息缺失被静默跳过」直接失败。
+.PHONY: cover-go-cobertura
+cover-go-cobertura: cover-go
+	@echo "[Coverage] coverage.out → coverage.xml（Cobertura）"
+	gocover-cobertura -by-files -strict < coverage.out > coverage.xml
+
+# 前端覆盖率（Vitest v8）→ cmd/frontend/coverage/lcov.info
+.PHONY: cover-node
+cover-node:
+	@echo "[Coverage] 前端覆盖率 → $(NODE_COVER_LCOV)"
+	cd $(NODE_DIR) && $(NODE_VITEST_ENV) pnpm exec vitest run --coverage
+
+# 前端 JUnit（Codecov Test Analytics 用）；outputFile 用绝对路径避开 vitest root 的相对路径歧义
+.PHONY: junit-node
+junit-node:
+	@echo "[Coverage] 前端 JUnit → $(NODE_JUNIT_XML)"
+	@mkdir -p $(NODE_COVER_DIR)
+	cd $(NODE_DIR) && $(NODE_VITEST_ENV) pnpm exec vitest run --reporter=junit --outputFile=$(CURDIR)/$(NODE_JUNIT_XML)

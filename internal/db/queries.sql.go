@@ -179,7 +179,9 @@ SET
   last_scrobbled_at = ?2,
   updated_at = ?3
 WHERE
-  username = ?4 RETURNING username, lastfm_scrobbles, listenbrainz_scrobbles, total_scrobbles, lastfm_enabled, listenbrainz_enabled, last_scrobbled_at, updated_at
+  username = ?4
+RETURNING
+  username, lastfm_scrobbles, listenbrainz_scrobbles, total_scrobbles, lastfm_enabled, listenbrainz_enabled, last_scrobbled_at, updated_at
 `
 
 type IncrementScrobbleParams struct {
@@ -236,7 +238,9 @@ VALUES
     ?8,
     ?9,
     ?10
-  ) RETURNING id
+  )
+RETURNING
+  id
 `
 
 type InsertPlaybackParams struct {
@@ -294,7 +298,9 @@ VALUES
     ?7,
     ?8,
     ?9
-  ) RETURNING id, username, provider, status, "trigger", playlists, tracks, message, started_at, finished_at
+  )
+RETURNING
+  id, username, provider, status, "trigger", playlists, tracks, message, started_at, finished_at
 `
 
 type InsertSyncLogParams struct {
@@ -754,12 +760,14 @@ VALUES
     ?3,
     ?4,
     ?5
-  ) ON CONFLICT (username) DO
-UPDATE
+  )
+ON CONFLICT (username) DO UPDATE
 SET
   lastfm_enabled = excluded.lastfm_enabled,
   listenbrainz_enabled = excluded.listenbrainz_enabled,
-  updated_at = excluded.updated_at RETURNING username, lastfm_scrobbles, listenbrainz_scrobbles, total_scrobbles, lastfm_enabled, listenbrainz_enabled, last_scrobbled_at, updated_at
+  updated_at = excluded.updated_at
+RETURNING
+  username, lastfm_scrobbles, listenbrainz_scrobbles, total_scrobbles, lastfm_enabled, listenbrainz_enabled, last_scrobbled_at, updated_at
 `
 
 type UpsertRunStatusParams struct {
@@ -822,8 +830,8 @@ VALUES
     ?10,
     ?11,
     ?12
-  ) ON CONFLICT (token_prefix) DO
-UPDATE
+  )
+ON CONFLICT (token_prefix) DO UPDATE
 SET
   username = excluded.username,
   platform_uid = COALESCE(excluded.platform_uid, users.platform_uid),
@@ -848,7 +856,9 @@ SET
     ELSE users.ua_client
   END,
   last_seen_at = excluded.last_seen_at,
-  updated_at = excluded.updated_at RETURNING id, username, platform_uid, platform_username, is_admin, token_prefix, ua_raw, ua_system, ua_client, first_seen_at, last_seen_at, created_at, updated_at
+  updated_at = excluded.updated_at
+RETURNING
+  id, username, platform_uid, platform_username, is_admin, token_prefix, ua_raw, ua_system, ua_client, first_seen_at, last_seen_at, created_at, updated_at
 `
 
 type UpsertUserParams struct {

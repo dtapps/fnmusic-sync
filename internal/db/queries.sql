@@ -14,12 +14,14 @@ VALUES
     sqlc.arg (listenbrainz_enabled),
     sqlc.arg (last_scrobbled_at),
     sqlc.arg (updated_at)
-  ) ON CONFLICT (username) DO
-UPDATE
+  )
+ON CONFLICT (username) DO UPDATE
 SET
   lastfm_enabled = excluded.lastfm_enabled,
   listenbrainz_enabled = excluded.listenbrainz_enabled,
-  updated_at = excluded.updated_at RETURNING *;
+  updated_at = excluded.updated_at
+RETURNING
+  *;
 
 -- name: IncrementScrobble :one
 UPDATE run_status
@@ -36,7 +38,9 @@ SET
   last_scrobbled_at = sqlc.arg (last_scrobbled_at),
   updated_at = sqlc.arg (updated_at)
 WHERE
-  username = sqlc.arg (username) RETURNING *;
+  username = sqlc.arg (username)
+RETURNING
+  *;
 
 -- name: GetRunStatus :one
 SELECT
@@ -94,8 +98,8 @@ VALUES
     sqlc.arg (last_seen_at),
     sqlc.arg (created_at),
     sqlc.arg (updated_at)
-  ) ON CONFLICT (token_prefix) DO
-UPDATE
+  )
+ON CONFLICT (token_prefix) DO UPDATE
 SET
   username = excluded.username,
   platform_uid = COALESCE(excluded.platform_uid, users.platform_uid),
@@ -120,7 +124,9 @@ SET
     ELSE users.ua_client
   END,
   last_seen_at = excluded.last_seen_at,
-  updated_at = excluded.updated_at RETURNING *;
+  updated_at = excluded.updated_at
+RETURNING
+  *;
 
 -- name: GetUser :one
 SELECT
@@ -200,7 +206,9 @@ VALUES
     sqlc.arg (started_at),
     sqlc.arg (ended_at),
     sqlc.arg (created_at)
-  ) RETURNING id;
+  )
+RETURNING
+  id;
 
 -- name: ListPlaybacksByUser :many
 SELECT
@@ -282,7 +290,9 @@ VALUES
     sqlc.arg (message),
     sqlc.arg (started_at),
     sqlc.arg (finished_at)
-  ) RETURNING *;
+  )
+RETURNING
+  *;
 
 -- name: GetLastSuccessTime :one
 SELECT

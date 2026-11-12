@@ -226,10 +226,10 @@ stages:
               - bin
         notify: []
         strategy:
-          retry: "0"
+          retry: '0'
           resource:
-            cpu: "2"
-            memory: "4"
+            cpu: '2'
+            memory: '4'
 
   - name: release-stage
     displayName: 发布

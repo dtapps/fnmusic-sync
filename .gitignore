@@ -6,6 +6,7 @@
 .vscode
 .log
 .task
+.trae
 .codebuddy
 .gocache
 .gomodcache
@@ -45,7 +46,7 @@
 /docs/*.gif
 
 # 前端相关
-node_modules/
+**/node_modules
 dist/
 .vite/
 .svelte-check/
@@ -60,18 +61,11 @@ dist/
 /internal/webui/www/*
 !/internal/webui/www/index.html
 
+# 测试覆盖率
 coverage.out
-coverage.html
-/cmd/frontend/coverage/
-coverage-go.xml
-/cmd/frontend/test-results.json
-/cmd/frontend/test-report.xml
-/go-test-report.xml
+go-test-report.xml
+coverage.xml
+cmd/frontend/coverage
 
-# 发布流水线在构建过程中生成的临时文件（GitCode 步骤间传值 / Gitee 参数文件）
-# 都是单次运行的产物，跟仓库内容无关，别提交。
-/.ci-release.env
-/GITEE_PARAMS
-/release.env
-
+# Ai
 AGENTS.md

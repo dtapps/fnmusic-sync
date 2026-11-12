@@ -1,0 +1,15 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "ignoreDependencies": [
+    "prettier-plugin-svelte"
+  ],
+  "include": [
+    "dependencies",
+    "devDependencies"
+  ],
+  "project": [
+    "src/**/*.{ts,svelte,css}",
+    "*.config.ts",
+    "*.config.js"
+  ]
+}

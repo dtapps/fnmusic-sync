@@ -1,16 +1,17 @@
 # 覆盖率上报到 Codecov（GitHub 侧，与 CNB 的 testing:coverage 门禁相互独立）
 # 职责分离：
-#   - CNB 流水线负责硬性红线门禁（lines / diffLines），阻断低覆盖率合并；
+#   - CNB 流水线（.cnb/workflows/push-coverage.yml、pull-coverage.yml）负责硬性红线
+#     门禁（lines / diffLines），阻断低覆盖率合并；
 #   - 本工作流负责把覆盖率上传到 Codecov（PR 评论 + 徽章 + patch 状态）。
 # 因覆盖率产物需在 GitHub Actions 环境内生成，这里自行跑一遍测试（与 CNB 重复，
 # 但各自独立，互不依赖）。配置见 .github/codecov.yml。
+#
+# https://github.com/actions/runner-images
 # https://github.com/actions/checkout
+# https://github.com/actions/cache
 # https://github.com/codecov/codecov-action
-# https://github.com/actions/setup-go
-# https://github.com/pnpm/action-setup
-# https://github.com/actions/setup-node
-# https://github.com/codecov/test-results-action
-name: Coverage
+# https://github.com/dtapps/golang
+name: Codecov
 
 on:
   push:
@@ -32,9 +33,8 @@ concurrency:
 
 jobs:
   coverage:
-    runs-on: ubuntu-latest
-    # 直接使用统一共享的 CI 镜像（含 Go/Node/pnpm + GTK/WebKit + 全部 Go 工具链），
-    # 由 dtapps 统一维护并推送到 GHCR，无需本仓库自行构建（原 ci-image.yml 已删除）。
+    runs-on: ubuntu-26.04
+    # 统一使用预构建的 CI 基础镜像（含 Go/Node/pnpm + 全部 Go 工具链）
     container:
       image: ghcr.io/dtapps/golang/fnpack:latest
     env:
@@ -43,17 +43,12 @@ jobs:
       - name: 检出代码
         uses: actions/checkout@v7
 
-      # 容器镜像已预装 Go 工具链（GOPATH=/go，工具在 /go/bin 且已在 PATH），
-      # 这里把路径常量写入 $GITHUB_ENV，供后续 make 步骤的 GOPATH/GOBIN 引用。
-      # 无需再 apt 装 GTK/WebKit、setup-go/node、make tool-deps——镜像里都已就绪。
       - name: 设置 Go 工具链目录
         shell: bash
         run: |
           echo "GO_PATH_DIR=/go" >> "$GITHUB_ENV"
           echo "GO_BIN_DIR=/go/bin" >> "$GITHUB_ENV"
 
-      # 缓存 Go module 下载（GOMODCACHE），让 go mod download / go install
-      # 命中已下载模块，避免重复从 proxy 拉取。镜像内 GOPATH=/go。
       - name: 缓存 Go module
         uses: actions/cache@v6
         with:
@@ -62,7 +57,6 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-go-mod-
 
-      # 缓存 Go 编译缓存（~/.cache/go-build），避免每次全量重编。
       - name: 缓存 Go build 缓存
         uses: actions/cache@v6
         with:
@@ -71,14 +65,11 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-go-build-
 
-      # 动态获取 pnpm 实际 store 目录（受 PNPM_HOME / 配置影响，写死路径可能 Miss），
-      # 写入 $GITHUB_ENV 供下方缓存步骤引用。
       - name: 获取 pnpm store 目录
         id: pnpm-store
         shell: bash
         run: echo "PNPM_STORE_DIR=$(pnpm config get store-dir)" >> "$GITHUB_ENV"
 
-      # 自定义缓存 pnpm store，按 lockfile hash 命中，pnpm install 命中后跳过从 registry 下载。
       - name: 缓存 pnpm store
         uses: actions/cache@v6
         with:
@@ -90,17 +81,14 @@ jobs:
       - name: 安装所有依赖
         run: make deps
 
-      # 范围同 CNB 一致：./... 排除 sqlc 生成目录 internal/db、internal/datadb
-      # gotestsum 包裹 go test：coverage.out 照常产出，额外生成 go-test-report.xml（JUnit）
-      - name: 生成 Go 测试覆盖率与测试结果
-        run: gotestsum --junitfile go-test-report.xml -- -vet=off -coverpkg=$(go list ./... | grep -vE '/(db|datadb)$' | paste
-          -sd, -) -coverprofile=coverage.out ./...
+      - name: 生成 Go 测试覆盖率与测试报告
+        run: make junit-go # 产出 coverage.out + go-test-report.xml
 
-      # 额外挂 json reporter（产出 test-results.json），供后续转 JUnit 上传测试结果；
-      # coverage/lcov.info 仍正常产出。
       - name: 生成前端测试覆盖率
-        run: pnpm test:coverage --reporter=default --reporter=json --outputFile=test-results.json
-        working-directory: cmd/frontend
+        run: make cover-node # 产出 cmd/frontend/coverage/lcov.info
+
+      - name: 生成前端测试报告
+        run: make junit-node # 产出 cmd/frontend/coverage/junit.xml
 
       - name: 上传 Go 覆盖率到 Codecov
         uses: codecov/codecov-action@v7
@@ -118,22 +106,14 @@ jobs:
           flags: node
           fail_ci_if_error: false
 
-      - name: 构建前端（触发 Bundle Analysis 上传）
-        # 仅作体积分析上报；失败（如插件与 Vite 8 不兼容）不应阻断上面的覆盖率上传，故 continue-on-error。
-        # 仅当 CI 提供 CODECOV_TOKEN 时 vite.config.ts 才会实例化 @codecov/vite-plugin 并上传 chunk 体积。
-        continue-on-error: true
-        working-directory: cmd/frontend
-        run: pnpm build # = vite build，构建时插件自动上传（产物写入 internal/webui/www 这个 Go embed 目录）
-
-      - name: 转换 Vitest JSON 为 JUnit XML
-        # Vitest 5.0.5 无内置 junit reporter，用内置 json reporter 产出 test-results.json 后再转 JUnit（零依赖脚本）。
-        working-directory: cmd/frontend
-        run: node scripts/vitest-json-to-junit.mjs
+      - name: 构建前端
+        run: make build-frontend
 
       - name: 上传测试结果到 Codecov
-        uses: codecov/test-results-action@v1
+        uses: codecov/codecov-action@v7
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
-          # 合并前端（Svelte）与 Go 两份 JUnit 报告，Tests 面板同时展示
-          files: ./cmd/frontend/test-report.xml,./go-test-report.xml
+          files: ./go-test-report.xml,./cmd/frontend/coverage/junit.xml
+          report_type: test_results
+          disable_search: true
           fail_ci_if_error: false

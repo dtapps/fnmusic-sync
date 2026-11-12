@@ -6,11 +6,11 @@
 
 ## 1. 总览：一条独立通道
 
-| 项         | 内容             | 本仓库实现                                                      | Coveralls 里看什么          |
-|------------|------------------|-----------------------------------------------------------------|-----------------------------|
-| Go 覆盖率  | 后端代码行覆盖率 | `goveralls` 上传 `coverage.out`（flag `go`）                    | 总覆盖率 / 趋势 / flag 明细 |
-| 前端覆盖率 | Svelte 行覆盖率  | `coverallsapp/github-action@v2` 上传 `lcov.info`（flag `node`） | 同上，按 flag 合并          |
-| 合并       | 两份报告         | 同一 job、同一 build，靠 flag 合并                              | 一个 build 下同时有 go/node |
+| 项         | 内容             | 本仓库实现                                                                                    | Coveralls 里看什么          |
+|------------|------------------|-----------------------------------------------------------------------------------------------|-----------------------------|
+| Go 覆盖率  | 后端代码行覆盖率 | `make cover-go-cobertura` → `coverage.xml`，`coverallsapp/github-action@v2` 上传（flag `go`） | 总覆盖率 / 趋势 / flag 明细 |
+| 前端覆盖率 | Svelte 行覆盖率  | `make cover-node` → `lcov.info`，`coverallsapp/github-action@v2` 上传（flag `node`）          | 同上，按 flag 合并          |
+| 合并       | 两份报告         | 同一 job、同一 build，靠 flag 合并                                                            | 一个 build 下同时有 go/node |
 
 > **职责分离**：与 Codecov 一致——GitHub Actions 只负责上报，CNB 负责硬门禁。上传步骤全部 `continue-on-error: true`，Coveralls 故障不阻断合并。
 
@@ -21,54 +21,57 @@
 | `.github/workflows/coveralls.yml` | 唯一入口：装依赖 → 跑 Go/前端测试 → 分别上报 `flag=go` / `flag=node`                                                                                             |
 | `dtapps/golang/fnpack` 镜像       | 提供 `ghcr.io/dtapps/golang/fnpack:latest`（**与 codecov.yml 同一个**），已预装 `gotestsum`、`gojq`、`goveralls` 等；本仓库不自建，见 [ci-image.md](ci-image.md) |
 | `Makefile`（`deps` 目标）         | `go mod tidy` + `go mod download` + `pnpm --dir cmd/frontend install --frozen-lockfile`                                                                          |
-| `coverage.out`                    | Go 原始覆盖率（路径带模块前缀）                                                                                                                                  |
-| `cmd/frontend/coverage/lcov.info` | 前端覆盖率产物（`pnpm test:coverage` 生成）                                                                                                                      |
+| `Makefile`（`测试覆盖率` 一节）   | 覆盖率命令与扫描 / 排除清单的唯一来源：`cover-go` / `cover-go-cobertura` / `cover-node`                                                                          |
+| `coverage.xml`                    | Go 覆盖率（Cobertura 格式，由 `gocover-cobertura` 从 `coverage.out` 转换而来）                                                                                   |
+| `cmd/frontend/coverage/lcov.info` | 前端覆盖率产物（`make cover-node` 生成）                                                                                                                         |
 
 > **没有 `.github/coveralls.yml`**：与 Codecov 的 `.github/codecov.yml` 不同，Coveralls 的阈值 / PR 注释 / 徽章都在 Coveralls 后台仓库设置里配，仓库内不需要配置文件。
 
 ## 3. 各功能详解
 
-### 3.1 Go 覆盖率：goveralls
+### 3.1 Go 覆盖率：Cobertura XML
 
-- 与 Codecov **完全相同的口径**（`.github/codecov.yml` 与 `codecov.yml` 一致）：
+- 与 Codecov **完全相同的口径**（都走 Makefile 的 `cover-go`，扫描 / 排除清单同源）：
 
   ```
-  gotestsum --junitfile go-test-report.xml -- -vet=off -coverpkg=$(go list ./... | grep -vE '/(db|datadb)$' | paste -sd, -) -coverprofile=coverage.out ./...
+  make cover-go-cobertura   # = go test -coverpkg=... -coverprofile=coverage.out ./... && gocover-cobertura -by-files -strict < coverage.out > coverage.xml
   ```
 
   - 本项目**无 ent**；生成代码是 sqlc 的 `internal/db`、`internal/datadb`（合计约占 11% 语句块），从 `-coverpkg` 排除。
   - 范围是 `./...`（含 `cmd/fnmusic-sync` 的 `goroutine_diag_test.go`），不要写成 `./internal/...`。
 
-- 为什么不用 `coverallsapp/github-action`：它的 `action.yml` 只有 `path-to-lcov` 一个输入，**没有** `file` / `format`，喂不了 Go 的 `coverage.out`。
+- **为什么转 Cobertura 而不是直接喂 `coverage.out`**：Coveralls 的 `golang` parser 会用正则硬吃 3 段包前缀、只留 basename，导致所有文件坍缩到同一级目录，文件级明细全废；`cobertura` parser 直接取 `<class filename="...">` 的完整相对路径，绕开该正则。`gocover-cobertura` 由镜像预装。
 
-- 两步（**无安装步骤**，`goveralls` 来自镜像）：
+- 两步（**无安装步骤**，工具都来自镜像）：
 
   ```yaml
-  - name: 生成 Go 测试覆盖率
-    run: |
-      gotestsum --junitfile go-test-report.xml -- -vet=off -coverpkg=$(go list ./... | grep -vE '/(db|datadb)$' | paste -sd, -) -coverprofile=coverage.out ./...
+  - name: 生成 Go 测试覆盖率（Cobertura）
+    run: make cover-go-cobertura
 
   - name: 上传 Go 覆盖率到 Coveralls
     if: env.COVERALLS_REPO_TOKEN != ''
     continue-on-error: true
-    run: |
-      goveralls -coverprofile=coverage.out -service=github -repotoken="$COVERALLS_REPO_TOKEN" -flagname=go
+    uses: coverallsapp/github-action@v2
+    with:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      file: coverage.xml
+      format: cobertura
+      flag-name: go
   ```
 
 - 三个必须知道的细节：
-  - **不要剥模块前缀**（踩过坑）：`go test` 写出的是 `cnb.cool/dtapp/fnmusic-sync/cmd/...`，goveralls 的 `findFile` 会读 `go.mod` 拿到 module 名，把带前缀的路径**映射回仓库根**。若先 `sed` 剥掉前缀，路径变成 `cmd/fnmusic-sync/auth.go`，goveralls 转而用 `build.Import` 把它当导入路径去 GOPATH/GOROOT 找，直接报 `package cmd/fnmusic-sync is not in std`。原样喂 `coverage.out` 就对了。
-  - **`-service=github`**：让 goveralls 从 `GITHUB_*` 环境变量取分支 / commit / PR 元数据。
-  - **`-flagname=go`**：与前端 `node` 配对，合并进同一 build。
+  - **Cobertura 里是仓库相对路径**（`internal/config/config.go`），不再有模块前缀问题——前缀剥离那套坑（`package cmd/... is not in std`）随格式切换自然消失。
+  - **`-strict`**：让「包/模块信息缺失被静默跳过」直接失败，避免产出空报告还当成功。
+  - **`-flagname=go` / `flag-name: go`**：与前端 `node` 配对，合并进同一 build。
 
-- **不要在工作流里 `go install goveralls`**：镜像已预装。版本由 `dtapps/golang/fnpack` 的 `GOVERALLS_VERSION` 钉死，升级在那边改 ARG 后重推镜像；`go install ...@latest` 会拖慢 CI 并破坏可重现性。
-- `gotestsum` 的 `go-test-report.xml` 只用于命令对齐 / 本地排查，Coveralls **不接收** JUnit（那是 Codecov Test Analytics 用的）。
+- **不要在工作流里 `go install goveralls`**：本工作流用 `coverallsapp/github-action@v2`（composite action），镜像里无需额外装 goveralls；真要改回 `goveralls` CLI，版本由 `dtapps/golang/fnpack` 的 `GOVERALLS_VERSION` 钉死，升级在那边改 ARG 后重推镜像。
+- `make junit-go` 的 `go-test-report.xml` 只用于本地排查 / Codecov Test Analytics，Coveralls **不接收** JUnit。
 
 ### 3.2 前端覆盖率：coveralls action
 
 ```yaml
 - name: 生成前端测试覆盖率
-  working-directory: cmd/frontend
-  run: pnpm test:coverage
+  run: make cover-node
 
 - name: 上传前端覆盖率到 Coveralls
   if: env.COVERALLS_REPO_TOKEN != ''
@@ -81,8 +84,8 @@
 ```
 
 - 输入名是 **`path-to-lcov`**，不是 `file`。
-- 与 Codecov 不同，这里**不挂 json reporter**：Coveralls 只吃 lcov，不需要 JUnit / Test Analytics 那套转换。
-- 前端在 `cmd/frontend`，技术栈是 **Svelte**（Vitest 5.0.5）。
+- 与 Codecov 不同，这里**不产 JUnit**：Coveralls 只吃 lcov，不需要 Test Analytics 那套。
+- 前端在 `cmd/frontend`，技术栈是 **Svelte**（Vitest 5.1）；`make cover-node` 的扫描 / 排除清单与 CNB、Codecov 完全同源。
 
 ### 3.3 为什么是单个 job
 
@@ -119,32 +122,29 @@ Coveralls 以 **build** 为单位聚合报告，go / node 两份数据必须落�
 
 跑完后到 Coveralls 仓库页确认：**最新 build 下同时有 `go` 与 `node` 两个 flag，且合并出一个总覆盖率**。
 
-| 现象                                                        | 原因 / 处理                                                                                                                   |
-|-------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------|
-| 上传步骤显示 skipped                                        | `COVERALLS_REPO_TOKEN` 为空（fork PR 正常；主仓 PR 则是 secret 没配）                                                         |
-| `goveralls: command not found`                              | 镜像里 `GOVERALLS_VERSION` 那步没装成功，或 `/go/bin` 不在 PATH；**改镜像，别用 `go install` 兜底**                           |
-| `cannot find file "cmd/...": package cmd/... is not in std` | 不要把模块前缀剥掉——goveralls 靠 `go.mod` 的 module 名把 `cnb.cool/dtapp/fnmusic-sync/...` 映射回仓库根，剥了反而被当导入路径 |
-| 文件路径对不上 / 覆盖率 0%                                  | 确认 `coverage.out` 首行是 `mode:`、后续是 `cnb.cool/dtapp/fnmusic-sync/...`（**不要**做任何转换）                            |
-| 只看到 `go` 或只看到 `node`                                 | 某一步上传失败被 `continue-on-error` 吞了，展开该 step 日志看 API 返回                                                        |
-| 两个 flag 各算各的、没有合并                                | 两次上传不在同一 build；确认仍在同一个 job 内（拆分 job 就必须上 parallel 协议）                                              |
-| 私有仓库 401 / 未授权                                       | Coveralls 后台未授权该仓库，或 token 类型不对；确认 `COVERALLS_REPO_TOKEN` 属于该仓库                                         |
+| 现象                                   | 原因 / 处理                                                                                                                     |
+|----------------------------------------|---------------------------------------------------------------------------------------------------------------------------------|
+| 上传步骤显示 skipped                   | `COVERALLS_REPO_TOKEN` 为空（fork PR 正常；主仓 PR 则是 secret 没配）                                                           |
+| `gocover-cobertura: command not found` | 镜像里没装该工具，或 `/go/bin` 不在 PATH；**改镜像，别用 `go install` 兜底**                                                    |
+| 文件路径对不上 / 覆盖率 0%             | 先本地 `make cover-go-cobertura` 看 `coverage.xml`：`<class filename="...">` 应是仓库相对路径（如 `internal/config/config.go`） |
+| Go 覆盖率明显偏低                      | 确认 `-coverpkg` 排除了 `internal/db`、`internal/datadb`（sqlc 生成代码），排除项写在 Makefile 清单里                           |
+| 只看到 `go` 或只看到 `node`            | 某一步上传失败被 `continue-on-error` 吞了，展开该 step 日志看 API 返回                                                          |
+| 两个 flag 各算各的、没有合并           | 两次上传不在同一 build；确认仍在同一个 job 内（拆分 job 就必须上 parallel 协议）                                                |
+| 私有仓库 401 / 未授权                  | Coveralls 后台未授权该仓库，或 token 类型不对；确认 `COVERALLS_REPO_TOKEN` 属于该仓库                                           |
 
 本地预演（不真的上传）：
 
 ```bash
-go test -vet=off \
-  -coverpkg=$(go list ./... | grep -vE '/(db|datadb)$' | paste -sd, -) \
-  -coverprofile=coverage.out ./...
-head -3 coverage.out   # 应为 mode: / cnb.cool/dtapp/fnmusic-sync/...
-# 原样喂 goveralls，不要 sed 剥前缀
-goveralls -coverprofile=coverage.out -service=github -repotoken="$COVERALLS_REPO_TOKEN" -flagname=go
+make cover-go-cobertura
+head -3 coverage.xml   # 应为 <coverage ...> + <sources><source>仓库根</source>
+# Go：Cobertura（仓库相对路径）；前端：make cover-node 产出 cmd/frontend/coverage/lcov.info
 ```
 
 ## 7. 与 Codecov 的关系（同一口径，两条通道）
 
 | 维度          | Codecov（`codecov.yml` + `.github/codecov.yml`）                          | Coveralls（`coveralls.yml`）                                                           |
 |---------------|---------------------------------------------------------------------------|----------------------------------------------------------------------------------------|
-| Go 覆盖率命令 | 同一条（`./...` 排除 `db`/`datadb`）                                      | **相同**                                                                               |
+| Go 覆盖率命令 | 同一条（`make cover-go`，`./...` 排除 `db`/`datadb`）                     | **相同**（转成 Cobertura 后上传）                                                      |
 | flag 命名     | `go` / `node`                                                             | `go` / `node`（相同）                                                                  |
 | 运行环境      | 同一 CI 镜像                                                              | **同一 CI 镜像**                                                                       |
 | 配置文件      | `.github/codecov.yml`（flags / ignore / status / components）             | **无**，配置在 Coveralls 后台                                                          |
@@ -158,6 +158,6 @@ goveralls -coverprofile=coverage.out -service=github -repotoken="$COVERALLS_REPO
 ## 8. 注意事项
 
 - `flag` 名一旦定了别乱改，改了等于新建一条趋势线，历史会断档。
-- goveralls 版本由 `dtapps/golang/fnpack` 的 `GOVERALLS_VERSION` 钉死；升级改那边的 ARG 后重推镜像，**不要**在工作流里 `go install`。
+- 本工作流用 `coverallsapp/github-action@v2`（composite action），镜像里无需额外装 goveralls；若改回 CLI 方式，版本由 `dtapps/golang/fnpack` 的 `GOVERALLS_VERSION` 钉死，升级改那边的 ARG 后重推镜像，**不要**在工作流里 `go install`。
 - 文档命名：`docs/*-*-*.md`（双横线）被 `.gitignore` 忽略，本文档用单横线（`docs/coveralls.md`）。
-- **Go 端可能为 0%**：本仓库 `.gitignore` 忽略 `*_test.go`，GitHub Actions checkout 后无 Go 测试可跑，`go test` / `gotestsum` 仍会产出全 0% 的 `coverage.out`（不会失败），Coveralls 收到 0%。要拿到真实 Go 数据，需先把测试文件纳入 git（从 `.gitignore` 移除 `*_test.go` 或 `git add -f`）。前端不受影响（测试已跟踪）。
+- **Go 端当前基线约 16.5%**：Go 测试文件已全部纳入 git（`.gitignore` 只忽略 `/internal/reqlog/*_test.go`）；若 Coveralls 上显示 0%，先本地 `make cover-go-cobertura` 对照。

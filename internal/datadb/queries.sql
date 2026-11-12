@@ -28,8 +28,8 @@ VALUES
     sqlc.arg (work_mbid),
     sqlc.arg (matched_by),
     sqlc.arg (updated_at)
-  ) ON CONFLICT (feiniu_guid) DO
-UPDATE
+  )
+ON CONFLICT (feiniu_guid) DO UPDATE
 SET
   file_path = excluded.file_path,
   title = excluded.title,
@@ -41,7 +41,9 @@ SET
   artist_mbid = excluded.artist_mbid,
   work_mbid = excluded.work_mbid,
   matched_by = excluded.matched_by,
-  updated_at = excluded.updated_at RETURNING *;
+  updated_at = excluded.updated_at
+RETURNING
+  *;
 
 -- name: GetTrackMBID :one
 SELECT

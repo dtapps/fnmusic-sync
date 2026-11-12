@@ -181,14 +181,14 @@ sudo sh /tmp/install.sh upgrade --version v0.0.32
 
 这套规则**依赖发布时的 tag 命名**，所以发版流水线里**只有一个参数：版本号**。五个平台（CNB / GitHub / GitLab / Gitee / GitCode）共用同一份判定（`scripts/ci/resolve-prerelease.sh`），没有开关、没有「是否预发布」字段可填：
 
-| 版本号形态                 | 判定     | 说明                                                   |
-|----------------------------|----------|--------------------------------------------------------|
-| `v1.2.3`                   | 正式版   | `PRERELEASE=false`                                     |
-| `v1.2.3-rc.1`              | 预发布   | rc 渠道，changelog 对比上一个 rc                       |
-| `v1.2.3-beta.1`            | 预发布   | beta 渠道，changelog 对比上一个 beta                   |
-| `v1.2.3-alpha.1`           | 预发布   | alpha 渠道，changelog 对比上一个 alpha                 |
-| `v1.2.3-nightly.20260101`  | 预发布   | nightly 渠道，changelog 对比昨天的 nightly             |
-| 空 / `v` / `1.2` / `abc`   | 直接失败 | `+build` 元数据也挡：deb 与 fpk 的版本段没为它做过处理 |
+| 版本号形态                | 判定     | 说明                                                   |
+|---------------------------|----------|--------------------------------------------------------|
+| `v1.2.3`                  | 正式版   | `PRERELEASE=false`                                     |
+| `v1.2.3-rc.1`             | 预发布   | rc 渠道，changelog 对比上一个 rc                       |
+| `v1.2.3-beta.1`           | 预发布   | beta 渠道，changelog 对比上一个 beta                   |
+| `v1.2.3-alpha.1`          | 预发布   | alpha 渠道，changelog 对比上一个 alpha                 |
+| `v1.2.3-nightly.20260101` | 预发布   | nightly 渠道，changelog 对比昨天的 nightly             |
+| 空 / `v` / `1.2` / `abc`  | 直接失败 | `+build` 元数据也挡：deb 与 fpk 的版本段没为它做过处理 |
 
 后缀同时也是 **changelog 的渠道**：`scripts/ci/release-changelog.sh` 按 `rc / beta / alpha / nightly / stable` 分别找同渠道的上一个 tag，首次发某渠道（含 nightly）则回退到上一个正式版。正式版的对比基准永远只看正式版 tag，不会被 nightly 污染。
 

@@ -1,12 +1,9 @@
 # 推送工作流
+# 
 # https://github.com/actions/runner-images
 # https://github.com/actions/checkout
-# https://github.com/actions/setup-go
-# https://github.com/actions/setup-node
-# https://github.com/pnpm/action-setup
-# https://github.com/crazy-max/ghaction-upx
-# https://github.com/golangci/golangci-lint-action
-# https://github.com/sqlc-dev/setup-sqlc
+# https://github.com/actions/cache
+# https://github.com/dtapps/golang
 name: PushRequest
 
 on:
@@ -31,7 +28,7 @@ concurrency:
 
 jobs:
   check:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     # 直接使用统一共享的 CI 镜像（含 Go/Node/pnpm + GTK/WebKit + 全部 Go 工具链），
     # 由 dtapps 统一维护并推送到 GHCR，无需本仓库自行构建（原 ci-image.yml 已删除）。
     container:
