@@ -192,6 +192,10 @@ sudo sh /tmp/install.sh upgrade --version v0.0.32
 
 后缀同时也是 **changelog 的渠道**：`scripts/ci/release-changelog.sh` 按 `rc / beta / alpha / nightly / stable` 分别找同渠道的上一个 tag，首次发某渠道（含 nightly）则回退到上一个正式版。正式版的对比基准永远只看正式版 tag，不会被 nightly 污染。
 
+**`nightly` 是关键词，不是版本号**：`.github/workflows/release.yml` 每天 UTC 00:00（北京时间 08:00）的定时任务把版本号留空，就等价于填 `nightly`；手动填也一样。流水线据此自动推导成 `<最近正式版 + 1 个补丁>-nightly.<UTC 构建日期>`——最近正式版 v0.2.7 → `v0.2.8-nightly.20261114`，规则在 `scripts/ci/resolve-prerelease.sh`（五个平台共用一份推导，别处再写一套只会把版本号算歪）。补丁号要 +1 是因为 nightly 走的是「下一个正式版」的版本号，否则 nightly 会抢走正式版的 tag 名，正式版就发不出去了。推导出来的 tag 走 nightly 渠道（预发布），所以稳定用户不会被推上 nightly；nightly Release 只保留最近 3 个（旧的连同 git tag 一起自动删掉），GitHub / CNB / GitLab / GitCode 各平台发布完各自清理，Gitee 侧插件没有删除能力、暂靠手工清理。
+
+**GitHub 是发版的总入口**：GitHub 发布成功后会自动把同版本号同步到 CNB / Gitee / GitLab / GitCode，再推一条 ServerChan3 通知（各平台同步状态一览）。同步用的 secret 全部可缺省，没配就跳过；清单见 [contributing.md](contributing.md) §GitHub 发版后的同步与通知。
+
 判法与客户端 `internal/updater.isPrereleaseTag` 逐字对齐（客户端认的是任意 `-<prerelease>` 段，不枚举渠道名）—— 两边不一致的后果是「发出去的版本没人能升上去」或者「稳定用户被推到 rc / nightly 上」，两种都撤不回来。
 
 为什么把那个开关彻底删掉：它跟版本号会打架，而打架的时候必然是在用户什么都没做错的时候打。CNB 的 `switch` 踩过：`web_trigger.yml` 里写死 `default: 'false'`，实际传进来仍是 `true`，「`v0.1.31` + 预发布」撞上硬失败，red 在第一步，页面上没有任何东西能让用户看出这个 `true` 从哪来。版本号里已经写了 `-rc.1`，再让人勾一遍只是多一个出错的地方。

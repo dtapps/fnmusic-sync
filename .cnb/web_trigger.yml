@@ -27,9 +27,23 @@ branch:
             - developer
         inputs:
           version:
-            # 输入框
-            name: 版本号
-            description: 要发布的版本号，可带或不带 v（1.2.3 / v1.2.3 / v1.2.3-rc.1 / v1.2.3-beta.1 / v1.2.3-alpha.1 / v1.2.3-nightly.20260101）
+            name: 打包版本
+            description: 请输入打包版本，如 v1.2.3；预发布版本请带 rc/beta/alpha/nightly 后缀，如 v1.2.3-rc.1、v1.2.3-nightly.20260101（填 nightly
+              自动推导当天夜间构建版本）
             required: true # 是否必填
             type: input
-            default: ''
+          commit:
+            name: 构建提交
+            description: 可选：要发布的代码版本（完整 SHA / 分支 / tag）；留空则用当前分支 HEAD
+            required: false
+            type: input
+
+      - name: 生成 Code Wiki
+        description: 重新分析仓库并生成 Code Wiki 文档
+        event: web_trigger_codewiki # 触发的 CI 事件名
+        permissions:
+          roles:
+            - owner
+            - master
+            - developer
+

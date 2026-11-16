@@ -33,8 +33,13 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: '版本号。预发布看后缀：1.2.3-rc.1 / 1.2.3-beta.1 / 1.2.3-alpha.1 / 1.2.3-nightly.20260101；没有后缀就是正式版'
+        description: '版本号。预发布看后缀：1.2.3-rc.1 / 1.2.3-beta.1 / 1.2.3-alpha.1 / 1.2.3-nightly.20260101；填 nightly 自动推导当天夜间构建版本；没有后缀就是正式版'
         required: true
+      commit:
+        description: '要构建的提交（留空则使用默认分支最新提交）'
+        required: false
+        type: string
+        default: ''
 
 # 同一时间只允许一条发布在跑。
 # 不能按版本号分组：同一次发布可以被写成 0.1.31 / v0.1.31 两种样子，分组键不同就等于
@@ -57,6 +62,7 @@ jobs:
         env:
           GITCODE_TOKEN: ${{ secrets.GITCODE_TOKEN }}
           VERSION_INPUT: ${{ inputs.version }}
+          COMMIT_INPUT: ${{ inputs.commit }}
           REPO_PATH: dtapp/fnmusic-sync
         run: |
           set -euo pipefail
@@ -66,16 +72,30 @@ jobs:
           # "v 0.1.31"，下面红在格式校验上，而报错里那个空格肉眼几乎看不见。
           RAW="${RAW#"${RAW%%[![:space:]]*}"}"
           RAW="${RAW%"${RAW##*[![:space:]]}"}"
-          case "$RAW" in v*) TAG="$RAW" ;; *) TAG="v$RAW" ;; esac
-          VER="${TAG#v}"
+          # nightly 是「关键词」而不是版本号：要靠「最近正式版 tag」推导成
+          # <最近正式版+1 补丁>-nightly.<UTC 日期>，所以它必须在**检出并拉全 tag 之后**
+          # 才能算出来（resolve-prerelease.sh 与另外四个平台同一份实现）。
+          KEY="$(printf '%s' "$RAW" | tr '[:upper:]' '[:lower:]')"
+          case "$KEY" in
+          nightly | nightly.*) IS_NIGHTLY=true ;;
+          *) IS_NIGHTLY=false ;;
+          esac
 
-          # 二次校验与 resolve-prerelease.sh 同一条正则。这里必须先判一次：下面要用 TAG 去
-          # checkout，而 scripts/ci/resolve-prerelease.sh 在空工作区里还不存在。
-          if ! printf '%s' "$VER" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z]+)*$'; then
-            echo "版本号格式不对：${RAW}（期望 0.1.31 / v0.1.31 / v0.1.32-rc.1 / v0.1.32-nightly.20260101）"
-            exit 1
+          if [ "$IS_NIGHTLY" = "false" ]; then
+            case "$RAW" in v*) TAG="$RAW" ;; *) TAG="v$RAW" ;; esac
+            VER="${TAG#v}"
+
+            # 二次校验与 resolve-prerelease.sh 同一条正则。这里必须先判一次：下面要用 TAG 去
+            # checkout，而 scripts/ci/resolve-prerelease.sh 在空工作区里还不存在。
+            if ! printf '%s' "$VER" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z]+)*$'; then
+              echo "版本号格式不对：${RAW}（期望 0.1.31 / v0.1.31 / 0.1.32-rc.1 / 0.1.32-nightly.20260101 / nightly）"
+              exit 1
+            fi
+            echo "版本号: ${TAG}"
+          else
+            echo "版本号关键词: ${RAW}（检出并拉全 tag 后展开成真正的版本号）"
+            TAG=""
           fi
-          echo "版本号: ${TAG}"
 
           # 检出：runner 已经把仓库挂进来就直接用，否则自己 clone。
           # 需要 git log 生成「更新内容」，所以不能 --depth 1。
@@ -89,26 +109,56 @@ jobs:
             else
               URL="https://gitcode.com/${REPO_PATH}.git"
             fi
-            git clone --depth 50 --branch "$TAG" "$URL" . 2>/dev/null \
-              || git clone --depth 50 "$URL" .
+            if [ -n "$TAG" ]; then
+              git clone --branch "$TAG" "$URL" . 2>/dev/null \
+                || git clone "$URL" .
+            else
+              # nightly 关键词：版本号要等检出并拉全 tag 之后才算得出，先按默认分支检出
+              git clone "$URL" .
+            fi
           fi
 
-          # 切到目标 tag：tag 不存在时先按当前分支构建，发布阶段会因为 tag 缺失而失败，
-          # 这样错误信息落在「发布」而不是「检出」，定位更快
-          git checkout --force "$TAG" 2>/dev/null || echo "警告：本地没有 tag ${TAG}，按当前 HEAD 构建"
+          # nightly 关键词（定时任务用）要靠「最近正式版 tag」推导版本号，
+          # 两条路径都得把 tag 拉全。
+          git fetch --tags --force origin 2>/dev/null || true
+          # 还要**完整历史**：release-changelog.sh 的 `git log <上一个 tag>..HEAD` 需要它。
+          # 浅克隆（runner 自带工作区通常是 depth=1）会让「更新内容」只剩最新那条提交，
+          # 与 GitHub / CNB 侧（完整历史）对不上。
+          git fetch --unshallow --quiet 2>/dev/null \
+            || git fetch --depth 1000 --quiet 2>/dev/null \
+            || true
+
+          # 指定构建提交（GitHub 同步过来的 commit）：各平台自己构建，必须是同一个提交，
+          # 否则同一个版本号在不同平台是不同内容。留空 = 默认分支最新提交。
+          if [ -n "${COMMIT_INPUT:-}" ]; then
+            echo "切换到指定提交: ${COMMIT_INPUT}"
+            git fetch --depth 1 origin "${COMMIT_INPUT}" 2>/dev/null \
+              || git fetch origin "${COMMIT_INPUT}" 2>/dev/null \
+              || true
+            if ! git checkout --force "${COMMIT_INPUT}" 2>/dev/null; then
+              echo "❌ 切换到提交 ${COMMIT_INPUT} 失败（该提交不在本仓库里？）"
+              exit 1
+            fi
+            echo "当前提交: $(git rev-parse --short HEAD)"
+          fi
 
           # 预发布判定与另外四个平台同一份规则（scripts/ci/resolve-prerelease.sh）：只看后缀。
           # source 它而不是自己写一遍 case。必须放在检出之后：工作区为空时上面才刚 clone
           # 出这个文件。算出来的值写进 .ci-release.env，下游「发布」步骤的 release_status
           # 和正文的「是否预发布」都取这一份，不各判一次。
-          export VERSION="$TAG"
+          # 传原始输入 RAW（不是 TAG）：nightly 关键词要在这里才展开成真正的版本号
+          export VERSION="$RAW"
           # shellcheck disable=SC1091
           . scripts/ci/resolve-prerelease.sh
           # source 只带进函数，必须显式调用才会算出 PRERELEASE（以及统一后的 TAG）
-          resolve_version "$TAG" || exit 1
+          resolve_version "$RAW" || exit 1
           VER="${TAG#v}"
           PRE="$PRERELEASE"
           echo "预发布: ${PRE}"
+
+          # 切到目标 tag：tag 不存在时（nightly 每天一个新 tag）先按当前 HEAD 构建，
+          # 发布阶段会因为 tag 缺失而失败，这样错误信息落在「发布」而不是「检出」，定位更快
+          git checkout --force "$TAG" 2>/dev/null || echo "警告：本地没有 tag ${TAG}，按当前 HEAD 构建"
 
           # 后续步骤共用的变量写进文件，不依赖平台的跨 step 变量机制
           # 标题统一带项目名前缀（与另外四个平台的 release.yml 同口径，改名字要一起改）。
@@ -124,6 +174,9 @@ jobs:
             echo "PRE=${PRE}"
             echo "REPO_PATH=${REPO_PATH}"
             echo "TITLE=\"${TITLE}\""
+            # 实际被构建的那个提交：指定 commit 构建时它不是 main 的最新提交，
+            # Release 的 tag 必须落在它上面（否则「包是 A、tag 指向 B」）。
+            echo "BUILD_SHA=$(git rev-parse HEAD)"
           } > .ci-release.env
 
           git log --oneline -3 || true
@@ -186,7 +239,7 @@ jobs:
             --arg tag "$TAG" \
             --arg name "$TITLE" \
             --rawfile body "$BODY_FILE" \
-            --arg tc "main" \
+            --arg tc "$BUILD_SHA" \
             --arg st "$STATUS" \
             '{tag_name: $tag, name: $name, body: $body, target_commitish: $tc, release_status: $st}')
 
@@ -254,3 +307,51 @@ jobs:
 
           echo ""
           echo "完成：https://gitcode.com/${REPO_PATH}/releases/tag/${TAG}"
+
+      # ---------------------------------------------------------------
+      # 4. 清理旧 nightly（与 GitHub / CNB / GitLab 的「只保留最近 3 个」同口径）
+      # ---------------------------------------------------------------
+      - name: 清理旧 nightly Release
+        shell: bash
+        env:
+          GITCODE_TOKEN: ${{ secrets.GITCODE_TOKEN }}
+        run: |
+          set -euo pipefail
+          # shellcheck disable=SC1091
+          . ./.ci-release.env
+
+          # 只处理日期 nightly（tag 以 -nightly.YYYYMMDD 结尾），rc / beta / alpha 与正式版不动
+          case "${PRE}:${TAG}" in
+          true:*-nightly.[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]) ;;
+          *) echo "非日期 nightly 发布（${TAG}），跳过清理"; exit 0 ;;
+          esac
+
+          API="https://api.gitcode.com/api/v5"
+          # 清理是「尽力而为」：任何一步失败只打印，不让 job 变红
+          # （Release 已经发布成功了，清理失败只是多留几个包）。
+          LIST=$(curl -s "${API}/repos/${REPO_PATH}/releases?per_page=100&access_token=${GITCODE_TOKEN}" || true)
+          OLD_TAGS=$(printf '%s' "${LIST}" | jq -r '
+            [ .[]
+              | select((.prerelease // false) == true)
+              | select(.tag_name | test("-nightly\\.[0-9]{8}$")) ]
+            | sort_by(.created_at) | reverse | .[].tag_name
+          ' 2>/dev/null || true)
+          if [ -z "${OLD_TAGS}" ]; then
+            echo "没有需要清理的旧 nightly Release"
+            exit 0
+          fi
+          TOTAL=$(printf '%s\n' "${OLD_TAGS}" | grep -c . || true)
+          if [ "${TOTAL:-0}" -le 3 ]; then
+            echo "nightly Release 共 ${TOTAL:-0} 个，无需清理"
+            exit 0
+          fi
+          # 前 3 个是保留项，其余逐个删
+          printf '%s\n' "${OLD_TAGS}" | tail -n +4 | while IFS= read -r OLD; do
+            [ -n "${OLD}" ] || continue
+            CODE=$(curl -s -o /dev/null -w "%{http_code}" -X DELETE \
+              "${API}/repos/${REPO_PATH}/releases/${OLD}?access_token=${GITCODE_TOKEN}" || echo "000")
+            case "${CODE}" in
+            200|204) echo "已删除旧 nightly Release ${OLD}" ;;
+            *) echo "⚠ 删除 Release ${OLD} 失败 HTTP=${CODE}" ;;
+            esac
+          done

@@ -35,9 +35,13 @@ include:
 
 # 什么时候创建流水线——不匹配时流水线根本不存在，不会出现「有流水线但 job 全被过滤」。
 #
-#   只有 Run pipeline 且填了 VERSION（发布）才建：
+#   Run pipeline 且填了 VERSION（发布）才建：
 #   镜像已改为统一的预置镜像，不再需要「Dockerfile 变了就重建镜像」和「定时刷基础镜像」，
 #   所以 push / 定时这两条入口一并去掉。
+#
+#   API 触发（GitHub 发布成功后由 sync-gitlab job 拉起）也建：
+#   CI_PIPELINE_SOURCE == "trigger"（项目级 trigger token 触发的流水线），
+#   同样要求填了 VERSION。
 #
 # 其它（push / 定时 / MR / 其它分支 / tag / 外部 API）一律不建。
 # Run pipeline 留空 VERSION 时什么都不建——本来也没有任何事要做，
@@ -45,6 +49,7 @@ include:
 workflow:
   rules:
     - if: $CI_PIPELINE_SOURCE == "web" && $VERSION != ""
+    - if: $CI_PIPELINE_SOURCE == "trigger" && $VERSION != ""
     - when: never
 
 stages:
@@ -54,8 +59,14 @@ variables:
   # Run pipeline 页面会把带 description 的变量列成表单，方便手填
   VERSION:
     value: ''
-    description: '要发布的版本号，可带或不带 v 前缀（如 0.1.31 / v0.1.31 / v0.1.32-rc.1 / v0.1.32-beta.1 / v0.1.32-alpha.1 / v0.1.32-nightly.20260101）。留空
-      = 不发布，也不建流水线。'
+    description: '要发布的版本号，可带或不带 v 前缀（如 0.1.31 / v0.1.31 / v0.1.32-rc.1 / v0.1.32-beta.1 / v0.1.32-alpha.1 / v0.1.32-nightly.20260101
+      / nightly）。留空 = 不发布，也不建流水线。'
+  # 要构建的提交：留空 = 构建默认分支的最新提交。
+  # GitHub 发版后由 sync-gitlab 自动传过来（那时必须与 GitHub 构建的是同一个提交，
+  # 否则同一个版本号在不同平台是不同内容）。
+  COMMIT:
+    value: ''
+    description: '要构建的提交（SHA 或分支名，留空 = 默认分支最新提交）'
   # 二进制内嵌的构建来源标识（buildinfo.RepoSource）。
   # updater 只区分 github 与其它：非 github 一律走 CNB 升级链路，所以 gitlab 与 cnb 运行时等价，
   # 但 UI「构建来源」会如实显示 gitlab。要支持从 GitLab API 升级需另改 internal/updater。

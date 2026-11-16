@@ -31,69 +31,15 @@
 
 set -eu
 
-# 产物名解析：本项目只发 Linux 安装包，两种命名：
-#   deb：fnmusic-sync_<arch>.deb      例 fnmusic-sync_amd64.deb
-#   fpk：fnmusic-sync-<arch>.fpk      例 fnmusic-sync-arm64.fpk
-# 另外兼容 .tar.gz / .zip（历史上发过裸二进制压缩包，留一条兜底路径）。
-# 输出三个全局变量 PLAT / ARCH / EXT（EXT 为包后缀，如 .deb / .fpk）
-parse_artifact_name() {
-  fname="$1"
-  PLAT='其它'
-  ARCH='-'
-  EXT=''
-
-  case "${fname}" in
-    *.tar.gz)
-      EXT='.tar.gz'
-      stem="${fname%.tar.gz}"
-      ;;
-    *.zip)
-      EXT='.zip'
-      stem="${fname%.zip}"
-      ;;
-    *.deb)
-      EXT='.deb'
-      stem="${fname%.deb}"
-      ;;
-    *.fpk)
-      EXT='.fpk'
-      stem="${fname%.fpk}"
-      ;;
-    *) return 0 ;;
-  esac
-  case "${stem}" in
-    *.exe) stem="${stem%.exe}" ;;
-  esac
-
-  # 架构取主干最后一段：两种命名的分隔符不同（_ 与 -），所以两种都当分隔符。
-  #   fnmusic-sync_amd64   -> amd64
-  #   fnmusic-sync-amd64   -> amd64
-  #   fnmusic-sync-fpk-linux-amd64 -> amd64
-  arch="${stem##*[-_]}"
-
-  case "${EXT}" in
-    # 本项目所有包都是给 Linux 的：deb 装 Debian/Ubuntu，fpk 装飞牛 fnOS
-    .deb | .fpk) PLAT='Linux' ;;
-    *) PLAT='其它' ;;
-  esac
-
-  case "${arch}" in
-    amd64) ARCH='x86_64' ;;
-    arm64) ARCH='ARM64' ;;
-    *) ARCH="${arch}" ;;
-  esac
-}
-
-# 说明列：一句话说清这是哪个平台的什么包、怎么用。
-# 依赖 parse_artifact_name 设置的全局变量 PLAT / ARCH / EXT，把说明写到 stdout，
-# 调用处用命令替换接住（避免往 Release 正文里直接插入一行）。
-describe_artifact() {
-  case "${PLAT}:${EXT}" in
-    Linux:.deb) printf '%s' 'Debian/Ubuntu 安装包（dpkg -i 安装）' ;;
-    Linux:.fpk) printf '%s' '飞牛 fnOS 应用包（应用中心 → 手动安装）' ;;
-    *) printf '压缩包（%s），解压即用' "${EXT}" ;;
-  esac
-}
+# 附件名解析与「说明」文案统一由 scripts/ci/describe-artifact.sh 提供（跨仓库通用）：
+#   parse_artifact_name <文件名>   解析出 PLAT / ARCH / EXT / KIND / APP
+#   describe_artifact [文件名]     输出说明文案
+# 本文件原先另存了一份同名同接口的本地实现，文案各写一套，改一处忘一处。
+# 现在只保留这一份事实来源：文案集中在那份脚本的 DESC_* 表，五个平台同步生效。
+# 注意：调用方（各平台 workflow 与 build-linux-packages.sh）的工作目录都是仓库根，
+# 故这里用相对路径 source；与 scripts/ci/resolve-prerelease.sh 的用法一致。
+# shellcheck disable=SC1091
+. scripts/ci/describe-artifact.sh
 
 render_body() {
   : "${VERSION:?VERSION 为空}"
@@ -293,7 +239,7 @@ if [ "${1:-}" = '--self-test' ]; then
   expect "${tmp_dir}/stable.md" '✅ 正式发布版本 (Stable)' '正式版标记'
   expect "${tmp_dir}/stable.md" '| 构建时间 |' '构建时间行'
   expect "${tmp_dir}/stable.md" '| Linux | x86_64 | [fnmusic-sync_amd64.deb](https://example.com/dl/v1.2.3/fnmusic-sync_amd64.deb) |' 'deb x86_64 下载行'
-  expect "${tmp_dir}/stable.md" '| Linux | ARM64 | [fnmusic-sync-arm64.fpk]' 'fpk ARM64 下载行'
+  expect "${tmp_dir}/stable.md" '| fnOS | ARM64 | [fnmusic-sync-arm64.fpk]' 'fpk ARM64 下载行'
   expect "${tmp_dir}/stable.md" '- 修复 A' '更新内容保留'
   expect "${tmp_dir}/stable.md" '## 校验' '有 SHA256SUMS 时写校验节'
   expect "${tmp_dir}/stable.md" 'sha256sum -c SHA256SUMS' 'Linux 校验命令'
@@ -302,7 +248,7 @@ if [ "${1:-}" = '--self-test' ]; then
   reject "${tmp_dir}/stable.md" '## ⚠️ 预发布版本' '正式版不出现预发布警示'
   reject "${tmp_dir}/stable.md" 'SHA256SUMS |' '校验文件不进下载表格'
   expect "${tmp_dir}/stable.md" '| 平台 | 架构 | 文件 | 大小 | 说明 |' '下载表头含说明列'
-  expect "${tmp_dir}/stable.md" 'Debian/Ubuntu 安装包（dpkg -i 安装）' 'deb 行说明'
+  expect "${tmp_dir}/stable.md" 'Debian/Ubuntu 安装包（dpkg -i）' 'deb 行说明'
   expect "${tmp_dir}/stable.md" '飞牛 fnOS 应用包（应用中心 → 手动安装）' 'fpk 行说明'
 
   echo '── 预发布 ──'

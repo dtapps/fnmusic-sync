@@ -55,6 +55,12 @@
 #
 # 附件必须逐个列名：插件不支持目录，assertFiles 填 bin 会把整个目录压成
 # bin.tar.gz 去上传，然后 400 失败。CNB / GitHub 那边增减产物时要同步改那份清单。
+#
+# nightly 保留策略（与 GitHub / CNB / GitLab / GitCode 的「只保留最近 3 个」同口径）：
+# 本条流水线的 release@gitee 插件只能**覆盖同名** Release（allowUpdate: true），
+# 没有删除历史 Release 的能力，所以 Gitee 侧的 nightly 会逐日堆积。
+# 要在这里也收敛到 3 个，得改成手写 Gitee v5 API（查列表 → 删旧的 → 建 Release → 传附件），
+# 参考 certflow 的 scripts/ci/gitee-release-publish.js；在那之前靠手工清理。
 version: '1.0'
 name: release
 displayName: 发布版本
@@ -181,7 +187,11 @@ stages:
               cat SHA256SUMS
             )
 
-            # Gitee Go 的检出通常不带 tag，先补一次；补不到时 changelog 会退化成「首次发布」
+            # Gitee Go 的检出通常既不带 tag 也不带完整历史，两个都要补：
+            #   tag 缺 → changelog 挑不出基准，退化成「首次发布」
+            #   历史缺（浅克隆）→ `git log <上一个 tag>..HEAD` 只剩 HEAD 一条，
+            #     正文里的「更新内容」退化成「只有最新那条提交」，与其它平台对不上
+            git fetch --unshallow --quiet 2>/dev/null || true
             git fetch --tags --quiet --force origin 2>/dev/null || true
             CHANGELOG="$(sh scripts/ci/release-changelog.sh "${TAG}" 2>/dev/null || true)"
             if ! VERSION="${TAG}" PRERELEASE="${PRE}" \

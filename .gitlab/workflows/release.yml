@@ -31,6 +31,25 @@ package-release:
       set -eu
       VERSION="${VERSION:-}"
       export VERSION
+      # 指定构建提交（GitHub 同步过来的 commit）：各平台自己构建，必须是同一个提交，
+      # 否则同一个版本号在不同平台是不同内容（GitHub 上的包是 A、GitLab 上的是 B）。
+      # COMMIT 留空 = 构建 GitLab 仓库默认分支的 HEAD（页面手动 Run pipeline 的情形）。
+      if [ -n "${COMMIT:-}" ]; then
+        echo "切换到指定提交: ${COMMIT}"
+        git fetch --depth 1 origin "${COMMIT}" 2>/dev/null \
+          || git fetch origin "${COMMIT}" 2>/dev/null \
+          || true
+        if ! git checkout --force "${COMMIT}" 2>/dev/null; then
+          echo "❌ 切换到提交 ${COMMIT} 失败（该提交不在本仓库里？）"
+          exit 1
+        fi
+        echo "当前提交: $(git rev-parse --short HEAD)"
+      fi
+      # 实际被构建的那个提交：手动指定 COMMIT 时它不是 CI_COMMIT_SHA（那是触发流水线的提交），
+      # Release 的 tag 必须落在它上面，否则「包是 A、tag 指向 B」。
+      BUILD_SHA="$(git rev-parse HEAD)"
+      export BUILD_SHA
+      echo "构建提交: ${BUILD_SHA}"
       # 更新内容的对比基准靠 tag，而 GitLab 默认是浅克隆（GIT_DEPTH=20），tag 拉不全
       # 会让 changelog 退化成「首次发布」甚至挑不出基准。这一行是必需的，不是兜底。
       git fetch --tags --quiet --force || true
@@ -153,7 +172,8 @@ package-release:
       done
       # name 用带项目名前缀的标题：Release 列表里「fnmusic-sync v0.1.32 (预发布)」
       # 比光秃秃的 tag 更容易一眼分清正式版与预发布（与另外四个平台同口径）
-      jq -n --arg tag "$TAG_NAME" --arg name "$RELEASE_TITLE" --arg ref "$CI_COMMIT_SHA" \
+      # ref 用实际被构建的那个提交（BUILD_SHA），不是 CI_COMMIT_SHA（那是触发流水线的提交）
+      jq -n --arg tag "$TAG_NAME" --arg name "$RELEASE_TITLE" --arg ref "$BUILD_SHA" \
         --arg body "$(cat release_body.md)" \
         --argjson links "$links" \
         '{tag_name:$tag,name:$name,ref:$ref,description:$body,assets:{links:$links}}' > release.json
@@ -175,6 +195,51 @@ package-release:
         exit 1
       fi
       echo "✓ Release $TAG_NAME 已发布：$CI_PROJECT_URL/-/releases/$TAG_NAME"
+    # 5. 清理旧 nightly（与 GitHub / CNB 的「只保留最近 3 个」同口径）。
+    #    nightly 每天一个 tag，不清理的话 GitLab 上的 Release + Generic Package 会无限堆积；
+    #    GitHub 那边删掉的旧 nightly 也不会自动从 GitLab 消失。
+    #    只处理日期 nightly（tag 以 -nightly.YYYYMMDD 结尾），rc / beta / alpha 与正式版一律不动。
+    - |
+      set -eu
+      case "${PRE_RELEASE}:${TAG_NAME}" in
+      true:*-nightly.[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]) ;;
+      *) echo "非日期 nightly 发布（${TAG_NAME}），跳过清理" ;;
+      esac
+      # 清理是「尽力而为」：任何一步失败只打印，不让 job 变红
+      # （Release 已经发布成功了，清理失败只是多留几个包）。
+      OLD_TAGS=$(curl --silent --show-error \
+        --header "JOB-TOKEN: $CI_JOB_TOKEN" \
+        "$CI_API_V4_URL/projects/$CI_PROJECT_ID/releases?per_page=100" 2>/dev/null \
+        | jq -r '[.[] | select(.draft == false and .upcoming_release == false)
+                   | select(.tag_name | test("-nightly\\.[0-9]{8}$"))] | sort_by(.created_at) | reverse | .[].tag_name' 2>/dev/null || true)
+      if [ -z "${OLD_TAGS}" ]; then
+        echo "没有需要清理的旧 nightly Release"
+        exit 0
+      fi
+      TOTAL=$(printf '%s\n' "${OLD_TAGS}" | grep -c . || true)
+      if [ "${TOTAL:-0}" -le 3 ]; then
+        echo "nightly Release 共 ${TOTAL:-0} 个，无需清理"
+        exit 0
+      fi
+      # 前 3 个是保留项，其余逐个删（连同 Generic Package 里的包一起删，否则包还在）
+      printf '%s\n' "${OLD_TAGS}" | tail -n +4 | while IFS= read -r OLD; do
+        [ -n "${OLD}" ] || continue
+        CODE=$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
+          --request DELETE --header "JOB-TOKEN: $CI_JOB_TOKEN" \
+          "$CI_API_V4_URL/projects/$CI_PROJECT_ID/releases/${OLD}" || echo "000")
+        case "${CODE}" in
+        200|204) echo "已删除旧 nightly Release ${OLD}" ;;
+        *) echo "⚠ 删除 Release ${OLD} 失败 HTTP=${CODE}" ;;
+        esac
+        # 通用包仓库里的同名包也删掉，否则旧版本还能被直接下载
+        PC=$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
+          --request DELETE --header "JOB-TOKEN: $CI_JOB_TOKEN" \
+          "$CI_API_V4_URL/projects/$CI_PROJECT_ID/packages/generic/$PACKAGE_NAME/${OLD}" || echo "000")
+        case "${PC}" in
+        200|204) echo "已删除旧 nightly 包 ${OLD}" ;;
+        *) echo "⚠ 删除包 ${OLD} 失败 HTTP=${PC}" ;;
+        esac
+      done
   artifacts:
     when: always
     expire_in: 30 days
@@ -187,6 +252,8 @@ package-release:
       # 这里本来有 reports.dotenv: release.env。删了：本 job 没有下游 job 会 needs 它，
       # 那份文件既没人读也不进 artifacts 列表（下载不到），属于纯空转的配置。
       # 变量靠上面的 export 在 job 内传递，那才是唯一真正被消费的通道。
-  # 只有「手动 Run pipeline 且填了 VERSION」才发布；留空则本 stage 为空，只维护镜像
+  # 只有「手动 Run pipeline 且填了 VERSION」或「API 触发且填了 VERSION」才发布；
+  # 留空则本 stage 为空，只维护镜像
   rules:
     - if: $CI_PIPELINE_SOURCE == "web" && $VERSION != ""
+    - if: $CI_PIPELINE_SOURCE == "trigger" && $VERSION != ""
