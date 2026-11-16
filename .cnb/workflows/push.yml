@@ -14,8 +14,9 @@
         - name: 安装所有依赖
           script: make deps
 
-        # - name: 格式化（Go + 前端 + 配置 + 文档 + 脚本）
+        # - name: 格式化/修复项目
         #   script: make format
 
-        - name: 检查（Go + HTML/CSS/JS/TS/Svelte）
-          script: make check
+        - name: 检查/测试项目
+          # CI=true：流水线里「过时依赖」只提示不阻塞（make check STRICT_CHECKS=0）
+          script: CI=true make check

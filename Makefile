@@ -651,7 +651,7 @@ format-docker:
 format-shell:
 	@bash scripts/format.sh shell
 
-# 格式化
+# 格式化/修复项目
 .PHONY: format
 format: format-node format-go format-yaml format-json format-sql format-markdown format-docker format-shell
 
@@ -696,6 +696,12 @@ check-go:
 
 	@echo "[Check] 完成。"
 
+# 「过时依赖」是否严格把关：
+#   1 = 严格（本地默认）：pnpm outdated 发现过时依赖就让 make 失败
+#   0 = 宽松（流水线默认）：只提示，不阻塞流水线
+# 流水线（GitHub Actions / CNB）会设置 CI=true，此时默认走宽松；
+# 需要在流水线里也严格时显式传参：make check STRICT_CHECKS=1
+STRICT_CHECKS ?= $(if $(filter true,$(CI)),0,1)
 
 # 检查前端代码
 .PHONY: check-node
@@ -707,8 +713,14 @@ check-node:
 	@echo "  -> 检查安全漏洞 (仅高危阻断)..."
 	pnpm --dir $(FRONTEND_DIR) audit --production --audit-level high --registry=https://registry.npmjs.org
 
+	# pnpm outdated 只要存在过时依赖就返回 1（连 pnpm 自己这个 devDependency 也算），
+	# 「有新版可用」不该卡住流水线：流水线里降级为提示，本地仍按 STRICT_CHECKS 失败。
 	@echo "  -> 检查过时依赖..."
-	pnpm --dir $(FRONTEND_DIR) outdated
+	@if [ "$(STRICT_CHECKS)" = "1" ]; then \
+		pnpm --dir $(FRONTEND_DIR) outdated; \
+	else \
+		pnpm --dir $(FRONTEND_DIR) outdated || echo "  -> (宽松模式) 存在过时依赖，不阻塞流水线"; \
+	fi
 
 	@echo "  -> 检查代码风格 (Lint)..."
 	pnpm --dir $(FRONTEND_DIR) run lint
@@ -721,7 +733,7 @@ check-node:
 
 	@echo "[Check] 前端检查完成。"
 
-# 检查代码
+# 检查/测试项目
 .PHONY: check
 check: check-node check-go
 
