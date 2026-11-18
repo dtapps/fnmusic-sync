@@ -147,6 +147,20 @@ stages:
             PRE="${PRERELEASE}"
             echo "版本号: ${TAG}  预发布: ${PRE}"
 
+            # 双触发去重：GitHub 的 sync-gitee 与 CNB 的「触发 Gitee 同步发布」都会拉起
+            # 本流水线，同一个 tag 会被发两次 Release。先到的发完后，后到的在这里查到
+            # Gitee 已有同名 tag，就让本 step 失败退出 —— Gitee Go 规则是「上游 stage
+            # 失败不触发下游」，于是 release-stage 不会执行，避免重复发布 / 混源。
+            # 注意这里是**故意失败**（构建记录会标红）：GitHub / CNB 只看 webhook 的
+            # 2xx，不读 Gitee 构建结果，所以标红对上游无影响；代价是日志里能看到一次
+            # 「已存在跳过」的红构建。Gitee Go 没有 step 级 if，这是唯一能让发布阶段
+            # 不执行的办法（脚本 exit 0 只会跳过下载、下游插件照发）。
+            if [ "$(VERSION="${TAG}" node scripts/ci/gitee-download-assets.js --check-release)" = "exists" ]; then
+              echo "⏭ Gitee 已存在 tag ${TAG}（另一个触发源已发布），跳过本次下载与发布"
+              exit 1
+            fi
+            echo "Gitee 尚无 tag ${TAG}，继续下载与发布"
+
             # 只搬不建：附件清单与正文取上游 Release，字节按 DOWNLOAD_SOURCE 从单一来源拿，
             # 落 bin/ 并写 release_body.md。脚本只用 node 内置模块（镜像里没有 python3 / jq）。
             export VERSION="${TAG}"

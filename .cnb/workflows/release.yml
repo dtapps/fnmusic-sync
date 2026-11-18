@@ -6,12 +6,16 @@
   services:
     - docker # 启用 Docker 服务（用于 docker build/push）
   docker:
-    image: docker.cnb.cool/dtapp/golang/fnpack:latest
+    image: docker.cnb.cool/dtapp/golang/fnpack:latest # 统一使用预构建的 CI 环境镜像
     volumes:
       - /root/.cache/go-build:copy-on-write # Go 构建缓存 - 加速编译
       - /root/.local/share/pnpm/store:copy-on-write # pnpm 全局存储 - 加速前端依赖安装
       - /go/pkg/mod:copy-on-write # 仅缓存 Go 模块下载，避免覆盖镜像内预装的 /go/bin 工具
-  imports: https://cnb.cool/dtapp/envs/-/blob/main/update.yml # 导入外部环境变量/配置
+  # 导入外部环境变量/配置。多文件必须用 YAML 数组（逗号分隔字符串不生效）；
+  # 同名变量后面的覆盖前面的，故项目专属的 fnmusic-sync.yml 放在通用 github.yml 之后。
+  imports:
+    - https://cnb.cool/dtapp/envs/-/blob/main/github.yml
+    - https://cnb.cool/dtapp/envs/-/blob/main/fnmusic-sync.yml
   # 公告评论的两个开关/内容（job 级 env，所有 stage 都能读到）：
   # - ANNOUNCEMENT_COMMENT_ENABLED：是否在公告 Issue 上追加评论（true / false）；
   # - ANNOUNCEMENT_COMMENT_TEXT：评论内容，默认让仓库里的 NPC（CodeBuddy）根据公告里的
@@ -246,6 +250,43 @@
 
     - name: 输出 Release 附件
       script: echo $FILES
+
+    # 发布到 CNB 后触发 Gitee 发布流水线，让 Gitee 从 CNB Release 搬附件。
+    # 与 GitHub release.yml 的 sync-gitee 同口径（eventType=fnmusic-sync-release，
+    # 与 Gitee 侧 .workflow/release.yml 的 triggers.webhook 逐字一致）。
+    # DOWNLOAD_SOURCE=cnb —— CNB 这边刚发完包，Gitee 从国内 CNB 搬最快（附件名固定、
+    # 全程不碰 GitHub API）；GitHub 侧那条走 github 源，因为它是搬 GitHub 自己的附件。
+    # cnb 源匿名 401 查不到 tag，所以 VERSION 必须显式传。
+    # WEBHOOK_URL / TOKEN 从 imports 的 envs 注入（与 GitHub 侧 secret 同名）。
+    # allowFailure: true —— 此时 CNB Release 与附件已发完，同步失败或没配令牌都不能
+    # 把这条流水线标红，否则上游 GitHub 的 sync-cnb 会误报「同步失败」。
+    - name: 触发 Gitee 同步发布
+      allowFailure: true
+      script: |
+        set -eu
+        WEBHOOK_URL="${SYNC_GITEE_WEBHOOK_URL:-}"
+        GITEE_TOKEN="${SYNC_GITEE_TOKEN:-}"
+        if [ -z "$WEBHOOK_URL" ] || [ -z "$GITEE_TOKEN" ]; then
+          echo "未配置 SYNC_GITEE_WEBHOOK_URL / SYNC_GITEE_TOKEN，跳过 Gitee 同步"
+          exit 0
+        fi
+
+        VERSION="${INTERIOR_VERSION}"
+        # Gitee 侧是只搬不建的转发壳：VERSION 由后缀定预发布，DOWNLOAD_SOURCE 定源，
+        # 没有 COMMIT / PRERELEASE 这类参数（预发布看后缀、包从源端搬），不要照抄 certflow。
+        echo "触发 Gitee 发布流水线: ${VERSION} (source=cnb)"
+        HTTP=$(curl -s -o /tmp/gitee-sync.json -w "%{http_code}" -X POST \
+          -H "Authorization: Bearer ${GITEE_TOKEN}" \
+          -H "Content-Type: application/json" \
+          -d "{\"eventType\":\"fnmusic-sync-release\",\"payload\":{\"params\":{\"VERSION\":\"${VERSION}\",\"DOWNLOAD_SOURCE\":\"cnb\"}}}" \
+          "${WEBHOOK_URL}")
+        echo "Gitee webhook 响应 HTTP=${HTTP}"
+        cat /tmp/gitee-sync.json 2>/dev/null || true
+        if [ "$HTTP" -lt 200 ] || [ "$HTTP" -ge 300 ]; then
+          echo "⚠ 触发 Gitee 流水线失败（HTTP=${HTTP}），不影响 CNB Release"
+        else
+          echo "✓ 已请求 Gitee 执行发布流水线（异步执行，进度看 Gitee 流水线页面）"
+        fi
 
     # 清理旧 nightly（与 GitHub release.yml 的「只保留最近 3 个」同口径）。
     # nightly 每天一个 tag，不清理的话 CNB 上的 Release + tag + 附件会无限堆积；

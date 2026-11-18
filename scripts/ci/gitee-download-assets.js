@@ -20,10 +20,16 @@
  *   CNB_REPO         CNB 仓库路径，默认 dtapp/fnmusic-sync
  *   GH_REPO          GitHub 仓库路径，默认 dtapps/fnmusic-sync
  *   GH_TOKEN         可选，避开 api.github.com 匿名限额（60 次/小时）
+ *   GITEE_REPO       Gitee 仓库路径，默认 dtapps/fnmusic-sync（--check-release 用）
  *
  * 输出：
  *   bin/<上游附件原名>    附件原样落地，不做改名（下游 assertFiles 按名字找）
  *   release_body.md       上游正文（markdown），由 gitee-release-body.js 转成单行 HTML
+ *
+ * --check-release：只判断 Gitee 上是否已有该 tag 的 Release，打印 exists / absent 后退出，
+ *   不下载、不写文件。GitHub 与 CNB 都会触发 Gitee 流水线，先到的发完、后到的靠这个
+ *   跳过，避免同一个版本被重复发布 / 混源。查询失败一律打印 absent（保守放行，宁可
+ *   重发也不漏发）。
  */
 
 const fs = require('fs');
@@ -36,6 +42,7 @@ const OUT_DIR = (process.env.OUT_DIR || 'bin').trim();
 const CNB_REPO = (process.env.CNB_REPO || 'dtapp/fnmusic-sync').trim();
 const GH_REPO = (process.env.GH_REPO || 'dtapps/fnmusic-sync').trim();
 const GH_TOKEN = (process.env.GH_TOKEN || '').trim();
+const GITEE_REPO = (process.env.GITEE_REPO || 'dtapps/fnmusic-sync').trim();
 const SOURCE = (process.env.DOWNLOAD_SOURCE || 'cnb').trim().toLowerCase();
 
 const GH_API = 'https://api.github.com/repos/' + GH_REPO;
@@ -139,6 +146,36 @@ function readText(url, withAuth) {
       req.destroy(new Error('请求超时: ' + url));
     });
   });
+}
+
+// ---------- Gitee Release 存在性检查（--check-release）----------
+// GitHub 与 CNB 都能触发 Gitee 流水线，两边会在同一个 tag 上各发一次 Release。
+// 判据用「Gitee 仓库是否已有同名 tag」：release@gitee 发 Release 必然建同名 tag，
+// 且 git ls-remote 匿名可列出**全部** tag。
+// 不用 Gitee releases API：实测匿名只返回前 5 条（per_page/page 都无效），
+// releases/tags/<tag> 恒返回 null，两者都会把老 tag 误判成不存在。
+// 已存在 → 让调用方跳过整个 download-stage（stage 失败 → 下游 release-stage 不触发）。
+function checkReleaseExists() {
+  const { execFileSync } = require('child_process');
+  let out;
+  try {
+    out = execFileSync('git', ['ls-remote', '--tags', 'https://gitee.com/' + GITEE_REPO + '.git'], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+      timeout: 30000,
+    });
+  } catch (e) {
+    // 查不到就当不存在：宁可重复发一次，也不能因为查询故障漏发整个版本。
+    console.error('⚠ 查询 Gitee tag 失败，按「不存在」放行：' + (e.message || e));
+    process.stdout.write('absent\n');
+    return;
+  }
+  const wanted = 'refs/tags/' + TAG;
+  const found = out.split('\n').some(function (line) {
+    const ref = line.split('\t')[1] || '';
+    return ref === wanted || ref === wanted + '^{}';
+  });
+  process.stdout.write(found ? 'exists\n' : 'absent\n');
 }
 
 // ---------- 下载（结构与 certflow 一致）----------
@@ -472,6 +509,13 @@ async function main() {
           ? 'CNB 的 API 匿名访问返回 401，推不出最新 tag，请填 VERSION（全局参数或 Webhook 的 payload.params）'
           : '查 GitHub 最新 Release 也失败了，请填 VERSION')
     );
+  }
+
+  // 只检查 Gitee 上是否已有该 tag 的 Release：打印 exists / absent 后退出，不下载、不写正文。
+  // 必须放在 --resolve-tag / 下载之前：版本号已由调用方归一化后通过 VERSION 传进来。
+  if (process.argv.indexOf('--check-release') !== -1) {
+    await checkReleaseExists();
+    return;
   }
 
   // 只解析版本用：打印后退出，不下载、不写正文

@@ -10,6 +10,7 @@
         - name: 生成 Code Wiki
           timeout: 3h
           image: cnbcool/codewiki:latest
+          allowFailure: true
           settings:
             # 必填。指定 codewiki 生成文档的保存位置。支持绝对路径，也支持相对路径（会与当前工作目录 PWD 相加得到绝对路径）
             git_doc_dir: /${CNB_BUILD_WORKSPACE}/${CNB_REPO_SLUG}/codewiki
