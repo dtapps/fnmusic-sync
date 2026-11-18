@@ -1,0 +1,91 @@
+# 公告清理：关闭超过 7 天的版本公告讨论（与 CNB 侧的 announcement-cleanup 同口径）。
+#
+# GitHub Actions 的 schedule 只认 UTC：UTC 16:00 = 北京时间 0 点。
+# Discussions 没有官方专用 action，这里用官方 actions/github-script 调
+# github.rest.discussions.*（与发公告同一个官方客户端）。
+name: 公告清理
+
+on:
+  schedule:
+    - cron: '0 16 * * *'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  discussions: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-26.04
+    env:
+      # 公告多少天后过期（天）
+      # 令牌：GITHUB_TOKEN 在部分仓库读不到 Discussions（接口 404），配 PAT 覆盖；没配就退回 GITHUB_TOKEN
+      ANNOUNCEMENT_TOKEN: ${{ secrets.ANNOUNCEMENT_TOKEN || secrets.GITHUB_TOKEN }}
+      ANNOUNCEMENT_EXPIRE_DAYS: '7'
+    steps:
+      - name: 关闭过期的版本公告讨论
+        uses: actions/github-script@v9
+        with:
+          github-token: ${{ env.ANNOUNCEMENT_TOKEN }}
+          script: |
+            const owner = context.repo.owner
+            const repo = context.repo.repo
+            const days = parseInt(process.env.ANNOUNCEMENT_EXPIRE_DAYS || '7', 10)
+            const cutoff = Date.now() - days * 24 * 60 * 60 * 1000
+            const prefix = '[发版公告] FnMusicSync '
+
+            // GitHub 没有仓库 Discussions 的 REST 端点（REST 里只有 org/team discussions），
+            // 所以列讨论、关讨论都走 GraphQL。
+            const listQuery = `
+              query ($owner: String!, $repo: String!, $cursor: String) {
+                repository(owner: $owner, name: $repo) {
+                  discussions(first: 100, after: $cursor) {
+                    nodes { id number title createdAt }
+                    pageInfo { hasNextPage endCursor }
+                  }
+                }
+              }`
+
+            try {
+              const expired = []
+              let cursor = null
+              for (;;) {
+                const res = await github.graphql(listQuery, { owner, repo, cursor })
+                const page = res.repository.discussions
+                for (const d of page.nodes) {
+                  if (!d.title.startsWith(prefix)) continue
+                  if (new Date(d.createdAt).getTime() >= cutoff) continue
+                  expired.push(d)
+                }
+                if (!page.pageInfo.hasNextPage) break
+                cursor = page.pageInfo.endCursor
+              }
+
+              if (expired.length === 0) {
+                core.info(`没有超过 ${days} 天的版本公告讨论，无需清理`)
+                return 'skipped'
+              }
+
+              // 关讨论只有 closeDiscussion 一个入口；某些仓库/令牌不支持时只报告，交给人工处理。
+              let closed = 0
+              for (const d of expired) {
+                try {
+                  await github.graphql(
+                    `mutation ($id: ID!) { closeDiscussion(input: { discussionId: $id }) { discussion { number } } }`,
+                    { id: d.id },
+                  )
+                  core.info(`已关闭 #${d.number} ${d.title}`)
+                  closed++
+                } catch (err) {
+                  core.warning(`关闭 #${d.number} ${d.title} 失败（${err.message}），请手工关闭`)
+                }
+              }
+              core.info(`共处理 ${expired.length} 条超过 ${days} 天的版本公告讨论，成功关闭 ${closed} 条`)
+              return `closed:${closed}`
+            } catch (err) {
+              const hint = /not found|forbidden|permission|access/i.test(err.message || '')
+                ? '（多半是令牌没有 Discussions 权限：fine-grained PAT 需勾 Discussions: Read and write，配到 secret ANNOUNCEMENT_TOKEN）'
+                : ''
+              core.warning(`公告清理失败${hint}：${err.message}`)
+              return 'failed'
+            }

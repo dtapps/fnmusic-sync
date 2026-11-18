@@ -1,0 +1,148 @@
+# CNB Issue 模板：发版公告
+#
+# 规则：本仓库 Issue 仅用于发版公告（Release Announcement），不受理缺陷反馈与需求讨论。
+# 生效条件：模板文件必须放在默认分支（main）的 .cnb/ISSUE_TEMPLATE/ 目录下，
+#           否则 CNB 不会识别（同名文件超过 10 个、单个超过 256KB 也不识别）。
+#
+# 字段口径与 scripts/ci/render-release-body.sh 生成的 Release 正文保持一致
+# （版本号 / 发布类型 / 提交 / 构建时间 / 下载 / 校验 / 更新内容），
+# 避免公告与实际发布两套说法；版本号规则见 docs/contributing.md。
+name: 发版公告
+description: 发布新版本时登记一条公告（版本号、变更摘要、下载与校验、升级提示）；本仓库 Issue 仅用于发版公告
+title: '[发版公告] '
+labels: ['发版公告']
+
+body:
+  # ---------- 填写须知（只展示，不写进 Issue 正文） ----------
+  - type: markdown
+    attributes:
+      value: |
+        ## 📣 发版公告
+
+        本仓库 Issue **仅用于发版公告**：每次发布新版本在这里登记一条，关注 Issue 列表即可看到更新。
+
+        > **多数公告不用手填**：CNB 发布流水线在 Release 发布成功后会自动创建一条公告
+        > （正文与 Release 正文同源，见 `.cnb/workflows/release.yml` 的「创建发版公告」）。
+        > 只有需要补发或手工补一条时才用本模板。
+
+        **版本号规则**（与 CNB / GitHub 发布流水线同口径，tag 统一带 `v` 前缀）：
+
+        | 版本号 | 渠道 |
+        | --- | --- |
+        | `v1.2.3` | 正式版 |
+        | `v1.2.3-rc.1` / `v1.2.3-beta.1` / `v1.2.3-alpha.1` | 预发布 |
+        | `v1.2.4-nightly.20261024` | 夜间构建（每日一个 tag，CNB / GitHub 只保留最近 3 个） |
+
+        **公告内容必须与实际 Release 一致**：Release 正文由 `scripts/ci/render-release-body.sh` 生成，
+        下载链接与校验方式以 Release 页为准，公告里不要另编一套。
+
+        ⚠️ **安全问题不要开公开 Issue**：按 [SECURITY.md](https://cnb.cool/dtapp/fnmusic-sync/-/blob/main/SECURITY.md)
+        走私下渠道，不要在此贴音乐服务 token、session_key、api_secret、真实地址或利用细节。
+
+  # ---------- 版本信息 ----------
+  - type: input
+    id: version
+    attributes:
+      label: 版本号
+      description: '最终 tag，带 `v` 前缀，如 `v1.2.3` / `v1.2.3-rc.1` / `v1.2.3-nightly.20261024`。'
+      placeholder: v1.2.3
+    validations:
+      required: true
+
+  - type: dropdown
+    id: release-type
+    attributes:
+      label: 发布类型
+      description: 是否预发布只看版本号后缀，与 Release 上的标记保持一致。
+      options:
+        - 正式版 (Stable)
+        - 预发布 · rc
+        - 预发布 · beta
+        - 预发布 · alpha
+        - 夜间构建 (nightly)
+    validations:
+      required: true
+
+  - type: input
+    id: release-date
+    attributes:
+      label: 发布日期
+      description: '公告发布日（YYYY-MM-DD）；构建时间为 UTC，以 Release 正文为准。'
+      placeholder: '2026-10-24'
+    validations:
+      required: true
+
+  - type: input
+    id: commit
+    attributes:
+      label: 发布提交
+      description: '可选。本次发布对应的 commit（完整 SHA）；填 `nightly` 这类由定时任务展开的版本时，填实际构建的 commit。'
+      placeholder: 0123456789abcdef0123456789abcdef01234567
+
+  # ---------- 变更内容 ----------
+  - type: textarea
+    id: changelog
+    attributes:
+      label: 更新内容摘要
+      description: '面向用户的变更摘要，按「新增 / 变更 / 修复」分组，与 CHANGELOG.md 同一条目对应。'
+      placeholder: |
+        ### 新增
+        - ...
+
+        ### 变更
+        - ...
+
+        ### 修复
+        - ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: breaking
+    attributes:
+      label: 破坏性变更与升级提示
+      description: '可选。有数据格式、配置项、部署目标变化时必填，并写明用户需要做什么。'
+      placeholder: |
+        无破坏性变更。
+        或：
+        - 写明用户需要做什么，例如需在设置页重新填写部署凭据（APIKey / APISecret），旧凭据不再可用。
+
+  # ---------- 下载与校验 ----------
+  - type: textarea
+    id: downloads
+    attributes:
+      label: 下载地址
+      description: 'Release 页面地址（CNB / GitHub 两个平台）。'
+      placeholder: |
+        - CNB：https://cnb.cool/dtapp/fnmusic-sync/-/releases/tag/v1.2.3
+        - GitHub：https://github.com/dtapps/fnmusic-sync/releases/tag/v1.2.3
+    validations:
+      required: true
+
+  - type: textarea
+    id: verify
+    attributes:
+      label: 校验方式与已知问题
+      description: '可选。附件校验方式（`SHA256SUMS`）以及本次已知的限制 / 未修复问题。'
+      placeholder: |
+        校验：下载 SHA256SUMS 与安装包到同一目录后执行
+        - Debian/Ubuntu（deb）：sha256sum -c SHA256SUMS，再 sudo dpkg -i fnmusic-sync_<版本>_<架构>.deb
+        - 飞牛 fnOS（fpk）：sha256sum -c SHA256SUMS，再到应用中心手动安装 .fpk
+
+        已知问题：（无 / 简述）
+
+  # ---------- 发布前检查 ----------
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: 发布前检查
+      description: 逐项确认后再提交公告。
+      options:
+        - label: 版本号与 tag 一致，且 CHANGELOG.md 已更新
+          required: true
+        - label: Release 附件已上传，SHA256SUMS 可校验
+          required: true
+        - label: 公告内容不含音乐服务 token、session_key、api_secret、真实地址或日志等敏感信息
+          required: true
+        - label: CI 流水线（构建 / 测试 / 覆盖率）全绿
+        - label: CNB / GitHub 两个平台均已发布

@@ -12,6 +12,14 @@
       - /root/.local/share/pnpm/store:copy-on-write # pnpm 全局存储 - 加速前端依赖安装
       - /go/pkg/mod:copy-on-write # 仅缓存 Go 模块下载，避免覆盖镜像内预装的 /go/bin 工具
   imports: https://cnb.cool/dtapp/envs/-/blob/main/update.yml # 导入外部环境变量/配置
+  # 公告评论的两个开关/内容（job 级 env，所有 stage 都能读到）：
+  # - ANNOUNCEMENT_COMMENT_ENABLED：是否在公告 Issue 上追加评论（true / false）；
+  # - ANNOUNCEMENT_COMMENT_TEXT：评论内容，默认让仓库里的 NPC（CodeBuddy）根据公告里的
+  #   更新内容整理一份用户友好的更新日志，并以评论形式发回。
+  env:
+    ANNOUNCEMENT_COMMENT_ENABLED: 'true'
+    ANNOUNCEMENT_COMMENT_TEXT: |-
+      @CodeBuddy 请根据本次发布的更新内容（见上方），整理一份用户友好的更新日志，并作为评论发布在这里。
   stages:
     - name: 解析版本号（预发布看后缀）
       script: |
@@ -317,6 +325,279 @@
           *) echo "⚠ 删除 tag ${OLD} 失败 HTTP=${TCODE}" ;;
           esac
         done
+
+    # 发布成功后同步开一条「发版公告」Issue。
+    #
+    # 为什么放在 CNB 侧：公告正文要引用 CNB 的 Release 下载链接，而 GitHub 侧发完版
+    # 只是触发 CNB 同步，由 CNB 自己开公告最顺（也只开一条，不会两边各开一遍）。
+    #
+    # 为什么用官方 cnbcool/cnb-cli 插件而不是自己拼 OpenAPI：
+    # CNB 没有「创建 Issue」的内置步骤（git:issue-update 只能改状态 / 标签 / 处理人，
+    # 既不能创建、也不能改标题与正文），能创建 Issue 的官方工具就是 cnb-cli 插件
+    # （官方 OpenAPI 命令行工具，CNB_TOKEN 由流水线自动注入）。
+    #
+    # ⚠️ 命令形态（v1.23.5 实测）：模块 / 工具用「位置参数」（cnb issues create-issue），
+    # 选项用 --repo / --title / --body-file / --labels / --number / --state 这类长选项；
+    # 不要写 cnb --module issues --tool create-issue——v1.23.5 的解析器会把 --module
+    # 当成位置参数，报「工具函数 --module/issues 不存在」。
+    #
+    # 为什么拆成两个 stage：
+    # - 「准备发版公告」跑在默认镜像里：只负责渲染正文与标题（不碰网络）；
+    # - 「创建发版公告」「发布公告评论」跑在官方 CLI 镜像里：image 是任务级环境
+    #   （见 CNB 文档「构建环境」），不会影响同一条流水线里其它 stage 用的镜像。
+    #
+    # 为什么失败不阻断：这一步跑在 Release 与附件都上传完之后，发布已经完成；
+    # 这里红掉只会被 GitHub 侧 sync-cnb 记成「同步失败」，反而误导。所以只告警。
+    - name: 准备发版公告
+      script: |
+        set -eu
+
+        VERSION="${INTERIOR_VERSION}"
+        PRERELEASE="${PRE_RELEASE}"
+        WEB_BASE="${CNB_REPO_URL_HTTPS%/}/-"
+
+        # 上一次的残留标记要先清掉：标记文件在同一个工作区里，
+        # 留着会让这一步明明成功也走「跳过」分支。
+        rm -f announcement-skip.txt announcement-number.txt
+
+        # nightly 每天一个 tag：每天开一条公告会把 Issue 列表刷成日报。
+        # 真正的发版公告（正式版 / rc / beta / alpha）才值得一条。
+        case "${VERSION}" in
+          *-nightly.*)
+            echo "跳过 nightly 版本（${VERSION}）的发版公告"
+            printf 'skip\n' > announcement-skip.txt
+            exit 0
+            ;;
+        esac
+
+        # 公告正文与 Release 正文同源：下载表 / 校验 / 更新内容都取自 release_body.md，
+        # 不在这里另编一套（格式见 scripts/ci/render-announcement-body.sh）。
+        if [ ! -f scripts/ci/render-announcement-body.sh ]; then
+          echo "⚠️ 缺少 scripts/ci/render-announcement-body.sh（发布用的提交里没有该脚本），跳过公告"
+          printf 'skip\n' > announcement-skip.txt
+          exit 0
+        fi
+
+        export VERSION PRERELEASE
+        export RELEASE_BODY="release_body.md"
+        export OUT_FILE="announcement_body.md"
+        export TITLE_FILE="announcement-title.txt"
+        export CNB_WEB_BASE="${WEB_BASE}"
+        export GITHUB_WEB="https://github.com/dtapps/fnmusic-sync"
+        export STABLE_URL="${WEB_BASE}/releases/latest"
+        # stage 1 已切到本次发布的提交，HEAD 即发布提交。
+        export COMMIT_SHA="$(git rev-parse HEAD 2>/dev/null || true)"
+
+        # 渲染失败也不让发布流水线变红：正文渲染不出来只是少一条公告，
+        # 而这里变红会被 GitHub 侧 sync-cnb 记成「同步失败」，反而误导。
+        if ! sh scripts/ci/render-announcement-body.sh > /dev/null; then
+          echo "⚠️ 生成公告正文失败，跳过发版公告"
+          printf 'skip\n' > announcement-skip.txt
+          exit 0
+        fi
+        echo "公告正文已生成：${OUT_FILE}（标题见 ${TITLE_FILE}）"
+
+    # 用官方 cnbcool/cnb-cli 插件创建 / 更新公告 Issue。
+    #
+    # Issue 一旦建出来就删不掉，所以这里严格「先查后改」：
+    # 按标题找出所有同版本的公告，第一个更新、其余（历史重复）关掉。
+    - name: 创建发版公告
+      image: cnbcool/cnb-cli
+      script: |
+        set -eu
+
+        REPO="${CNB_REPO_SLUG}"
+        KEYWORD="${INTERIOR_VERSION}"
+        LABEL="发版公告"
+        BODY="announcement_body.md"
+
+        if [ -f announcement-skip.txt ]; then
+          echo "上一步已标记跳过（nightly 或正文生成失败），不创建公告"
+          exit 0
+        fi
+
+        TITLE="$(cat announcement-title.txt 2>/dev/null || echo '')"
+        if [ -z "${TITLE}" ] || [ ! -f "${BODY}" ]; then
+          echo "⚠️ 缺少公告标题或正文，跳过"
+          exit 0
+        fi
+
+        # 1) 先把标签建好：仓库里没有「发版公告」这个标签时，带标签建 Issue 会被拒。
+        #    标签已存在时接口报 400、CLI 退出码非 0，忽略即可。
+        cnb repo-labels post-label \
+          --repo "${REPO}" \
+          --name "${LABEL}" \
+          --color "1677ff" \
+          --description "FnMusicSync 发版公告" \
+          > /dev/null 2>&1 || echo "（标签可能已存在，忽略）"
+
+        # 2) 先查：open / closed 各查一次（官方接口的 state 只列了 open 与 closed）。
+        #    已关闭的公告也算「已经创建过」，照样更新，不能因为关了再建一条。
+        for issue_state in open closed; do
+          cnb issues list-issues \
+            --repo "${REPO}" \
+            --state "${issue_state}" \
+            --keyword "${KEYWORD}" \
+            --page 1 \
+            --page-size 50 \
+            > "announcement-list-${issue_state}.txt" 2>&1 || true
+        done
+
+        # 3) 从 CLI 输出里找「标题完全一致」的所有公告（不 exit：可能有多条历史重复）。
+        #    输出是 util.inspect 风格（对象属性逐行），按「上一个 number 行 + 当前 title 行」配对；
+        #    number 是字符串（官方 schema: type string，可能带引号），title 值也被引号包着，
+        #    两边都先剥掉引号/逗号再比较，否则 v1.2.3 会误匹配 v1.2.30。
+        numbers="$(cat announcement-list-open.txt announcement-list-closed.txt 2>/dev/null | awk -v t="${TITLE}" '
+          /^[[:space:]]*(-[[:space:]]+)?number: / { v = $NF; gsub(/[^0-9]/, "", v); if (v != "") n = v }
+          /^[[:space:]]*(-[[:space:]]+)?title: / {
+            line = $0
+            sub(/^[[:space:]]*(-[[:space:]]+)?title: /, "", line)
+            gsub(/^[",]+|[",]+$/, "", line)
+            if (line == t && n != "") print n
+          }
+        ' | sort -un || true)"
+
+        if [ -n "${numbers}" ]; then
+          number="$(printf '%s\n' "${numbers}" | head -1)"
+          echo "已存在同版本公告（#${number}），改写正文"
+          if cnb issues update-issue \
+            --repo "${REPO}" \
+            --number "${number}" \
+            --title "${TITLE}" \
+            --body-file "${BODY}" \
+            > announcement-result.txt 2>&1; then
+            echo "✓ 已更新发版公告 #${number}"
+          else
+            echo "⚠️ 更新发版公告失败，请手工改一下："
+            cat announcement-result.txt 2>/dev/null || true
+          fi
+
+          # 同版本有多条时（历史上幂等失效留下的），**逐条更新成同一份内容**。
+          # 不关闭任何一条：公告是给用户看的，关掉反而像「这个版本被撤了」。
+          for other in $(printf '%s\n' "${numbers}" | tail -n +2); do
+            if cnb issues update-issue \
+              --repo "${REPO}" \
+              --number "${other}" \
+              --title "${TITLE}" \
+              --body-file "${BODY}" \
+              > /dev/null 2>&1; then
+              echo "已同步更新同版本公告 #${other}"
+            else
+              echo "⚠️ 同步更新同版本公告 #${other} 失败，请手工处理"
+            fi
+          done
+
+          # 编号落盘：下一步（发评论）要用它定位公告。
+          printf '%s' "${number}" > announcement-number.txt
+          exit 0
+        fi
+
+        echo "创建发版公告：${TITLE}"
+        # CLI 的退出码就是结果：0 成功，3 = HTTP / 网络错误（输出里有 status: 400 等详情）。
+        if cnb issues create-issue \
+          --repo "${REPO}" \
+          --title "${TITLE}" \
+          --body-file "${BODY}" \
+          --labels "${LABEL}" \
+          > announcement-result.txt 2>&1; then
+          echo "✓ 已创建发版公告"
+        else
+          # 仓库里还没有「发版公告」这个标签时，带标签创建会被拒；
+          # 去掉标签再试一次，公告本身仍然发得出去。
+          echo "带标签创建失败，去掉标签重试"
+          if cnb issues create-issue \
+            --repo "${REPO}" \
+            --title "${TITLE}" \
+            --body-file "${BODY}" \
+            > announcement-result.txt 2>&1; then
+            echo "✓ 已创建发版公告"
+          else
+            echo "⚠️ 创建发版公告失败，请手工补一条："
+            cat announcement-result.txt 2>/dev/null || true
+          fi
+        fi
+
+        # 把 Issue 编号落盘：下一步（发评论）要用它定位公告。
+        # number 是字符串（可能带引号），.? 吃掉引号再取数字。
+        issue_number="$(grep -oE 'number: .?[0-9]+' announcement-result.txt 2>/dev/null | head -1 | grep -oE '[0-9]+' || true)"
+        if [ -n "${issue_number}" ]; then
+          printf '%s' "${issue_number}" > announcement-number.txt
+          echo "公告 Issue 编号：${issue_number}（已落盘，下一步用它发评论）"
+        else
+          echo "⚠️ 公告已创建但没解析到 Issue 编号，评论会跳过；下面是原始输出："
+          head -20 announcement-result.txt 2>/dev/null || true
+        fi
+
+    # 在公告 Issue 上追加一条评论：把「整理一份用户友好的更新日志」交给仓库里的 NPC
+    # （.cnb/settings.yml 里导入的 npc/CodeBuddy）去做，它会把整理好的日志作为评论发回来。
+    #
+    # 两个开关/内容在 job 级 env 里（见 .trigger_release 的 env 段）：
+    # - ANNOUNCEMENT_COMMENT_ENABLED：是否发评论；
+    # - ANNOUNCEMENT_COMMENT_TEXT：评论内容（只放提示语本身，不夹带更新内容——
+    #   NPC 自己会读上面那条公告）。
+    - name: 发布公告评论
+      image: cnbcool/cnb-cli
+      script: |
+        set -eu
+
+        REPO="${CNB_REPO_SLUG}"
+        ENABLED="${ANNOUNCEMENT_COMMENT_ENABLED:-true}"
+
+        case "$(printf '%s' "${ENABLED}" | tr '[:upper:]' '[:lower:]')" in
+          1 | true | yes | on) ;;
+          *)
+            echo "发版公告评论已关闭（ANNOUNCEMENT_COMMENT_ENABLED=${ENABLED}）"
+            exit 0
+            ;;
+        esac
+
+        # 公告 Issue 的编号由「创建发版公告」落盘；没有编号说明公告没建成。
+        NUMBER="$(cat announcement-number.txt 2>/dev/null || echo '')"
+        if [ -z "${NUMBER}" ]; then
+          echo "没有公告 Issue 编号（公告未创建或已被跳过），不追加评论"
+          exit 0
+        fi
+
+        # 评论内容只放提示语本身，不夹带更新内容：NPC 自己会读上面那条公告。
+        printf '%s' "${ANNOUNCEMENT_COMMENT_TEXT:-}" > announcement-comment.md
+        if [ ! -s announcement-comment.md ]; then
+          echo "⚠️ 评论内容为空（ANNOUNCEMENT_COMMENT_TEXT），不追加评论"
+          exit 0
+        fi
+
+        # 幂等：评论发出去也删不掉，重跑时先看这条公告下有没有同样的评论，有就不重复发。
+        # 用评论正文的第一行做标记（默认提示语是单行；多行文案请保证首行唯一）。
+        MARK="$(head -1 announcement-comment.md)"
+        if [ -z "${MARK}" ]; then
+          echo "⚠️ 评论第一行为空，无法做重复检查，直接发布"
+        else
+          cnb issues list-issue-comments \
+            --repo "${REPO}" \
+            --number "${NUMBER}" \
+            --sort -created \
+            --page-size 30 \
+            > announcement-comment-list.txt 2>&1 || true
+
+          if ! grep -q 'status: 2' announcement-comment-list.txt 2>/dev/null; then
+            # 列表查不出来就没法判断「发过没」：宁可发一次（NPC 才会动），但要留痕。
+            echo "⚠️ 查询已有评论失败，无法确认是否发过；仍会发布，请留意是否重复"
+            cat announcement-comment-list.txt 2>/dev/null || true
+          elif grep -qF -- "${MARK}" announcement-comment-list.txt 2>/dev/null; then
+            echo "✓ 公告 #${NUMBER} 已有同样的评论，跳过（评论删不掉，不重复发）"
+            exit 0
+          fi
+        fi
+
+        if cnb issues post-issue-comment \
+          --repo "${REPO}" \
+          --number "${NUMBER}" \
+          --body-file announcement-comment.md \
+          > announcement-comment-result.txt 2>&1; then
+          echo "✓ 已在公告 #${NUMBER} 上发布评论"
+        else
+          echo "⚠️ 发布公告评论失败，请手工补一条评论："
+          cat announcement-comment-result.txt 2>/dev/null || true
+        fi
 
 main:
   # 手动触发：通过页面自定义按钮执行（预发布看版本号后缀，页面不再有勾选框）

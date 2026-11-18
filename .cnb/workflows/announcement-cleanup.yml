@@ -1,0 +1,88 @@
+# 公告清理：每天 0 点（CNB crontab 的时区就是 Asia/Shanghai，直接写 0 0 即中国 0 点）
+# 检查带「发版公告」标签的 Issue，更新时间早于 7 天前的自动关闭。
+#
+# 定时任务的写法（本仓库 nightly 定时任务的历史实现同此）：
+# - 只能挂在**明确的分支**上，且必须是仓库默认分支（本仓库是 main）；
+# - 事件键是字符串 "crontab: <表达式>"，最小间隔 5 分钟；
+# - 任务以最后修改本配置的用户身份执行，CNB_TOKEN 默认只能访问当前仓库（够用：只关本仓库的 Issue）；
+# - ⚠️ 本文件是通过 .cnb.yml 的 include 引入的：定时任务只在 .cnb.yml 本身变更推送时才会同步，
+#   只改本文件不生效——改完记得顺手在 .cnb.yml 里做一次无害改动（例如调整注释）一起提交。
+#
+# 两步走：
+# 1. 官方 cnb-cli 只负责「筛」：按标签 + updated_time_end 列出过期公告，把编号写进文本文件；
+# 2. 关闭交给官方内置步骤 git:issue-update（fromFile + state: close）：
+#    一次调用批量关，比逐条调 CLI 快得多，也不用自己拼 update 请求。
+#    fromFile 的解析规则：文本里出现 " #123"（# 前必须有空格）即视为要处理的 Issue。
+#
+# 筛选用 updated_time_end 而不是创建时间：接口没有按创建时间筛的参数，
+# 公告 Issue 建出来就不再动（updated ≈ created），只有重发版本会刷新 updated——
+# 刚刷新过的公告本来就该继续挂着，这个口径反而更合理。
+main:
+  'crontab: 0 0 * * *':
+    - runner:
+        tags: cnb:arch:amd64
+      env:
+        # 公告多少天后过期（天）
+        ANNOUNCEMENT_EXPIRE_DAYS: '7'
+      stages:
+        - name: 找出过期的发版公告
+          image: cnbcool/cnb-cli
+          script: |
+            set -eu
+
+            REPO="${CNB_REPO_SLUG}"
+            LABEL="发版公告"
+            DAYS="${ANNOUNCEMENT_EXPIRE_DAYS:-7}"
+            REFS="close-issue-refs.txt"
+
+            # cutoff：DAYS 天前的日期（YYYY-MM-DD）。
+            # 不同镜像的 date 行为不一样：先试 GNU，再试 BSD，最后用 awk 兜底。
+            cutoff="$(date -u -d "${DAYS} days ago" '+%Y-%m-%d' 2>/dev/null \
+              || date -u -v-"${DAYS}"d '+%Y-%m-%d' 2>/dev/null \
+              || awk -v d="${DAYS}" 'BEGIN { print strftime("%Y-%m-%d", systime() - d * 86400) }')"
+            echo "过期阈值：更新时间早于 ${cutoff} 的发版公告会被关闭"
+
+            # 官方 CLI 只做筛选：开放 + 带「发版公告」标签 + 更新时间早于 cutoff。
+            cnb issues list-issues \
+              --repo "${REPO}" \
+              --state open \
+              --labels "${LABEL}" \
+              --labels-operator contains_all \
+              --updated-time-end "${cutoff}" \
+              --page 1 \
+              --page-size 100 \
+              > announcement-cleanup-list.txt 2>&1 || true
+
+            # CLI 的退出码就是结果：0 成功，3 = HTTP / 网络错误（输出里有 status: 400 等详情）。
+            if ! grep -q 'status: 2' announcement-cleanup-list.txt 2>/dev/null; then
+              echo "⚠️ 查询发版公告列表失败，跳过清理："
+              cat announcement-cleanup-list.txt 2>/dev/null || true
+              # 写一句不含「 #编号」的文本：解析不到 IssueId，后面的官方步骤等于空操作。
+              printf '查询失败，本轮不清理\n' > "${REFS}"
+              exit 0
+            fi
+
+            # number 是字符串（可能带引号），.? 吃掉引号再取数字。
+            numbers="$(grep -oE 'number: .?[0-9]+' announcement-cleanup-list.txt 2>/dev/null | grep -oE '[0-9]+' | sort -un || true)"
+
+            if [ -z "${numbers}" ]; then
+              echo "没有超过 ${DAYS} 天的发版公告，无需清理"
+              printf '今日无过期公告\n' > "${REFS}"
+              exit 0
+            fi
+
+            echo "待关闭的发版公告：${numbers}"
+            # 官方步骤的解析规则：# 前面必须有空格，所以每行写成 " #151"。
+            : > "${REFS}"
+            for n in ${numbers}; do
+              printf ' #%s\n' "${n}" >> "${REFS}"
+            done
+            echo "已写入 ${REFS}："
+            cat "${REFS}"
+
+        # 官方内置步骤：一次调用批量关闭（fromFile 里的 #编号 都会被处理）。
+        - name: 关闭过期的发版公告
+          type: git:issue-update
+          options:
+            fromFile: close-issue-refs.txt
+            state: close

@@ -1,4 +1,11 @@
+# CNB 流水线总入口：只负责聚合各工作流文件。
+#
+# 发布（Release 同步）配置已拆到 .cnb/workflows/release.yml，便于复制到其它仓库复用。
+# 注意：CNB 的 include 不支持跨文件使用 YAML 锚点（& / *），所以发布块里的
+# .trigger_release 锚点与 master 下的两个 *trigger_release 引用必须留在同一个文件里，
+# 不能把锚点定义放这里、引用放 release.yml。
 include:
+  - .cnb/workflows/announcement-cleanup.yml
   - .cnb/workflows/cnb-sechook.yml
   - .cnb/workflows/code-review.yml
   - .cnb/workflows/code-security-config.yml

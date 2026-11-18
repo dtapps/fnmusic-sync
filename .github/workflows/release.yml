@@ -33,12 +33,8 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        # nightly 是「关键词」而不是版本号：会自动推导成
-        #   <最近正式版 + 1 个补丁>-nightly.<UTC 构建日期>
-        # 例如最近正式版 v0.2.7 → v0.2.8-nightly.20261114。
-        # 其余按后缀判定：1.2.3-rc.1 / 1.2.3-beta.1 / 1.2.3-alpha.1 是预发布，没后缀就是正式版。
-        description: '版本号。nightly = 定时任务的默认值（手动填也可）：自动推导成 <最近正式版+1 补丁>-nightly.<UTC 日期>；带 -rc/-beta/-alpha 后缀是预发布，无后缀是正式版'
-        default: 'nightly'
+        description: '版本号。预发布看后缀：1.2.3-rc.1 / 1.2.3-beta.1 / 1.2.3-alpha.1 / 1.2.3-nightly.20260101；填 nightly 自动生成带日期的 nightly
+          版本；无后缀即正式版'
         required: true
         type: string
       commit:
@@ -449,6 +445,206 @@ jobs:
             gh api -X DELETE "repos/${repo}/git/refs/tags/${tag}" >/dev/null 2>&1 \
               || echo "  ⚠️ tag ${tag} 删除失败，忽略"
           done
+
+  # GitHub 侧的发版公告：Release 发布成功后，在仓库 Discussions 里开一条讨论。
+  #
+  # 正文与 CNB 侧同一份脚本渲染（scripts/ci/render-announcement-body.sh），
+  # 只有下载表指向自家平台（GitHub 的下载表来自 GitHub Release 正文，CNB 的是替换过链接的版本）。
+  # 用 Discussions 而不是 Issue：公告是对外的版本说明，讨论区更贴切；
+  # 也不需要像 CNB 那样再让 NPC 追加一条评论。
+  #
+  # 令牌：GITHUB_TOKEN 需要 discussions: write（下面 permissions 显式声明）。
+  # 仓库还要在 Settings → General 里打开 Discussions，否则接口 404 —— 只告警跳过，不影响发布。
+  announce:
+    needs: [release, prepare]
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: read
+      discussions: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # 归一化后的 tag：v1.2.3 / v1.2.3-rc.1 / v1.2.4-nightly.20260101
+      VERSION: ${{ needs.prepare.outputs.interior_version }}
+      PRERELEASE: ${{ needs.prepare.outputs.pre_release }}
+      REPO_URL: https://github.com/${{ github.repository }}
+      COMMIT_SHA: ${{ needs.prepare.outputs.git_commit_full }}
+      # 是否发公告 + 讨论分类（和 CNB 侧一样放 job 级 env）
+      ANNOUNCEMENT_ENABLED: 'true'
+      ANNOUNCEMENT_DISCUSSION_CATEGORY: 'General'
+      # 分类 id：填了就直接用，跳过「列分类」接口（GITHUB_TOKEN 读不到 Discussions 时用它绕开）
+      ANNOUNCEMENT_DISCUSSION_CATEGORY_ID: ''
+      # 发公告用的令牌：GITHUB_TOKEN 在部分仓库 / 组织策略下读不到 Discussions（接口 404，
+      # 看着像「没开启 Discussions」）。配一个带 repo 权限的 PAT（经典 PAT 勾 repo；
+      # fine-grained 勾 Discussions: read & write）覆盖它；没配就退回 GITHUB_TOKEN。
+      ANNOUNCEMENT_TOKEN: ${{ secrets.ANNOUNCEMENT_TOKEN || secrets.GITHUB_TOKEN }}
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.commit || github.sha }}
+
+      - name: 生成公告正文
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # nightly 每天一个 tag：每天都开一条讨论会把讨论区刷成日报。
+          case "${VERSION}" in
+            *-nightly.*)
+              echo "跳过 nightly 版本（${VERSION}）的发版公告"
+              exit 0
+              ;;
+          esac
+
+          # 正文与 Release 正文同源：直接取已发布 Release 的正文，不重新渲染
+          # （发布用的提交可能还没进分支头，正文脚本未必是同一份）。
+          gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${VERSION}" --jq '.body // ""' > release_body.md
+          if [ ! -s release_body.md ]; then
+            echo "::warning::取不到 Release 正文，跳过发版公告"
+            exit 0
+          fi
+
+          export VERSION PRERELEASE
+          export RELEASE_BODY="release_body.md"
+          export OUT_FILE="announcement_body.md"
+          export TITLE_FILE="announcement-title.txt"
+          export CNB_WEB_BASE="https://cnb.cool/dtapp/fnmusic-sync/-"
+          export GITHUB_WEB="${REPO_URL}"
+          # 提交链接指向 GitHub 的提交页（CNB 侧不传这个变量，脚本会用 CNB 的地址拼）
+          export COMMIT_URL="${REPO_URL}/commit"
+          export STABLE_URL="${REPO_URL}/releases/latest"
+          export COMMIT_SHA="${COMMIT_SHA}"
+
+          sh scripts/ci/render-announcement-body.sh > /dev/null
+          echo "公告正文已生成：${OUT_FILE}"
+
+      # 用官方 actions/github-script 调 Discussions API。
+      # 为什么不用社区的 create-discussion 之类：那些不是 GitHub 官方维护的（作者/星数都很少），
+      # 而 actions/github-script 是 actions 组织下的官方 action（Discussions 走它的 github.request 路由调用）。
+      # 官方没有专门「发讨论」的 action，Discussion 的 REST 接口只能这样调。
+      # 用官方 actions/github-script 调 Discussions API。
+      # 为什么不用社区的 create-discussion 之类：那些不是 GitHub 官方维护的；
+      # 官方也没有专门「发讨论」的 action，Discussions 只能这样调。
+      #
+      # ⚠️ 统一走 github.request 的「路由字符串」写法，不要用 github.rest.discussions.*：
+      # github-script v9 打包的 octokit 里 discussions 这组生成方法不存在
+      # （实测报 Cannot read properties of undefined (reading 'listCategories')），
+      # 而 request 是官方通用的调用出口，不依赖这组生成方法。
+      - name: 发布公告到 Discussions
+        uses: actions/github-script@v9
+        env:
+          TITLE_FILE: announcement-title.txt
+          BODY_FILE: announcement_body.md
+        with:
+          github-token: ${{ env.ANNOUNCEMENT_TOKEN }}
+          retries: 2
+          script: |
+            const fs = require('fs')
+            const owner = context.repo.owner
+            const repo = context.repo.repo
+
+            // 标题与正文都从文件读：脚本注入的坑（把不可信内容拼进 JS）就绕开了。
+            const title = fs.readFileSync(process.env.TITLE_FILE, 'utf8').trim()
+            const body = fs.readFileSync(process.env.BODY_FILE, 'utf8')
+
+            // 开关：只有 true / 1 / yes / on 才发，其余值跳过。
+            const enabled = String(process.env.ANNOUNCEMENT_ENABLED || '').toLowerCase()
+            if (!['1', 'true', 'yes', 'on'].includes(enabled)) {
+              core.warning(`发版公告已关闭（ANNOUNCEMENT_ENABLED=${process.env.ANNOUNCEMENT_ENABLED}）`)
+              return 'skipped'
+            }
+
+            const wantCategory = process.env.ANNOUNCEMENT_DISCUSSION_CATEGORY || 'General'
+            // 分类 node id（DIC_kwDO... 这种），填了就跳过「查分类」的 GraphQL 查询。
+            const wantCategoryId = process.env.ANNOUNCEMENT_DISCUSSION_CATEGORY_ID || ''
+
+            try {
+              // GitHub 没有仓库 Discussions 的 REST 端点（REST 里只有 org/team discussions），
+              // 所以列分类、查讨论、建讨论、改讨论一律走 GraphQL。
+              const repoQuery = `
+                query ($owner: String!, $repo: String!) {
+                  repository(owner: $owner, name: $repo) {
+                    id
+                    discussionCategories(first: 25) { nodes { id name } }
+                  }
+                }`
+              const { repository } = await github.graphql(repoQuery, { owner, repo })
+              const repositoryId = repository.id
+
+              let categoryId = wantCategoryId
+              if (categoryId) {
+                core.info(`使用配置的讨论分类 node id=${categoryId}（跳过分类查询）`)
+              } else {
+                const categories = repository.discussionCategories.nodes
+                const picked = categories.find((c) => c.name === wantCategory) || categories[0]
+                if (!picked) {
+                  core.warning('没有可用的讨论分类，跳过发版公告')
+                  return 'skipped'
+                }
+                categoryId = picked.id
+                core.info(`讨论分类：${picked.name}（${categoryId}）`)
+              }
+
+              // Discussion 建出来删不掉，所以先按标题找出**所有**同版本讨论，
+              // 每一条都更新成同一份内容（关掉会让读者以为版本被撤了，不关）。
+              const listQuery = `
+                query ($owner: String!, $repo: String!, $cursor: String) {
+                  repository(owner: $owner, name: $repo) {
+                    discussions(first: 100, after: $cursor) {
+                      nodes { id number title }
+                      pageInfo { hasNextPage endCursor }
+                    }
+                  }
+                }`
+              const matches = []
+              let cursor = null
+              for (;;) {
+                const res = await github.graphql(listQuery, { owner, repo, cursor })
+                const page = res.repository.discussions
+                for (const d of page.nodes) {
+                  if (d.title === title) matches.push(d)
+                }
+                if (!page.pageInfo.hasNextPage) break
+                cursor = page.pageInfo.endCursor
+              }
+
+              const updateMutation = `
+                mutation ($id: ID!, $title: String!, $body: String!) {
+                  updateDiscussion(input: { discussionId: $id, title: $title, body: $body }) {
+                    discussion { number }
+                  }
+                }`
+
+              if (matches.length > 0) {
+                const [keep, ...others] = matches
+                await github.graphql(updateMutation, { id: keep.id, title, body })
+                core.info(`已更新发版公告讨论 #${keep.number}`)
+                for (const other of others) {
+                  await github.graphql(updateMutation, { id: other.id, title, body })
+                  core.info(`已同步更新同版本讨论 #${other.number}`)
+                }
+                return `updated:${keep.number}`
+              }
+
+              const createMutation = `
+                mutation ($repositoryId: ID!, $categoryId: ID!, $title: String!, $body: String!) {
+                  createDiscussion(input: { repositoryId: $repositoryId, categoryId: $categoryId, title: $title, body: $body }) {
+                    discussion { number url }
+                  }
+                }`
+              const created = await github.graphql(createMutation, { repositoryId, categoryId, title, body })
+              core.info(`已创建发版公告讨论 #${created.createDiscussion.discussion.number}`)
+              return `created:${created.createDiscussion.discussion.number}`
+            } catch (err) {
+              // 公告失败不该把发布流水线标红：Release 已经发出去了。
+              // 404 / 权限类错误最可能是令牌没给 Discussions 权限（fine-grained: Discussions: Read and write）。
+              const hint = /not found|forbidden|permission/i.test(err.message || '')
+                ? '（多半是令牌没有 Discussions 权限：fine-grained PAT 需勾 Discussions: Read and write，然后配到 secret ANNOUNCEMENT_TOKEN）'
+                : ''
+              core.warning(`发版公告失败${hint}，请手工补一条：${err.message}`)
+              return 'failed'
+            }
 
   # ── 以下四个 job：把这次发布同步到别的平台 ──────────────────────────────────
   #

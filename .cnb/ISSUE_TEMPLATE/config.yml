@@ -1,0 +1,25 @@
+# Issue 模板选择页配置
+#
+# 规则：本仓库 Issue 仅用于发版公告，所以关闭空白 Issue（blank_issues_enabled: false），
+# 用户必须走「发版公告」模板提交，保证每条 Issue 都带版本号、变更摘要与下载地址。
+#
+# 代价：SECURITY.md 里「开一个不含技术细节的 Issue 说明需要私下安全渠道」这条兜底路径
+# 会被模板页挡住，所以下面用 contact_links 把安全渠道显式放到选择页上。
+blank_issues_enabled: false
+
+contact_links:
+  - name: 使用帮助与文档
+    url: https://cnb.cool/dtapp/fnmusic-sync/-/blob/main/docs/README.md
+    about: 安装升级、音乐库同步、scrobble 上报、Web UI、配置项与故障排查等完整文档索引
+
+  - name: 安全漏洞报告（不要开公开 Issue）
+    url: https://cnb.cool/dtapp/fnmusic-sync/-/blob/main/SECURITY.md
+    about: 发现安全问题请按私下渠道报告，不要在 Issue 里贴利用细节、真实地址、音乐服务 token、session_key 或 api_secret
+
+  - name: 历史发布记录
+    url: https://cnb.cool/dtapp/fnmusic-sync/-/releases
+    about: 查看已发布版本的 Release 正文、下载附件与 SHA256SUMS
+
+  - name: 构建与发布流程
+    url: https://cnb.cool/dtapp/fnmusic-sync/-/blob/main/docs/contributing.md
+    about: 版本号规则、构建产物（deb / fpk）与发布流程的说明
