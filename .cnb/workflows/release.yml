@@ -390,6 +390,13 @@
     # 为什么失败不阻断：这一步跑在 Release 与附件都上传完之后，发布已经完成；
     # 这里红掉只会被 GitHub 侧 sync-cnb 记成「同步失败」，反而误导。所以只告警。
     - name: 准备发版公告
+      # 只在非 nightly 版本执行：CNB 的 if 是一段 shell 脚本，退出码 0 才跑这个 stage。
+      # nightly 每天一个 tag，每天开一条公告会把 Issue 列表刷成日报。
+      if: &not_nightly |
+        case "${INTERIOR_VERSION}" in
+          *-nightly.*) exit 1 ;;
+          *) exit 0 ;;
+        esac
       script: |
         set -eu
 
@@ -397,25 +404,10 @@
         PRERELEASE="${PRE_RELEASE}"
         WEB_BASE="${CNB_REPO_URL_HTTPS%/}/-"
 
-        # 上一次的残留标记要先清掉：标记文件在同一个工作区里，
-        # 留着会让这一步明明成功也走「跳过」分支。
-        rm -f announcement-skip.txt announcement-number.txt
-
-        # nightly 每天一个 tag：每天开一条公告会把 Issue 列表刷成日报。
-        # 真正的发版公告（正式版 / rc / beta / alpha）才值得一条。
-        case "${VERSION}" in
-          *-nightly.*)
-            echo "跳过 nightly 版本（${VERSION}）的发版公告"
-            printf 'skip\n' > announcement-skip.txt
-            exit 0
-            ;;
-        esac
-
         # 公告正文与 Release 正文同源：下载表 / 校验 / 更新内容都取自 release_body.md，
         # 不在这里另编一套（格式见 scripts/ci/render-announcement-body.sh）。
         if [ ! -f scripts/ci/render-announcement-body.sh ]; then
           echo "⚠️ 缺少 scripts/ci/render-announcement-body.sh（发布用的提交里没有该脚本），跳过公告"
-          printf 'skip\n' > announcement-skip.txt
           exit 0
         fi
 
@@ -431,9 +423,9 @@
 
         # 渲染失败也不让发布流水线变红：正文渲染不出来只是少一条公告，
         # 而这里变红会被 GitHub 侧 sync-cnb 记成「同步失败」，反而误导。
+        # 后面的步骤读不到标题会自动跳过（创建 stage 有缺失检查）。
         if ! sh scripts/ci/render-announcement-body.sh > /dev/null; then
           echo "⚠️ 生成公告正文失败，跳过发版公告"
-          printf 'skip\n' > announcement-skip.txt
           exit 0
         fi
         echo "公告正文已生成：${OUT_FILE}（标题见 ${TITLE_FILE}）"
@@ -444,6 +436,7 @@
     # 按标题找出所有同版本的公告，第一个更新、其余（历史重复）关掉。
     - name: 创建发版公告
       image: cnbcool/cnb-cli
+      if: *not_nightly
       script: |
         set -eu
 
@@ -451,11 +444,6 @@
         KEYWORD="${INTERIOR_VERSION}"
         LABEL="发版公告"
         BODY="announcement_body.md"
-
-        if [ -f announcement-skip.txt ]; then
-          echo "上一步已标记跳过（nightly 或正文生成失败），不创建公告"
-          exit 0
-        fi
 
         TITLE="$(cat announcement-title.txt 2>/dev/null || echo '')"
         if [ -z "${TITLE}" ] || [ ! -f "${BODY}" ]; then
@@ -578,6 +566,7 @@
     #   NPC 自己会读上面那条公告）。
     - name: 发布公告评论
       image: cnbcool/cnb-cli
+      if: *not_nightly
       script: |
         set -eu
 

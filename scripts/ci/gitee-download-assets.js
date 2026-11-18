@@ -306,13 +306,14 @@ function downloadFile(asset, dest, expectedSize) {
   let tries = 0;
 
   function step() {
-    const from = fs.existsSync(dest) ? fs.statSync(dest).size : 0;
+    let from = fs.existsSync(dest) ? fs.statSync(dest).size : 0;
     if (expectedSize > 0 && from === expectedSize) {
       console.log('  已完整（' + mb(from) + '）');
       return Promise.resolve();
     }
     if (expectedSize > 0 && from > expectedSize) {
       fs.unlinkSync(dest); // 上次写了脏数据，重来
+      from = 0; // 文件已删就必须从头下：还拿旧偏移带 Range + 追加写，前 N 字节会缺
     }
     return downloadOnce(chain[idx].wrap(urlFor(asset)), dest, from)
       .then(function (written) {

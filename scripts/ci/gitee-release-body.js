@@ -51,66 +51,93 @@ notesHtml = notesHtml.replace(/<a\b[^>]*>\s*<\/a>/g, '');
 notesHtml = notesHtml.replace(/\s+[a-zA-Z][\w:-]*="[^"]*"/g, '');
 notesHtml = notesHtml.replace(/=/g, '&#61;');
 
+// 单段上限。插件把值当相对路径 open，单段超过 255 字节就 file name too long，
+// 这里取 200 留余量。注意末尾兜底校验是按 / 切分的 —— 我们插的 <br/> 会把
+// "<br" 这三个字节算进**前**一段，所以文本实际可用宽度是 LIMIT - 3。
+const LIMIT = 200;
+const BREAK = '<br/>';
+// 校验是按 / 切分的，"<br" 这三个字节会算进**前**一段，所以文本只能用到 197
+const ROOM = LIMIT - '<br'.length;
+
 /**
- * 按字节精确切分，每累计 LIMIT 字节插一个 <br/>。
- * 只落在「标签」与「文本」的边界上，不会把多字节汉字或标签切断。
+ * 把一段 HTML 切成「/ 与 / 之间的片段都不超过 LIMIT 字节」的单行。
+ *
+ * 两条硬性要求：
+ *   1. 不切断多字节汉字，也不切断标签（标签整块输出）；
+ *   2. size 是「距输出里上一个 / 的字节数」，**必须整篇累计**、遇到 /（含
+ *      <br/> 和标签里的 /）就归零 —— 与末尾的兜底校验同一口径。
+ *
+ * 以前的写法是「每行单独调一次 withBreaks，然后 join('') 拼起来」，size 在行首
+ * 被清零，而连续几行都不足 200 字节时根本插不进 <br/>；拼完之后就是一条几百
+ * 字节、中间没有任何 / 的串。nightly 的更新内容正好是三行 135 / 146 / 144
+ * 字节，攒成 338 字节，构建直接红在校验那一步（v0.1.31-nightly.20261118）。
+ * 所以现在：整篇只走一遍，size 一路带下去。
  */
-function withBreaks(block, LIMIT) {
+function withBreaks(block) {
   const tokens = block.match(/<[^>]*>|[^<]+/g) || [];
   let out = '';
-  let size = 0;
+  let size = 0; // 距上一个 / 的字节数
   for (const t of tokens) {
     if (t.charAt(0) === '<') {
-      out += t;
-      size += Buffer.byteLength(t, 'utf8');
-    } else {
-      let buf = Buffer.from(t, 'utf8');
-      while (buf.length > 0) {
-        if (size >= LIMIT) {
-          out += '<br/>';
-          size = 0;
-          continue;
-        }
-        let end = Math.min(LIMIT - size, buf.length);
-        // 往回退到 UTF-8 字符边界，避免切出乱码
-        while (end > 0 && (buf[end] & 0xc0) === 0x80) end--;
-        out += buf.slice(0, end).toString('utf8');
-        size += end;
-        buf = buf.slice(end);
+      // 标签不能切（切了就成不了 HTML），但它内部的 / 天然断开片段：
+      // 第一个 / 之前的算 head，最后一个 / 之后的算 tail。
+      const slash = t.lastIndexOf('/');
+      const head = Buffer.byteLength(slash === -1 ? t : t.slice(0, slash), 'utf8');
+      const tail = slash === -1 ? 0 : Buffer.byteLength(t.slice(slash + 1), 'utf8');
+      if (size + head > ROOM) {
+        out += BREAK;
+        size = 0;
       }
-    }
-    if (size >= LIMIT) {
-      out += '<br/>';
-      size = 0;
+      out += t;
+      // 没有 / 的标签（<p> / <td> / <strong>）字节要累加，不能归零
+      size = slash === -1 ? size + head : tail;
+    } else {
+      // 按 Unicode 码点逐个追加，不再用 Buffer 切片 + 回退：
+      // 剩余空间不足一个多字节汉字时，end 会被回退到 0，buf 原样不变，
+      // while (buf.length > 0) 永远转下去（实测含中文的 nightly 正文卡死两次）。
+      // 码点天然不可分割，size+n 超限时先插 <br/> 再放，每轮必定推进。
+      for (const ch of t) {
+        const n = Buffer.byteLength(ch, 'utf8');
+        if (size + n > ROOM) {
+          out += BREAK;
+          size = 0;
+        }
+        out += ch;
+        size += n;
+      }
     }
   }
   return out;
 }
 
-const oneLine = notesHtml
-  .split('\n')
-  .map(function (l) {
-    return l.trim();
-  })
-  .filter(Boolean)
-  .map(function (l) {
-    return withBreaks(l, 200);
-  })
-  .join('');
+// 先压成单行（trim + 去空行），再整篇分段。行与行之间不再单独处理：
+// 块级标签自带 /，行间不需要额外的分隔符。
+const oneLine = withBreaks(
+  notesHtml
+    .split('\n')
+    .map(function (l) {
+      return l.trim();
+    })
+    .filter(Boolean)
+    .join('')
+);
 
 if (oneLine.indexOf('=') !== -1) {
   throw new Error('正文里还有裸 =，会被参数解析截断');
 }
 
-// 兜底校验：任何一段都不能超过 255，否则插件 open 会 file name too long
+// 兜底校验：任何一段都不能超过 LIMIT，否则插件 open 会 file name too long。
+// withBreaks 已经保证 ≤ ROOM + 3 == LIMIT，走到这里还超就是算法本身坏了。
 const longest = Math.max.apply(
   null,
   oneLine.split('/').map(function (p) {
     return Buffer.byteLength(p, 'utf8');
   })
 );
-if (longest > 200) {
-  throw new Error('正文分段后仍有 ' + longest + ' 字节的片段，会被插件当超长文件名');
+if (longest > LIMIT) {
+  throw new Error(
+    '正文分段后仍有 ' + longest + ' 字节的片段（上限 ' + LIMIT + '），会被插件当超长文件名'
+  );
 }
 
 // VERSION / PRERELEASE / RELEASE_NAME 由平台插值给下游 release-stage，正文走参数通道。
