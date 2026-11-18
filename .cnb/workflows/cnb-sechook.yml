@@ -1,9 +1,12 @@
+# CNB 安全扫描结果
+# https://docs.cnb.cool/zh/plugin/public/cnbcool/cnb-sechook.html
+# https://cnb.cool/cnb/plugins/cnbcool/cnb-sechook
 '**':
   pull_request:
-    - stages:
-    # https://docs.cnb.cool/zh/plugin/public/cnbcool/cnb-sechook.html
-    # https://cnb.cool/cnb/plugins/cnbcool/cnb-sechook
-    - stages:
+    - name: 安全扫描与通知
+      # 密钥通过 imports 从私有仓库导入
+      imports: https://cnb.cool/dtapp/envs/-/blob/main/webhook.yml
+      stages:
         - name: 获取扫描结果
           image: cnbcool/cnb-sechook
           settings:
@@ -13,3 +16,42 @@
             sensitive_disabled: false
             # 禁用代码扫描统计（可选，设置为 true/TRUE/1 时禁用）
             scanning_disabled: false
+        # 插件把完整扫描报告写入 sec_overview.md（敏感信息统计/漏洞统计/按作者分组）
+        # 正文渲染统一收口到 scripts/ci/render-ci-notice.sh，供三个平台复用
+        - name: 整理扫描报告正文
+          image: docker.cnb.cool/dtapp/alpine:latest # 统一使用预构建的 CI 环境镜像
+          script: sh scripts/ci/render-ci-notice.sh sechook scan_notice.md
+          exports:
+            scan: SCAN_RESULT
+            # 飞书用 post 富文本（filepath 读 *_feishu.json），查看详情为可点击 a 标签
+            scan_text: SCAN_RESULT_TEXT
+        # 安全扫描结果通知：企业微信（fromFile 直接发送报告全文）
+        # https://docs.cnb.cool/zh/plugin/public/tencentcom/wecom-message.html
+        - name: 企业微信通知
+          allowFailure: true
+          image: tencentcom/wecom-message
+          settings:
+            robot: $WECOM_BOT_WEBHOOK
+            msgType: markdown
+            fromFile: scan_notice.md
+            # 企业微信单条上限 2048 字节，超长时插件在结尾追加此提示
+            lastMsg: 完整结果请查看 PR 页面
+        # 安全扫描结果通知：飞书（post 富文本，查看详情为可点击超链接）
+        # https://docs.cnb.cool/zh/plugin/public/tencentcom/feishu-message.html
+        - name: 飞书通知
+          allowFailure: true
+          image: tencentcom/feishu-message
+          settings:
+            robot: $FEISHU_BOT_WEBHOOK
+            msg_type: post
+            filepath: scan_notice_feishu.json
+        # 安全扫描结果通知：钉钉（机器人 webhook + 加签，markdown 发送报告全文）
+        # https://docs.cnb.cool/zh/plugin/public/tencentcom/dingtalk-bot-msg.html
+        - name: 钉钉通知
+          allowFailure: true
+          image: tencentcom/dingtalk-bot-msg:latest
+          settings:
+            c_type: markdown
+            webhook: $DINGTALK_BOT_WEBHOOK
+            secret: $DINGTALK_BOT_SECRET
+            content: $SCAN_RESULT

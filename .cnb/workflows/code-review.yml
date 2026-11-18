@@ -1,13 +1,17 @@
+# AI 代码评审
+# https://docs.cnb.cool/zh/plugin/public/cnbcool/code-review.html
+# https://cnb.cool/cnb/plugins/cnbcool/code-review
 '**':
   pull_request:
-    - stages:
-        # https://docs.cnb.cool/zh/plugin/public/cnbcool/code-review.html
-        # https://cnb.cool/cnb/plugins/cnbcool/code-review
+    - name: AI 代码评审与通知
+      # 密钥通过 imports 从私有仓库导入
+      imports: https://cnb.cool/dtapp/envs/-/blob/main/webhook.yml
+      stages:
         - name: AI 代码评审
           image: cnbcool/code-review:latest
           settings:
-            # 评审结果输出文件路径。指定后评审结果会保存为 JSON 文件，不指定则直接输出到终端。
-            output:
+            # 评审结果输出文件路径。指定后评审结果会保存为 JSON 文件，供下游通知 stage 读取真实评审内容
+            output: ./code_review.json
             # 生成 diff 时包含的上下文行数，即变更代码前后各显示多少行。值越大，AI 能看到更多上下文，评审更准确，但也会增加 token 消耗。默认 5
             context: 5
             # 是否显示详细日志。开启后会输出更多调试信息，包括 Git 命令执行、文件过滤详情等。默认 false
@@ -44,3 +48,41 @@
             max_turns:
             # SDK 调用超时时间（单位：分钟）。超过该时长仍未完成的评审会中断，避免流水线卡死。默认 30
             timeout_minutes: 30
+        # 把 code_review.json（status + issues）渲染成可读正文，供各平台发送真实评审内容
+        - name: 整理评审结果正文
+          image: docker.cnb.cool/dtapp/alpine:latest # 统一使用预构建的 CI 环境镜像
+          script: sh scripts/ci/render-ci-notice.sh review review_notice.md
+          exports:
+            review: REVIEW_RESULT
+            # 飞书用 post 富文本（filepath 读 *_feishu.json），查看详情为可点击 a 标签
+            review_text: REVIEW_RESULT_TEXT
+        # AI 评审结果通知：企业微信（fromFile 发送评审结果全文）
+        # https://docs.cnb.cool/zh/plugin/public/tencentcom/wecom-message.html
+        - name: 企业微信通知
+          allowFailure: true
+          image: tencentcom/wecom-message
+          settings:
+            robot: $WECOM_BOT_WEBHOOK
+            msgType: markdown
+            fromFile: review_notice.md
+            # 企业微信单条上限 2048 字节，超长时插件在结尾追加此提示
+            lastMsg: 完整评审结果请查看 PR 页面
+        # AI 评审结果通知：飞书（post 富文本，查看详情为可点击超链接）
+        # https://docs.cnb.cool/zh/plugin/public/tencentcom/feishu-message.html
+        - name: 飞书通知
+          allowFailure: true
+          image: tencentcom/feishu-message
+          settings:
+            robot: $FEISHU_BOT_WEBHOOK
+            msg_type: post
+            filepath: review_notice_feishu.json
+        # AI 评审结果通知：钉钉（机器人 webhook + 加签，markdown 发送评审结果全文）
+        # https://docs.cnb.cool/zh/plugin/public/tencentcom/dingtalk-bot-msg.html
+        - name: 钉钉通知
+          allowFailure: true
+          image: tencentcom/dingtalk-bot-msg:latest
+          settings:
+            c_type: markdown
+            webhook: $DINGTALK_BOT_WEBHOOK
+            secret: $DINGTALK_BOT_SECRET
+            content: $REVIEW_RESULT
