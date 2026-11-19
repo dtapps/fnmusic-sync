@@ -1,0 +1,57 @@
+name: 从 Dependabot 同步标签
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/dependabot.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v7
+
+      - name: 从 dependabot.yml 自动创建标签
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          # 提取所有 labels 并去重
+          labels=$(yq -r '.updates[].labels[]?' .github/dependabot.yml | sort -u)
+
+          echo "📋 发现以下标签："
+          echo "$labels"
+
+          # 为每个标签自动生成颜色和描述
+          echo "$labels" | while IFS= read -r label; do
+            [ -z "$label" ] && continue
+
+            # 用 md5 哈希生成颜色（取前6位）
+            color=$(echo -n "$label" | md5sum | cut -c1-6)
+
+            # 确保颜色不会太浅（如果前两位是 ff/fe/fd，强制改为 darker）
+            if [[ "$color" =~ ^(ff|fe|fd) ]]; then
+              color="0${color:2:5}"
+            fi
+
+            # 描述直接用标签名
+            desc="Auto-synced from dependabot.yml"
+
+            # 创建或更新标签
+            gh label create "$label" \
+              --color "$color" \
+              --description "$desc" \
+              --force
+
+            echo "✅ 已创建/更新：$label (#$color)"
+          done
+
+          echo "🎉 所有标签同步完成！"
