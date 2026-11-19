@@ -1,27 +1,24 @@
 #!/usr/bin/env bash
 #
-# 生成 Release 正文的「更新内容」：按发布渠道找对比基准，输出提交摘要。
+# 生成 Release 正文的「更新内容」：拿对比基准，输出两个 tag 之间的提交摘要。
 #
-# 需求（同渠道对比）：
-#   - 预发布（rc / beta / alpha / nightly）：和**同渠道**的上一个 tag 对比
+# 对比基准只从 scripts/ci/resolve-prev-tag.sh 取：同渠道的上一个 tag，
+# 不是 `git describe` 那种「最近可达 tag」（发正式版会取到刚发的 rc，
+# 整轮改动只剩 rc 之后那几个；仓库里的 docker-v1.0.x 系列 tag 也会把基准带偏）。
+# 挑 tag 的规则只在 resolve-prev-tag.sh 那一份实现里，本脚本不再重复一遍：
+# 发版公告评论的 {{PREVIOUSTAG}} 也调它，两边必然指向同一个区间。
+#
+# 基准规则（细节见 resolve-prev-tag.sh 头部）：
+#   - 预发布（rc / beta / alpha / nightly）→ 同渠道的上一个 tag
 #       发 v1.0.44-rc.2 → 对比 v1.0.44-rc.1
-#       发 v1.0.44-beta.2 → 对比 v1.0.44-beta.1
-#       发 v1.0.44-nightly.20260102 → 对比 v1.0.44-nightly.20260101
-#   - 正式版：和上一个**正式版**对比，不掺预发布阶段的提交
+#   - 正式版 → 上一个正式版，不掺预发布阶段的提交
 #       发 v1.0.45 → 对比 v1.0.43（中间那些 -rc.1/-rc.2 不算基准）
-#   - 该渠道还没有过 tag 时，回退到上一个正式版
-#       首次发 v1.0.44-rc.1 / v1.0.44-nightly.20260101 → 对比 v1.0.43
-#
-# 为什么不用 `git describe --tags --abbrev=0 'HEAD^'`：
-#   1) 它取的是「最近的可达 tag」，不区分渠道。发正式版时会取到刚发的 rc，
-#      于是正式版的更新内容只剩 rc 之后那几个提交，前面整轮的改动全丢了。
-#   2) 它还会被无关 tag 干扰：仓库里另有 docker-v1.0.x 系列 tag，只要某个 docker
-#      tag 比版本 tag 更靠近 HEAD，describe 就会选它，基准直接错到别的线上。
-#   所以这里显式按 tag 名前缀（v*）和渠道过滤。
+#   - 该渠道还没有过 tag → 回退到上一个正式版
 #
 # 用法：
 #   sh scripts/ci/release-changelog.sh <版本号>
-#   # 输出（多行 Markdown）到 stdout；挑不出基准时 exit 1，由工作流中断发布
+#   # 输出（多行 Markdown）到 stdout；取不到基准（取数故障）时 exit 1，
+#   # 由工作流中断发布，不发出一份区间错误的正文。
 #
 # 环境变量：
 #   COMMIT_URL  选填，提交链接前缀。拼成 ${COMMIT_URL}/<sha>。
@@ -40,107 +37,22 @@ if [ -z "${version}" ]; then
   exit 2
 fi
 
-# ── 渠道判定 ────────────────────────────────────────────────────────────────
-# 只看版本号后缀决定渠道，和 resolve-prerelease.sh 的口径保持一致：
-# 预发布后缀一律用连字符（-rc.N / -beta.N / -alpha.N / -nightly.YYYYMMDD），
-# 这是 SemVer 的规定。nightly 也是独立渠道：今天的 nightly 只对比昨天的 nightly，
-# 不要拿 rc 或正式版当基准。
-channel='stable'
-case "${version}" in
-  *-nightly*) channel='nightly' ;;
-  *-rc*) channel='rc' ;;
-  *-beta*) channel='beta' ;;
-  *-alpha*) channel='alpha' ;;
-esac
-
-# ── 收集候选 tag ────────────────────────────────────────────────────────────
-# 只认合法的 SemVer 版本 tag：vX.Y.Z 或 vX.Y.Z-rc.N / -beta.N / -alpha.N /
-# -nightly.YYYYMMDD（数字段用 * 而不是 ?，这样 -rc.1.2、-nightly.20260101.2
-# 这类多段后缀也能进候选集，和 resolve-prerelease.sh 接受的字符集保持一致）。
-# 不合规的 tag 一律不进候选集 —— 否则一个随手建的 v1.0.44.rc1 之类就会变成
-# 对比基准，把 diff 算到错误的区间上。
-# 拉取 tag 是调用方的责任：GitHub 用 fetch-depth: 0，CNB 用 git fetch --tags，
-# 工作流里都有独立一步校验，这里不做兜底 fetch。
-all_tags="$(git tag -l 'v*' 2>/dev/null \
-  | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+(-(rc|beta|alpha|nightly)(\.[0-9]+)*)?$' \
-  || true)"
-
-# 按渠道过滤出「同渠道」的 tag。注意排除当前版本自己：重跑同一次发布时，
-# 当前 tag 可能已经建好了，不排除就会变成自己和自己对比（diff 为空）。
-same_channel=''
-for t in ${all_tags}; do
-  [ "${t}" = "${version}" ] && continue
-  t_channel='stable'
-  case "${t}" in
-    *-nightly*) t_channel='nightly' ;;
-    *-rc*) t_channel='rc' ;;
-    *-beta*) t_channel='beta' ;;
-    *-alpha*) t_channel='alpha' ;;
-  esac
-  [ "${t_channel}" = "${channel}" ] || continue
-  same_channel="${same_channel}${same_channel:+
-}${t}"
-done
-
-# ── 选基准 ──────────────────────────────────────────────────────────────────
-# 同渠道里挑版本号最大的那个。用 sort -V 而不是 --sort=-v:refname：
-# 后者对 rc.2 / rc.10 这类排序不符合直觉，且不同 git 版本行为有差异。
-pick_latest() {
-  printf '%s\n' "$1" | sed '/^$/d' | sort -V -r | head -n 1
-}
-
-# 只保留「比当前版本旧」的 tag。
-# 补发历史版本（比如已经发过 rc.2 再回头发 rc.1）时，候选集里会有比当前版本更新的
-# tag，不过滤就会拿「未来」当基准，diff 变成反向的。
-older_than_version() {
-  while IFS= read -r t; do
-    [ -n "${t}" ] || continue
-    # sort -V -r 后取首行：若首行是当前版本，说明 t 不比它新
-    latest="$(printf '%s\n%s\n' "${t}" "${version}" | sort -V -r | head -n 1)"
-    [ "${latest}" = "${version}" ] && printf '%s\n' "${t}"
-  done <<EOF
-$1
-EOF
-}
-
-base=''
-if [ -n "${same_channel}" ]; then
-  base="$(pick_latest "$(older_than_version "${same_channel}")")"
-fi
-
-# 同渠道没有更早的 tag（首次发这个渠道）→ 回退到上一个正式版
-if [ -z "${base}" ]; then
-  stable_tags=''
-  for t in ${all_tags}; do
-    [ "${t}" = "${version}" ] && continue
-    case "${t}" in
-      *-rc* | *-beta* | *-alpha* | *-nightly*) continue ;;
-    esac
-    stable_tags="${stable_tags}${stable_tags:+
-}${t}"
-  done
-  if [ -n "${stable_tags}" ]; then
-    base="$(pick_latest "$(older_than_version "${stable_tags}")")"
-  fi
-fi
-
-# ── 输出 ────────────────────────────────────────────────────────────────────
-# 只有仓库里一个版本 tag 都没有时，才是真的「首次发布」。
-# 有 tag 但挑不出基准，说明是取数出了问题（比如 clone 时没拉 tag），
-# 这时报「首次发布」会盖住真正的故障，必须显式报错让人去看。
-if [ -z "${base}" ]; then
-  # 排掉「当前版本自己」之后还剩几个 tag
-  others="$(printf '%s\n' "${all_tags}" | sed '/^$/d' | grep -vxF "${version}" || true)"
-  # 一个 tag 都没有，或只有当前版本自己 → 这就是这个仓库/渠道的第一次发布
-  if [ -z "${others}" ]; then
-    printf '首次发布\n'
-    exit 0
-  fi
-  # 有别的 tag 却挑不出基准，说明取数有问题，不能拿「首次发布」把故障盖住
-  printf '错误: 仓库里有 %d 个其它版本 tag，但挑不出 %s 渠道的对比基准。\n' \
-    "$(printf '%s\n' "${others}" | sed '/^$/d' | wc -l | tr -d ' ')" "${channel}" >&2
-  printf '常见原因：clone 时没拉取 tag（GitHub 需要 fetch-depth: 0），或 tag 命名不符合预期。\n' >&2
+# ── 对比基准：只从 resolve-prev-tag.sh 取 ──────────────────────────────────
+# 发版公告评论的 {{PREVIOUSTAG}} 也调那一份，本脚本绝不自己再挑一遍：
+# 两边各写一套 regex / 渠道过滤，早晚出现「正文 A..HEAD、评论 B..HEAD」。
+# resolve-prev-tag.sh 的契约（见其头部注释）：
+#   找到基准 → stdout 打印 tag，exit 0；
+#   首次发布 → stdout 空，exit 0；
+#   取数故障 → stderr 写原因，exit 1（这里转成非零，让工作流中断发布）。
+self_dir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+if ! base="$(sh "${self_dir}/resolve-prev-tag.sh" "${version}")"; then
+  printf '错误: 解析上一个版本 tag 失败，不生成更新内容。\n' >&2
   exit 1
+fi
+
+if [ -z "${base}" ]; then
+  printf '首次发布\n'
+  exit 0
 fi
 
 # 基准就是当前版本（重跑同一次发布）→ 没有可对比的提交

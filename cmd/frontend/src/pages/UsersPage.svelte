@@ -100,8 +100,10 @@
         onclick={() => {
           newUserName = '';
           showAddUserModal = true;
-        }}>{$_('users.add_user')}</Button
+        }}
       >
+        {$_('users.add_user')}
+      </Button>
       <span class="text-xs text-muted-foreground hidden sm:inline">{$_('users.username_hint')}</span>
     {/if}
   </div>
@@ -126,8 +128,10 @@
                   size="sm"
                   onclick={() => {
                     expandedRows = { ...expandedRows, [name]: !expandedRows[name] };
-                  }}>{expandedRows[name] ? $_('users.collapse') : $_('users.edit')}</Button
+                  }}
                 >
+                  {expandedRows[name] ? $_('users.collapse') : $_('users.edit')}
+                </Button>
                 <Button variant="destructive" size="sm" onclick={() => handleDelete(name)}>{$_('users.delete')}</Button>
               </div>
             </div>
@@ -141,9 +145,9 @@
                 {/if}
               </span>
               <span class="flex items-center gap-1">
-                <Badge variant={user.listenbrainz?.enabled ? 'on' : 'off'}
-                  >{user.listenbrainz?.enabled ? '✓' : '✗'}</Badge
-                >
+                <Badge variant={user.listenbrainz?.enabled ? 'on' : 'off'}>
+                  {user.listenbrainz?.enabled ? '✓' : '✗'}
+                </Badge>
                 {#if lbUrl}
                   <a class="hover:underline" href={lbUrl} target="_blank" rel="noopener noreferrer">ListenBrainz</a>
                 {:else}
@@ -172,8 +176,9 @@
           <tr class="bg-muted">
             <th class="px-4 py-2.5 text-left text-xs font-semibold text-muted-foreground">{$_('users.username')}</th>
             <th class="px-4 py-2.5 text-left text-xs font-semibold text-muted-foreground">{$_('users.lastfm')}</th>
-            <th class="px-4 py-2.5 text-left text-xs font-semibold text-muted-foreground">{$_('users.listenbrainz')}</th
-            >
+            <th class="px-4 py-2.5 text-left text-xs font-semibold text-muted-foreground">
+              {$_('users.listenbrainz')}
+            </th>
             <th class="px-4 py-2.5 text-left text-xs font-semibold text-muted-foreground">{$_('users.actions')}</th>
           </tr>
         </thead>
@@ -191,8 +196,10 @@
                       class="text-xs text-muted-foreground ml-1 hover:underline"
                       href={lfUrl}
                       target="_blank"
-                      rel="noopener noreferrer">{user.lastfm.username}</a
+                      rel="noopener noreferrer"
                     >
+                      {user.lastfm.username}
+                    </a>
                   {/if}
                 {:else}
                   <Badge variant="off">✗</Badge>
@@ -206,8 +213,10 @@
                       class="text-xs text-muted-foreground ml-1 hover:underline"
                       href={lbUrl}
                       target="_blank"
-                      rel="noopener noreferrer">{user.listenbrainz.username}</a
+                      rel="noopener noreferrer"
                     >
+                      {user.listenbrainz.username}
+                    </a>
                   {/if}
                 {:else}
                   <Badge variant="off">✗</Badge>
@@ -219,11 +228,13 @@
                     size="sm"
                     onclick={() => {
                       expandedRows = { ...expandedRows, [name]: !expandedRows[name] };
-                    }}>{expandedRows[name] ? $_('users.collapse') : $_('users.edit')}</Button
+                    }}
                   >
-                  <Button variant="destructive" size="sm" onclick={() => handleDelete(name)}
-                    >{$_('users.delete')}</Button
-                  >
+                    {expandedRows[name] ? $_('users.collapse') : $_('users.edit')}
+                  </Button>
+                  <Button variant="destructive" size="sm" onclick={() => handleDelete(name)}>
+                    {$_('users.delete')}
+                  </Button>
                 </div>
               </td>
             </tr>

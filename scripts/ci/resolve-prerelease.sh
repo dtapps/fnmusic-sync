@@ -35,8 +35,10 @@
 # ── nightly 推导 ─────────────────────────────────────────────────────────────
 #
 # 「最近正式版」= 仓库里所有 vX.Y.Z 形态 tag 中最大的那个（不含 -rc / -beta /
-# -alpha / -nightly 等任何预发布后缀）。判定口径与 scripts/ci/release-changelog.sh
-# 认 tag 的正则一致，两边不会各认各的。
+# -alpha / -nightly 等任何预发布后缀）。这里只认纯 vX.Y.Z：它决定 nightly 的补丁号，
+# 多认一个预发布 tag 就会拼出 v1.2.3-rc.1-nightly.YYYYMMDD 这种没人认的版本号。
+# 「同渠道的上一个 tag」是另一回事（changelog 的对比基准），在那边单独由
+# scripts/ci/resolve-prev-tag.sh 判定，不要和这里的正则混用。
 #
 # 拉取 tag 是调用方的责任（GitHub 用 fetch-depth: 0，CNB / GitLab / GitCode 各自
 # git fetch --tags），这里不做兜底 fetch。
