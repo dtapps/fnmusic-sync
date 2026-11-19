@@ -21,14 +21,8 @@ endif
 GIT_REMOTE ?= origin
 export GIT_REMOTE
 
-# 名称
-BINARY := fnmusic-sync
-
-# 包名
-PKG    := cnb.cool/dtapp/fnmusic-sync
-
 # 二进制文件名
-BINARY_NAME=fnmusic-sync
+BINARY_NAME = fnmusic-sync
 
 # 前端项目目录
 FRONTEND_DIR = cmd/frontend
@@ -39,8 +33,8 @@ BACKEND_DIR = cmd/fnmusic-sync
 # 飞牛项目目录
 FPKG_DIR = fpkg
 
-# 编译输出目录
-BUILD_DIR=bin
+# 备份目录
+BACKUP_DIR = bin
 
 # 版本信息（支持外部传入）
 # 注意：若本地存在形如 refs/tags/vX.Y.Z 的异常标签，git describe 会返回带路径前缀的
@@ -51,17 +45,10 @@ VERSION ?= $(shell v=$$(git describe --tags --always --dirty 2>/dev/null | sed '
 # 不使用 v 前缀；而二进制内部版本与下载链接仍使用带 v 的 VERSION（与 git tag 保持一致）。
 PKG_VERSION = $(patsubst v%,%,$(VERSION))
 
-# deb 专用版本号：把 semver 的预发布后缀换成 Debian 的 ~ 写法。
-# dpkg 的版本是 upstream-revision，同 upstream 时「有 revision 的那份更大」——
-# 也就是 0.1.32-rc.1 > 0.1.32，用户装了 rc 之后正式版反而成了降级（apt 会拒绝）。
-# 换成 0.1.32~rc.1（tilde 排序低于空串）才对。fnOS 的 fpk 与前端 package.json
-# 仍用原样 semver，只有 deb 元数据需要这一步。
-DEB_VERSION = $(subst -,~,$(PKG_VERSION))
-COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
-BUILDTIME ?= $(shell date -u '+%Y-%m-%d %H:%M:%S UTC')
+# deb 的 ~ 预发布排序由 nfpm（goreleaser 内置）自动处理，见 .goreleaser.yaml 的 nfpms 段。
 
 # 构建来源（标识当前二进制由哪个平台构建发布）
-# CNB 构建时注入 REPO_SOURCE=cnb，GitHub 构建时注入 REPO_SOURCE=github，GitLab 构建时注入 REPO_SOURCE=gitlab
+# CNB 构建时注入 REPO_SOURCE=cnb，GitHub 构建时注入 REPO_SOURCE=github；自建其它通道可自行传值
 # 升级时根据此值选择从对应平台下载
 REPO_SOURCE ?= cnb
 
@@ -73,95 +60,9 @@ CNB_TOKEN ?=
 # GitHub 构建时通过环境变量 GITHUB_TOKEN 传入
 GITHUB_TOKEN ?=
 
-# GitLab 访问令牌（read_api 权限）。公开项目可匿名读 releases API，因此可以为空；
-# 私有项目不配就会在升级时提示「项目不可读」。GitLab 构建时通过环境变量 GITLAB_TOKEN 传入。
-GITLAB_TOKEN ?=
-
-# 路径（ldflags -X 注入版本变量的包路径，需与 go.mod 模块路径一致）
-PKG_PATH = cnb.cool/dtapp/fnmusic-sync/internal/buildinfo
-
-# ldflags 模板
-# -s -w: 移除符号表和调试信息，减小体积
-# -buildid=: 移除构建指纹
-# 所有构建信息统一注入到 buildinfo 包
-LDFLAGS = -s -w \
-	-X '$(PKG_PATH).Version=$(VERSION)' \
-	-X '$(PKG_PATH).GitCommit=$(COMMIT)' \
-	-X '$(PKG_PATH).BuildTime=$(BUILDTIME)' \
-	-X '$(PKG_PATH).BinaryName=$(BINARY_NAME)' \
-	-X '$(PKG_PATH).RepoSource=$(REPO_SOURCE)' \
-	-X '$(PKG_PATH).CnbToken=$(CNB_TOKEN)' \
-	-X '$(PKG_PATH).GithubToken=$(GITHUB_TOKEN)' \
-	-X '$(PKG_PATH).GitlabToken=$(GITLAB_TOKEN)'
-
-# 统一定义构建命令
-# CGO_ENABLED=0: 禁用 CGO，实现完全静态链接
-# CGO_ENABLED=1: 启用 CGO，实现动态链接
-# -trimpath: 移除本地路径，保护隐私
-# -buildvcs=false: 不向二进制 stamp git 版本信息——CI 容器内 workspace 属宿主 uid，
-#   git 报 dubious ownership（exit 128）导致构建失败；且版本信息已全部由
-#   -ldflags 注入 buildinfo 包，buildvcs 的 vcs.* 元数据无人读取，砍掉零损失。
-# -ldflags: 注入版本信息并移除符号表
-# 注意：-tags 由 build_binary 的 $(6) 参数动态拼接，此处不含
-BUILD_CMD = CGO_ENABLED=0 go build -trimpath -buildvcs=false -ldflags="$(LDFLAGS)"
-
-# 构建 tag 名
-BUILD_TAG = fpk
-
-# 功能开关（设置为 1 开启，0 关闭）
-ENABLE_UPX ?= 1
-ENABLE_ARCHIVE ?= 1
-
-# 检测是否存在 upx 压缩工具
-UPX = $(shell command -v upx 2> /dev/null)
-# 检测是否存在 tar 和 zip
-TAR = $(shell command -v tar 2> /dev/null)
-ZIP = $(shell command -v zip 2> /dev/null)
-
-# ==================== 开发 ====================
-
-tool-deps: ## 工具依赖
-	@echo "==> 安装必要的工具依赖..."
-
-	sqlc version || true
-	go install github.com/sqlc-dev/sqlc/cmd/sqlc@latest
-	-sqlc version
-	@echo "==> sqlc 工具安装或更新完成"
-
-	golangci-lint version || true
-	go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
-	-golangci-lint version
-	@echo "==> golangci-lint 工具安装或更新完成"
-
-	govulncheck version || true
-	go install golang.org/x/vuln/cmd/govulncheck@latest
-	-govulncheck version
-	@echo "==> govulncheck 工具安装或更新完成"
-
-	gojq --version || true
-	go install github.com/itchyny/gojq/cmd/gojq@latest
-	-gojq --version
-	@echo "==> gojq 工具安装或更新完成"
-
-	yamlfmt -version || true
-	go install github.com/google/yamlfmt/cmd/yamlfmt@latest
-	-yamlfmt -version
-	@echo "==> yamlfmt 工具安装或更新完成"
-
-	shfmt -version || true
-	go install mvdan.cc/sh/v3/cmd/shfmt@latest
-	-shfmt -version
-	@echo "==> shfmt 工具安装或更新完成"
-
-	sql-formatter -version || true
-	go install github.com/wasilibs/go-sql-formatter/v15/cmd/sql-formatter@latest
-	-sql-formatter -version
-	@echo "==> sql-formatter 工具安装或更新完成"
-
-	dockerfmt version || true
-	go install github.com/reteps/dockerfmt@latest
-	-dockerfmt version
-	@echo "==> dockerfmt 工具安装或更新完成"
+#####################
+## 开发 相关
+#####################
 
 # 一键设置项目（默认执行）
 setup: deps
@@ -268,23 +169,29 @@ dev:
 	@echo "╚══════════════════════════════════════════════════════════════"
 
 #####################
-## 构建 相关
+## 构建 / 打包 相关
 #####################
 
-# ==================== 版本备份 / 还原 ====================
+# goreleaser 版本（所有流水线与本地共用，升级时只改这里）
+GORELEASER_VERSION ?= v2.20.2
+# goreleaser 可执行文件（不在 PATH 时回退到 $HOME/go/bin）
+GORELEASER ?= $(shell command -v goreleaser 2>/dev/null || echo $(HOME)/go/bin/goreleaser)
+# goreleaser 构建时注入 buildinfo 的环境变量
+GORELEASER_ENV = PKG_VERSION='$(PKG_VERSION)' REPO_SOURCE='$(REPO_SOURCE)' \
+	CNB_TOKEN='$(CNB_TOKEN)' GITHUB_TOKEN='$(GITHUB_TOKEN)'
 
 # build-frontend 会用 sed 把 PKG_VERSION 写进 $(FRONTEND_PKG)（与 git tag 保持一致），
 # 而且 sed -i.bak 之后顺手把 .bak 删了，于是构建完工作区就残留 package.json 的版本改动。
-# 会在外围构建的目标（build-linux-all → package-linux-deb/fpk → package-linux → check）
-# 统一用这两个目标夹一下：进构建前备份，出构建后还原。也可单独手动调用。
+# goreleaser-prepare 用这两个目标夹住 build-frontend：进构建前备份，出构建后还原。
+# 也可单独手动调用。
 # 备份放 bin/（已 gitignore），不污染源码树；restore 成功后才删备份，中途失败可手动补还原。
 FRONTEND_PKG     = $(FRONTEND_DIR)/package.json
-FRONTEND_PKG_BAK = $(BUILD_DIR)/package.json.ver.bak
+FRONTEND_PKG_BAK = $(BACKUP_DIR)/package.json.ver.bak
 
 # 备份 package.json（已存在备份则沿用，不会用被改过的版本覆盖原始版本）
 .PHONY: backup-version
 backup-version:
-	@mkdir -p $(BUILD_DIR)
+	@mkdir -p $(BACKUP_DIR)
 	@if [ -f $(FRONTEND_PKG_BAK) ]; then \
 		echo "[版本] 备份已存在（上次未还原），沿用：$(FRONTEND_PKG_BAK)"; \
 	else \
@@ -307,207 +214,10 @@ restore-version:
 # 打包时同步 version 到 package.json，与 git tag 保持一致
 .PHONY: build-frontend
 build-frontend:
-	@echo ""
-	@echo "┌────────────────────────────────────────────────────────────"
-	@echo "│ [构建] Svelte 前端"
-	@echo "└────────────────────────────────────────────────────────────"
+	@echo "[构建] 打包 Svelte 前端"
 	@cd $(FRONTEND_DIR) && sed -i.bak -E 's#("version"[[:space:]]*:[[:space:]]*")[^"]*(")#\1$(PKG_VERSION)\2#' package.json && rm -f package.json.bak
 	pnpm --dir $(FRONTEND_DIR) build
-	@echo "✓ 构建完成。"
-
-# 定义压缩逻辑：参数 $(1) 为文件路径
-define compress_file
-	@if [ "$(ENABLE_UPX)" = "1" ] && [ "$(UPX)" ]; then \
-		FILE_SIZE=$$(stat -c%s "$(1)" 2>/dev/null || stat -f%z "$(1)"); \
-		ORIG_SIZE_H=$$(du -h "$(1)" | cut -f1); \
-		\
-		if [ $$FILE_SIZE -lt 10485760 ]; then \
-			LEVEL="--best"; \
-			DESC="小文件-极限压缩"; \
-		elif [ $$FILE_SIZE -lt 52428800 ]; then \
-			LEVEL="-6"; \
-			DESC="中等文件-平衡模式"; \
-		else \
-			LEVEL="-1"; \
-			DESC="大文件-极速模式"; \
-		fi; \
-		\
-		echo "  📦 正在以 [$$DESC ($$LEVEL)] 压缩..."; \
-		ERR_MSG=$$($(UPX) $$LEVEL "$(1)" 2>&1); \
-		\
-		if [ $$? -eq 0 ]; then \
-			NEW_SIZE_H=$$(du -h "$(1)" | cut -f1); \
-			echo "  ⚡ UPX 压缩完成: $(1) [ $${ORIG_SIZE_H} -> $${NEW_SIZE_H} ]"; \
-		else \
-			echo "  ⚠️  UPX 压缩跳过: $(1) ($$ERR_MSG)"; \
-		fi \
-	elif [ "$(ENABLE_UPX)" = "1" ] && [ ! "$(UPX)" ]; then \
-		echo "  ⏭️  UPX 未安装，跳过压缩"; \
-	elif [ "$(ENABLE_UPX)" = "0" ]; then \
-		echo "  ⏭️  UPX 已禁用"; \
-	fi
-endef
-
-# 定义打包压缩逻辑：参数 $(1) 为源文件路径
-# 源文件命名规范: {binary-name}-{os}-{arch}[.exe]，例如: backend-linux-amd64, reporter-windows-amd64.exe
-# Linux/macOS 使用 tar.gz, Windows 使用 zip
-define archive_binary
-	@if [ "$(ENABLE_ARCHIVE)" = "1" ]; then \
-		SOURCE_FILE=$(1); \
-		BIN_NAME=$$(basename "$${SOURCE_FILE}"); \
-		ARCHIVE_NAME="$(BUILD_DIR)/$${BIN_NAME}"; \
-		\
-		if echo "$${BIN_NAME}" | grep -q "\.exe$$"; then \
-			if [ "$(ZIP)" ]; then \
-				ARCHIVE_NAME="$${ARCHIVE_NAME}.zip"; \
-				echo "  📦 正在打包 Windows 压缩包: $${ARCHIVE_NAME}..."; \
-				cd $(BUILD_DIR) && zip -q "$$(basename $${ARCHIVE_NAME})" "$$(basename $${SOURCE_FILE})"; \
-				cd ..; \
-				ARCHIVE_SIZE=$$(du -h "$${ARCHIVE_NAME}" | cut -f1); \
-				BIN_SIZE=$$(du -h "$${SOURCE_FILE}" | cut -f1); \
-				echo "  ✓ 打包完成: $${ARCHIVE_NAME} [ 二进制: $${BIN_SIZE} -> 压缩包: $${ARCHIVE_SIZE} ]"; \
-			else \
-				echo "  ⚠️  zip 未安装，无法打包 Windows 压缩包"; \
-			fi \
-		else \
-			if [ "$(TAR)" ]; then \
-				ARCHIVE_NAME="$${ARCHIVE_NAME}.tar.gz"; \
-				echo "  📦 正在打包 Unix 压缩包: $${ARCHIVE_NAME}..."; \
-				tar -czf "$${ARCHIVE_NAME}" -C $(BUILD_DIR) "$$(basename $${SOURCE_FILE})"; \
-				ARCHIVE_SIZE=$$(du -h "$${ARCHIVE_NAME}" | cut -f1); \
-				BIN_SIZE=$$(du -h "$${SOURCE_FILE}" | cut -f1); \
-				echo "  ✓ 打包完成: $${ARCHIVE_NAME} [ 二进制: $${BIN_SIZE} -> 压缩包: $${ARCHIVE_SIZE} ]"; \
-			else \
-				echo "  ⚠️  tar 未安装，无法打包 Unix 压缩包"; \
-			fi \
-		fi; \
-	elif [ "$(ENABLE_ARCHIVE)" = "0" ]; then \
-		echo "  ⏭️  压缩包已禁用"; \
-	fi
-endef
-
-# 定义清理二进制文件逻辑：如果存在对应压缩包则删除二进制
-# 参数 $(1) 为二进制文件路径
-# 源文件命名规范: {binary-name}-{os}-{arch}[.exe]，例如: backend-linux-amd64, reporter-windows-amd64.exe
-define clean_binary
-	@SOURCE_FILE=$(1); \
-	BIN_NAME=$$(basename "$${SOURCE_FILE}"); \
-	if echo "$${BIN_NAME}" | grep -q "\.exe$$"; then \
-		ARCHIVE_NAME="$(BUILD_DIR)/$${BIN_NAME}.zip"; \
-	else \
-		ARCHIVE_NAME="$(BUILD_DIR)/$${BIN_NAME}.tar.gz"; \
-	fi; \
-	if [ -f "$${ARCHIVE_NAME}" ] && [ -f "$${SOURCE_FILE}" ]; then \
-		rm -f "$${SOURCE_FILE}"; \
-		echo "  🗑️  已清理二进制: $${SOURCE_FILE} (存在 $${ARCHIVE_NAME})"; \
-	else \
-		echo "  ⏭️  未找到压缩包或二进制，跳过: $${SOURCE_FILE}"; \
-	fi
-endef
-
-# 定义清理压缩包文件逻辑：删除 .tar.gz / .zip 压缩包
-# 参数 $(1) 为二进制文件路径（据此推导压缩包名）
-# 源文件命名规范: {binary-name}-{os}-{arch}[.exe]
-define clean_archive
-	@SOURCE_FILE=$(1); \
-	BIN_NAME=$$(basename "$${SOURCE_FILE}"); \
-	if echo "$${BIN_NAME}" | grep -q "\.exe$$"; then \
-		ARCHIVE_NAME="$(BUILD_DIR)/$${BIN_NAME}.zip"; \
-	else \
-		ARCHIVE_NAME="$(BUILD_DIR)/$${BIN_NAME}.tar.gz"; \
-	fi; \
-	if [ -f "$${ARCHIVE_NAME}" ]; then \
-		rm -f "$${ARCHIVE_NAME}"; \
-		echo "  🗑️  已清理压缩包: $${ARCHIVE_NAME}"; \
-	else \
-		echo "  ⏭️  未找到压缩包，跳过: $${ARCHIVE_NAME}"; \
-	fi
-endef
-
-# 清理构建目录
-.PHONY: clean
-clean:
-	@echo "[Clean] 清理构建目录..."
-	@rm -rf $(BUILD_DIR)
-	@mkdir -p $(BUILD_DIR)
-
-# 定义构建单个二进制文件的通用逻辑（编译 + UPX + .tar.gz）
-# 参数: $(1)=GOOS, $(2)=GOARCH, $(3)=描述信息, $(4)=扩展名(.exe 或空), $(5)=额外 env (如 GOARM=7 GOMIPS=softfloat), $(6)=build tags (为空则无)
-define build_binary
-	@echo ""
-	@echo "┌────────────────────────────────────────────────────────────"
-	@echo "│ [构建] $(3)"
-	@echo "└────────────────────────────────────────────────────────────"
-	@cd $(BACKEND_DIR) && $(5) GOOS=$(1) GOARCH=$(2) $(BUILD_CMD) -o $(CURDIR)/$(BUILD_DIR)/$(BINARY_NAME)-$(1)-$(2)$(4) .
-	$(call compress_file,./$(BUILD_DIR)/$(BINARY_NAME)-$(1)-$(2)$(4))
-	$(call archive_binary,./$(BUILD_DIR)/$(BINARY_NAME)-$(1)-$(2)$(4))
-endef
-
-# 定义构建带 tag 二进制文件的逻辑（编译 + UPX + .tar.gz，输出名带 tag 前缀）
-# 参数: $(1)=GOOS, $(2)=GOARCH, $(3)=描述信息, $(4)=tag 名
-# 输出名: $(BINARY_NAME)-$(4)-$(1)-$(2)
-define build_tag_binary
-	@echo ""
-	@echo "┌────────────────────────────────────────────────────────────"
-	@echo "│ [构建] $(3)"
-	@echo "└────────────────────────────────────────────────────────────"
-	@cd $(BACKEND_DIR) && GOOS=$(1) GOARCH=$(2) $(BUILD_CMD) -tags "$(4)" -o $(CURDIR)/$(BUILD_DIR)/$(BINARY_NAME)-$(4)-$(1)-$(2) .
-	$(call compress_file,./$(BUILD_DIR)/$(BINARY_NAME)-$(4)-$(1)-$(2))
-	$(call archive_binary,./$(BUILD_DIR)/$(BINARY_NAME)-$(4)-$(1)-$(2))
-endef
-
-# 构建 Linux Amd64 平台（不带标签 + 带标签）
-.PHONY: build-linux-amd64
-build-linux-amd64:
-	$(call build_binary,linux,amd64,Linux x86_64,,,)
-	$(call build_tag_binary,linux,amd64,Linux x86_64 带标签,$(BUILD_TAG))
-
-# 构建 Linux Arm64 平台（不带标签 + 带标签）
-.PHONY: build-linux-arm64
-build-linux-arm64:
-	$(call build_binary,linux,arm64,Linux ARM64,,,)
-	$(call build_tag_binary,linux,arm64,Linux ARM64 带标签,$(BUILD_TAG))
-
-# 构建 Linux 平台（不带标签 + 带标签）
-# 两端夹 backup-version / restore-version：build-frontend 会改 cmd/frontend/package.json，
-# 构建完直接还原，使 package-linux-deb/fpk、package-linux、check 之后工作区保持干净。
-.PHONY: build-linux-all
-build-linux-all: backup-version build-frontend build-linux-amd64 build-linux-arm64 restore-version
-
-# 清理裸二进制（保留 .tar.gz 压缩包供自升级下载，上传前执行）
-.PHONY: clean-binaries
-clean-binaries:
-	@echo "[清理] 删除裸二进制（保留 .tar.gz 与安装包）..."
-	$(call clean_binary,./$(BUILD_DIR)/$(BINARY_NAME)-linux-amd64)
-	$(call clean_binary,./$(BUILD_DIR)/$(BINARY_NAME)-linux-arm64)
-	$(call clean_binary,./$(BUILD_DIR)/$(BINARY_NAME)-$(BUILD_TAG)-linux-amd64)
-	$(call clean_binary,./$(BUILD_DIR)/$(BINARY_NAME)-$(BUILD_TAG)-linux-arm64)
-	@echo "✓ 清理完成（bin/ 保留 .tar.gz + 安装包）"
-
-# 清理裸二进制 + .tar.gz 压缩包（保留安装包，上传前执行）
-.PHONY: clean-archives
-clean-archives:
-	@echo "[清理] 删除裸二进制 + .tar.gz 压缩包（保留安装包）..."
-	$(call clean_binary,./$(BUILD_DIR)/$(BINARY_NAME)-linux-amd64)
-	$(call clean_binary,./$(BUILD_DIR)/$(BINARY_NAME)-linux-arm64)
-	$(call clean_binary,./$(BUILD_DIR)/$(BINARY_NAME)-$(BUILD_TAG)-linux-amd64)
-	$(call clean_binary,./$(BUILD_DIR)/$(BINARY_NAME)-$(BUILD_TAG)-linux-arm64)
-	$(call clean_archive,./$(BUILD_DIR)/$(BINARY_NAME)-linux-amd64)
-	$(call clean_archive,./$(BUILD_DIR)/$(BINARY_NAME)-linux-arm64)
-	$(call clean_archive,./$(BUILD_DIR)/$(BINARY_NAME)-$(BUILD_TAG)-linux-amd64)
-	$(call clean_archive,./$(BUILD_DIR)/$(BINARY_NAME)-$(BUILD_TAG)-linux-arm64)
-	@echo "✓ 清理完成（bin/ 保留安装包）"
-
-# ==================== 打包 ====================
-
-# 生成 nfpm 临时配置文件（替换变量）
-# 参数: $(1)=架构名 (amd64)
-define generate_nfpm_config
-	@sed -e 's|$${ARCH}|$(1)|g' -e 's|$${VERSION}|$(DEB_VERSION)|g' \
-	     -e 's|$${POSTINSTALL}|.nfpm-scripts/postinstall.sh|g' \
-	     -e 's|$${PREREMOVE}|.nfpm-scripts/preremove.sh|g' \
-	     .nfpm.yaml > .nfpm-$(1).yaml
-endef
+	@echo "[构建] ✓ 打包完成。"
 
 # 生成注入了 BINARY_NAME 的安装/卸载脚本（替换 __BINARY_NAME__ 占位符）
 # 输出到 .nfpm-scripts/，由 nfpm 引用，打包结束后清理
@@ -518,90 +228,48 @@ define prepare_scripts
 	@chmod +x .nfpm-scripts/postinstall.sh .nfpm-scripts/preremove.sh
 endef
 
-# 清理生成的临时脚本
-define cleanup_scripts
-	@rm -rf .nfpm-scripts
-endef
-
-# 打包单个架构的 deb 包
-# 参数: $(1)=GOARCH, $(2)=deb 架构名 (amd64/arm64), $(3)=deb 文件名后缀
-define package_nfpm_formats
+# 生成 deb 安装 / 卸载脚本（替换 __BINARY_NAME__ 占位符）
+.PHONY: prepare-nfpm-scripts
+prepare-nfpm-scripts:
 	$(call prepare_scripts)
-	$(call generate_nfpm_config,$(2))
-	nfpm package -p deb -f .nfpm-$(2).yaml -t $(BUILD_DIR)/$(BINARY_NAME)_$(3).deb
-	@rm -f .nfpm-$(2).yaml
-	$(call cleanup_scripts)
-	@echo "✓ deb 包已创建: $(BUILD_DIR)/$(BINARY_NAME)_$(3).deb"
-endef
 
-# 从 git log 自动生成 changelog 文本（取上一个 tag 到 HEAD 的提交摘要）
-# 如果没有上一个 tag，则取最近 20 条提交
-# 可通过环境变量 CHANGELOG 覆盖（CI 可注入 git log 或自定义文本）
-CHANGELOG ?= $(shell \
-	prev_tag=$$(git describe --tags --abbrev=0 2>/dev/null); \
-	if [ -n "$$prev_tag" ]; then \
-		git log --oneline --no-decorate "$$prev_tag"..HEAD 2>/dev/null; \
-	else \
-		git log --oneline --no-decorate -20 2>/dev/null; \
-	fi | head -20 | sed 's/^[a-f0-9]* //' | tr '\n' ';' | sed 's/;$$/./' \
-)
+# 安装固定版本的 goreleaser（已存在则跳过）
+.PHONY: goreleaser-install
+goreleaser-install:
+	@if ! $(GORELEASER) --version >/dev/null 2>&1; then \
+		echo "安装 goreleaser $(GORELEASER_VERSION) → $(dir $(GORELEASER))"; \
+		GOBIN=$(dir $(GORELEASER)) go install github.com/goreleaser/goreleaser/v2@$(GORELEASER_VERSION); \
+	fi
 
-# 打包（单架构）：复制已构建好的带 tag 二进制到 fpkg/app/，再 fnpack build
-# 带 tag 二进制由 build-linux-amd64/arm64 构建，此处只打包
-# manifest 中的 __VERSION__ 和 __CHANGELOG__ 占位符在打包时替换为实际值
-# 参数: $(1)=GOARCH
-define build_fpk
-	@echo ""
-	@echo "┌────────────────────────────────────────────────────────────"
-	@echo "│ [打包] 创建 fpk 包 ($(1))"
-	@echo "└────────────────────────────────────────────────────────────"
-	@mkdir -p $(FPKG_DIR)/app
-	@cp $(BUILD_DIR)/$(BINARY_NAME)-$(BUILD_TAG)-linux-$(1) $(FPKG_DIR)/app/$(BINARY_NAME)
-	@cp $(FPKG_DIR)/manifest $(FPKG_DIR)/manifest.bak
-	@sed 's|__VERSION__|$(PKG_VERSION)|g' $(FPKG_DIR)/manifest.bak > $(FPKG_DIR)/manifest.tmp
-	@sed "s|__CHANGELOG__|$(CHANGELOG)|g" $(FPKG_DIR)/manifest.tmp > $(FPKG_DIR)/manifest
-	@rm -f $(FPKG_DIR)/manifest.tmp
-	@cd $(FPKG_DIR) && fnpack build
-	@mv $(FPKG_DIR)/$(BINARY_NAME).fpk $(BUILD_DIR)/$(BINARY_NAME)-$(1).fpk
-	@rm -f $(FPKG_DIR)/app/$(BINARY_NAME)
-	@mv $(FPKG_DIR)/manifest.bak $(FPKG_DIR)/manifest
-	@echo "✓ fpk 包已创建: $(BUILD_DIR)/$(BINARY_NAME)-$(1).fpk"
-endef
+# goreleaser 的前置步骤：前端产物 + deb 脚本。
+# 由 .goreleaser.yaml 的 before hook 调用；也可单独执行。
+# 用 backup-version / restore-version 夹住 build-frontend，避免 package.json 残留版本改动。
+.PHONY: goreleaser-prepare
+goreleaser-prepare:
+	@$(MAKE) --no-print-directory backup-version
+	@$(MAKE) --no-print-directory build-frontend
+	@$(MAKE) --no-print-directory restore-version
+	@$(MAKE) --no-print-directory prepare-nfpm-scripts
 
-# deb/fpk 都复用 build-linux-all 的二进制（不带标签 + 带标签）
-package-linux-deb package-linux-fpk: build-linux-all
+# 校验 .goreleaser.yaml
+.PHONY: goreleaser-check
+goreleaser-check: goreleaser-install
+	$(GORELEASER) check
 
-# 打包 Linux deb（全部 2 架构）
-.PHONY: package-linux-deb
-package-linux-deb:
-	@echo ""
-	@echo "┌────────────────────────────────────────────────────────────"
-	@echo "│ [打包] 创建 Linux deb 包 (amd64/arm64)..."
-	@echo "└────────────────────────────────────────────────────────────"
-	$(call package_nfpm_formats,amd64,amd64,amd64)
-	$(call package_nfpm_formats,arm64,arm64,arm64)
+# 快照构建（无需 tag）：产物在 dist/，包含 tar.gz / deb / fpk
+.PHONY: goreleaser-snapshot
+goreleaser-snapshot: goreleaser-install
+	$(GORELEASER_ENV) $(GORELEASER) release --snapshot --clean
+	@PKG_VERSION='$(PKG_VERSION)' sh scripts/goreleaser/package-fpk.sh
 
-# 打包 Linux fpk（FnOS，全部 2 架构）
-.PHONY: package-linux-fpk
-package-linux-fpk:
-	@echo ""
-	@echo "┌────────────────────────────────────────────────────────────"
-	@echo "│ [打包] 创建 Linux fpk 包 (amd64/arm64)..."
-	@echo "└────────────────────────────────────────────────────────────"
-	$(call build_fpk,amd64)
-	$(call build_fpk,arm64)
-
-# 打包所有 Linux deb/fpk 包（构建一次，各格式复用）
-.PHONY: package-linux-all
-package-linux-all: package-linux-deb package-linux-fpk
-	@echo ""
-	@echo "╔════════════════════════════════════════════════════════════"
-	@echo "║ ✓ 所有包已创建 (deb/fpk, 多架构)"
-	@echo "╚════════════════════════════════════════════════════════════"
-
-# 打包所有 Linux 包（deb/fpk）
-.PHONY: package-linux
-package-linux: package-linux-all
+# 发布构建：产物在 dist/。.goreleaser.yaml 设置了 release.disable，不会创建 Release。
+# CI 里 tag 要等发布阶段才创建，构建时本地还不存在这个 tag；
+# GORELEASER_CURRENT_TAG 只提供版本名，validate 仍要求 tag 指向当前提交，
+# 因此必须跳过 validate，否则会报 "git tag ... was not made against commit"。
+.PHONY: goreleaser-release
+goreleaser-release: goreleaser-install
+	$(GORELEASER_ENV) $(GORELEASER) release --clean --skip=validate
+	@PKG_VERSION='$(PKG_VERSION)' sh scripts/goreleaser/package-fpk.sh
 
 #####################
 ## 格式化 相关

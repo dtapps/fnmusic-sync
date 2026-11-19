@@ -1138,7 +1138,7 @@ Upstream OK
 1. scripts/install.sh
 2. Release 附件手动安装
 3. deb / rpm / apk
-4. 源码 make build-linux-*
+4. 源码 make goreleaser-snapshot（产物在 dist/）
 ```
 
 脚本：
@@ -1187,7 +1187,7 @@ curl -fsSL <仓库>/-/git/raw/main/scripts/install.sh | sudo sh
 amd64 / arm64 / mips / mipsle / arm / 386
 ```
 
-打包：`make package-linux-all` 产出 deb / rpm / apk（不含 OpenWrt ipk，已移除）。
+打包：`make goreleaser-snapshot` 产出 deb / fpk（tar.gz 也在 `dist/`）。
 
 然后才打开 fnOS Music。
 

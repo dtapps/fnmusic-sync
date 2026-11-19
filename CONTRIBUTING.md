@@ -71,17 +71,16 @@ git switch -c feat/lb-playlist-range
 [ ] 真机验证过受影响链路（socket 接管 / scrobble / 歌单 / 升级）
 ```
 
-`make check` 依赖 `nfpm` 与 `fnpack`（`make tool-deps` 不装这两个），装不上时至少跑 `go test ./...`、`pnpm --dir cmd/frontend test` 与 `golangci-lint run`。
+`make check` 不包含打包；打包（`make goreleaser-snapshot` / `goreleaser-release`）需要 `goreleaser` 与 `fnpack`——前者缺失时 `make goreleaser-install` 会按固定版本安装，`fnpack` 需自行准备。装不上时至少跑 `go test ./...`、`pnpm --dir cmd/frontend test` 与 `golangci-lint run`。
 
 ## CI 门禁
 
-仓库同时挂 CNB、GitHub Actions、GitLab CI 三套 CI 流水线，负责构建与门禁；发布另有 GitCode（自己构建）与 Gitee（只转发）两条，见 [docs/contributing.md](docs/contributing.md)：
+仓库同时挂 CNB、GitHub Actions 两套 CI 流水线，负责构建与门禁；发布另有 Gitee（只转发）一条，见 [docs/contributing.md](docs/contributing.md)：
 
 | 平台   | 跑什么                                                      |
 |--------|-------------------------------------------------------------|
 | CNB    | 构建、测试、代码评审、SCA / 许可证 / SBOM、CodeWiki、覆盖率 |
 | GitHub | 构建、Codecov、Coveralls                                    |
-| GitLab | 构建与打包发布（刻意不跑覆盖率）                            |
 
 分工、失败定位与覆盖率上报方式见 [docs/contributing.md](docs/contributing.md)；CI 镜像的工具版本对应关系见 [docs/ci-image.md](docs/ci-image.md)。
 

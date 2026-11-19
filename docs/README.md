@@ -41,13 +41,12 @@
 | [开发指南](development.md)     | 工具链来源与版本策略、全量 Make 目标表、没有 fnOS 时能开发到什么程度、前端结构与内嵌流程、sqlc、测试与覆盖率口径、调试手段、golangci 启用的 linter |
 | [部署与运维](deployment.md)    | deb 与 fpk 两种形态对比、`install.sh` 逐步拆解、真实渲染出的 systemd unit、权限推导、升级与回滚、卸载残留边界、日志估算与监控点、fnOS 专属注意事项 |
 | [故障排查](troubleshooting.md) | 症状速查表 + 10 类症状逐条展开（现象 → 命令 → 真实日志文案 → 根因 → 处理），含脱敏的一键诊断脚本                                                   |
-| [贡献指南](contributing.md)    | 从提交历史归纳出的提交规范、分支与 PR 流程、三套 CI 的分工与失败定位、加配置键/API/provider/schema 的落点清单、发布流程、行为准则与安全披露        |
+| [贡献指南](contributing.md)    | 从提交历史归纳出的提交规范、分支与 PR 流程、两套 CI 的分工与失败定位、加配置键/API/provider/schema 的落点清单、发布流程、行为准则与安全披露        |
 
 ## 历史与专题文档
 
 - [ai.md](ai.md)：最早的需求与设计文档，保留作为设计溯源。其中一部分是**未落地的早期方案**（`--config` / `--state` / `--log-dir` 参数、`state.yaml`、`server.listen_socket` 可配置、顶层 `providers` 等），实际行为以本目录其余文档与源码为准。
-- [ci-image.md](ci-image.md)：统一 CI 镜像 `dtapps/golang/fnpack` 的三处 registry 地址、工具清单与升级流程。
-- [gitlab-ci.md](gitlab-ci.md)：GitLab 流水线结构、统一的 CI 镜像、发布与排障。
+- [ci-image.md](ci-image.md)：统一 CI 镜像 `dtapps/golang/fnpack` 的两处 registry 地址、工具清单与升级流程。
 - [coverage-go.md](coverage-go.md)、[coverage-node.md](coverage-node.md)、[codecov.md](codecov.md)、[coveralls.md](coveralls.md)：覆盖率采集与上报。
 
 ## 文档约定

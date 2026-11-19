@@ -2,11 +2,10 @@
 #
 # 生成 Release 正文（Markdown）。
 #
-# 事实来源：五个平台的发布流水线（CNB / GitHub / GitLab / GitCode / Gitee）都调用这一份，
+# 事实来源：三个平台的发布流水线（CNB / GitHub / Gitee）都调用这一份，
 # 避免各写一遍表格/标题/下载链接，改一处忘一处：
 #   .cnb/workflows/release.yml        .github/workflows/release.yml
-#   .gitlab/workflows/release.yml     .gitcode/workflows/release.yml
-#   .workflow/release.yml（Gitee）    scripts/ci/build-linux-packages.sh（GitCode 打包时）
+#   .workflow/release.yml（Gitee）
 #
 # 只用环境变量传参（不解析位置参数）：
 #
@@ -35,8 +34,8 @@ set -eu
 #   parse_artifact_name <文件名>   解析出 PLAT / ARCH / EXT / KIND / APP
 #   describe_artifact [文件名]     输出说明文案
 # 本文件原先另存了一份同名同接口的本地实现，文案各写一套，改一处忘一处。
-# 现在只保留这一份事实来源：文案集中在那份脚本的 DESC_* 表，五个平台同步生效。
-# 注意：调用方（各平台 workflow 与 build-linux-packages.sh）的工作目录都是仓库根，
+# 现在只保留这一份事实来源：文案集中在那份脚本的 DESC_* 表，三个平台同步生效。
+# 注意：调用方（各平台 workflow）的工作目录都是仓库根，
 # 故这里用相对路径 source；与 scripts/ci/resolve-prerelease.sh 的用法一致。
 # shellcheck disable=SC1091
 . scripts/ci/describe-artifact.sh

@@ -355,7 +355,7 @@ const CNB_FILES = [
 ];
 
 // ⚠ 这份正文只是兜底：.workflow/release.yml 在下载之后会调用
-// scripts/ci/render-release-body.sh 覆盖它（那是五个平台共用的唯一实现，
+// scripts/ci/render-release-body.sh 覆盖它（那是三个平台共用的唯一实现，
 // 含校验节与提交行）。只有那个脚本在 Gitee 环境里跑不起来时，才会用到这份。
 function localBody(sizes) {
   const pre = (process.env.PRERELEASE || 'false').trim() === 'true';

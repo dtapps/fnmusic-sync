@@ -17,7 +17,7 @@ fnmusic-sync 接管飞牛音乐的 unix socket，持有 Last.fm / ListenBrainz �
 **不要开公开 Issue，也不要在 PR 里贴 PoC。**
 
 - 首选 GitHub 私密通道：[Security Advisories](https://github.com/dtapps/fnmusic-sync/security/advisories/new)
-- 或邮件：dtapp 13553695467@139.com（与包元数据 `.nfpm.yaml` 中的维护者地址一致）
+- 或邮件：dtapp 13553695467@139.com（与包元数据 `.goreleaser.yaml` 的 `nfpms.maintainer` 一致）
 
 报告里请带上：
 

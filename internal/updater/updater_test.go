@@ -71,7 +71,6 @@ func TestRepoBase(t *testing.T) {
 		want   string
 	}{
 		{source: "github", want: RepoBaseGitHub},
-		{source: "gitlab", want: RepoBaseGitLab},
 		{source: "cnb", want: RepoBaseCNB},
 		{source: "", want: RepoBaseCNB}, // 未知来源默认 CNB
 	}
@@ -103,21 +102,13 @@ func TestBuildDownloadURL(t *testing.T) {
 		RepoBaseCNB+"/-/releases/download/"+tag+"/"+file; got != want {
 		t.Errorf("CNB 下载地址 = %q, want %q", got, want)
 	}
-
-	// GitLab 走 Release 的 direct asset 链接（Web 的 /-/packages/generic/... 对匿名用户是登录页）
-	withRepoSource(t, "gitlab")
-
-	if got, want := BuildDownloadURL(tag, file),
-		RepoBaseGitLab+"/-/releases/"+tag+"/downloads/"+file; got != want {
-		t.Errorf("GitLab 下载地址 = %q, want %q", got, want)
-	}
 }
 
 func TestRelayDownloadURL(t *testing.T) {
 	const original = "https://example.com/a/b.zip"
 
-	// 不分来源：github / cnb / gitlab 一律 dl-stats.dtapp.net
-	for _, source := range []string{"github", "cnb", "gitlab", ""} {
+	// 不分来源：github / cnb 一律 dl-stats.dtapp.net
+	for _, source := range []string{"github", "cnb", ""} {
 		withRepoSource(t, source)
 
 		if got, want := relayDownloadURL(original), relayBase+"/"+original; got != want {
@@ -480,233 +471,6 @@ func TestIsPrereleaseTag(t *testing.T) {
 		if got := isPrereleaseTag(tt.tag); got != tt.want {
 			t.Errorf("isPrereleaseTag(%q) = %v, want %v", tt.tag, got, tt.want)
 		}
-	}
-}
-
-// 稳定版用户：列表里同时有 rc 和正式版时，必须拿正式版。
-func TestFetchLatestTagGitLab_PrefersStable(t *testing.T) {
-	withRepoSource(t, "gitlab")
-	withVersion(t, "v0.1.30")
-
-	const body = `[
-		{"tag_name":"v0.1.32-rc.1","upcoming_release":false},
-		{"tag_name":"v0.1.31","upcoming_release":false}
-	]`
-
-	tag, err := FetchLatestTag(jsonClient(t, http.StatusOK, body, nil))
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if tag != "v0.1.31" {
-		t.Errorf("tag = %q, want v0.1.31（稳定版用户不该被推到 rc）", tag)
-	}
-}
-
-// 当前自己就是预发布：允许继续拿到预发布。
-func TestFetchLatestTagGitLab_PrereleaseClientGetsPrerelease(t *testing.T) {
-	withRepoSource(t, "gitlab")
-	withVersion(t, "v0.1.32-rc.1")
-
-	const body = `[
-		{"tag_name":"v0.1.32-rc.2","upcoming_release":false},
-		{"tag_name":"v0.1.31","upcoming_release":false}
-	]`
-
-	tag, err := FetchLatestTag(jsonClient(t, http.StatusOK, body, nil))
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if tag != "v0.1.32-rc.2" {
-		t.Errorf("tag = %q, want v0.1.32-rc.2（预发布客户端应能继续升级）", tag)
-	}
-}
-
-// 只有预发布时，稳定版用户退回最新一条，而不是卡死。
-func TestFetchLatestTagGitLab_OnlyPrereleaseFallsBack(t *testing.T) {
-	withRepoSource(t, "gitlab")
-	withVersion(t, "v0.1.30")
-
-	const body = `[
-		{"tag_name":"v0.1.32-rc.1","upcoming_release":false},
-		{"tag_name":"v0.1.31-beta","upcoming_release":false}
-	]`
-
-	tag, err := FetchLatestTag(jsonClient(t, http.StatusOK, body, nil))
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if tag != "v0.1.32-rc.1" {
-		t.Errorf("tag = %q, want v0.1.32-rc.1（仅有预发布时退回最新一条）", tag)
-	}
-}
-
-func TestFetchLatestTagGitLab_OK(t *testing.T) {
-	withRepoSource(t, "gitlab")
-
-	const body = `[
-		{"tag_name":"v0.1.31","name":"v0.1.31","released_at":"2026-10-28T05:18:56.486Z","upcoming_release":false},
-		{"tag_name":"v0.1.30","name":"v0.1.30","released_at":"2026-10-20T01:00:00.000Z","upcoming_release":false}
-	]`
-
-	var gotReq http.Request
-	tag, err := FetchLatestTag(jsonClient(t, http.StatusOK, body, &gotReq))
-	if err != nil {
-		t.Fatalf("FetchLatestTag 返回错误: %v", err)
-	}
-
-	if tag != "v0.1.31" {
-		t.Errorf("tag = %q, want v0.1.31", tag)
-	}
-
-	// 项目标识必须 URL 编码，否则嵌套命名空间会被解析错
-	if uri := gotReq.URL.RequestURI(); !strings.Contains(uri, "projects/dtapps%2Ffnmusic-sync/releases") {
-		t.Errorf("请求地址异常: %s", uri)
-	}
-
-	if got := gotReq.Header.Get("Accept"); got != "application/json" {
-		t.Errorf("Accept 头 = %q", got)
-	}
-
-	// 未配置 token 时不应带鉴权头（公开项目匿名可读）
-	if got := gotReq.Header.Get("PRIVATE-TOKEN"); got != "" {
-		t.Errorf("PRIVATE-TOKEN = %q, want 空", got)
-	}
-}
-
-func TestFetchLatestTagGitLab_SendsToken(t *testing.T) {
-	withRepoSource(t, "gitlab")
-
-	old := buildinfo.GitlabToken
-	t.Cleanup(func() { buildinfo.GitlabToken = old })
-	buildinfo.GitlabToken = "glpat-xxx"
-
-	var gotReq http.Request
-	if _, err := FetchLatestTag(jsonClient(t, http.StatusOK,
-		`[{"tag_name":"v1.0.0","upcoming_release":false}]`, &gotReq)); err != nil {
-		t.Fatal(err)
-	}
-
-	if got := gotReq.Header.Get("PRIVATE-TOKEN"); got != "glpat-xxx" {
-		t.Errorf("PRIVATE-TOKEN = %q, want glpat-xxx", got)
-	}
-}
-
-func TestFetchLatestTagGitLab_SkipsUpcoming(t *testing.T) {
-	withRepoSource(t, "gitlab")
-
-	// 首项是「计划发布」的占位，必须跳过
-	const body = `[
-		{"tag_name":"v2.0.0","upcoming_release":true},
-		{"tag_name":"v1.9.0","upcoming_release":false}
-	]`
-
-	tag, err := FetchLatestTag(jsonClient(t, http.StatusOK, body, nil))
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if tag != "v1.9.0" {
-		t.Errorf("tag = %q, want v1.9.0（应跳过 upcoming_release）", tag)
-	}
-}
-
-func TestFetchLatestTagGitLab_Errors(t *testing.T) {
-	withRepoSource(t, "gitlab")
-
-	old := buildinfo.GitlabToken
-	t.Cleanup(func() { buildinfo.GitlabToken = old })
-	buildinfo.GitlabToken = ""
-
-	t.Run("404 私有项目", func(t *testing.T) {
-		// 未认证访问私有项目时 GitLab 返回 404 而不是 401
-		_, err := FetchLatestTag(jsonClient(t, http.StatusNotFound, `{"message":"404 Project Not Found"}`, nil))
-		if err == nil || !strings.Contains(err.Error(), "GitlabToken") {
-			t.Errorf("err = %v, want 提示需要 Token", err)
-		}
-	})
-
-	t.Run("401", func(t *testing.T) {
-		_, err := FetchLatestTag(jsonClient(t, http.StatusUnauthorized, `{}`, nil))
-		if err == nil || !strings.Contains(err.Error(), "不可读") {
-			t.Errorf("err = %v", err)
-		}
-	})
-
-	t.Run("空发布列表", func(t *testing.T) {
-		_, err := FetchLatestTag(jsonClient(t, http.StatusOK, `[]`, nil))
-		if err == nil || !strings.Contains(err.Error(), "暂无任何发布版本") {
-			t.Errorf("err = %v", err)
-		}
-	})
-
-	t.Run("只有 upcoming", func(t *testing.T) {
-		_, err := FetchLatestTag(jsonClient(t, http.StatusOK, `[{"tag_name":"v1.0.0","upcoming_release":true}]`, nil))
-		if err == nil || !strings.Contains(err.Error(), "暂无任何发布版本") {
-			t.Errorf("err = %v", err)
-		}
-	})
-
-	t.Run("响应体非法", func(t *testing.T) {
-		_, err := FetchLatestTag(jsonClient(t, http.StatusOK, `not json`, nil))
-		if err == nil || !strings.Contains(err.Error(), "解析 GitLab API 响应失败") {
-			t.Errorf("err = %v", err)
-		}
-	})
-
-	t.Run("非 200", func(t *testing.T) {
-		_, err := FetchLatestTag(jsonClient(t, http.StatusInternalServerError, `boom`, nil))
-		if err == nil || !strings.Contains(err.Error(), "500") {
-			t.Errorf("err = %v", err)
-		}
-	})
-
-	t.Run("网络错误", func(t *testing.T) {
-		_, err := FetchLatestTag(errClient(t))
-		if err == nil || !strings.Contains(err.Error(), "无法连接到 GitLab") {
-			t.Errorf("err = %v, want 网络错误提示", err)
-		}
-	})
-}
-
-// GitLab 源与 CNB 共用 dl-stats.dtapp.net，下载要先走中转。
-func TestDownloadFile_GitLabUsesRelay(t *testing.T) {
-	withRepoSource(t, "gitlab")
-
-	const payload = "gitlab-direct-ok"
-
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte(payload))
-	}))
-	defer srv.Close()
-
-	var attempts []string
-
-	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
-		attempts = append(attempts, r.URL.String())
-		return srv.Client().Get(srv.URL)
-	})}
-
-	const name = "fnmusic-sync_test_gitlab_pkg"
-	path, err := DownloadFile(client, "https://gitlab.com/o/r/-/releases/v1/downloads/x.deb", name)
-	if err != nil {
-		t.Fatalf("DownloadFile: %v", err)
-	}
-
-	t.Cleanup(func() { _ = os.Remove(path) })
-
-	if len(attempts) != 1 {
-		t.Errorf("请求次数 = %d, want 1: %v", len(attempts), attempts)
-	}
-
-	if !strings.HasPrefix(attempts[0], relayBase) {
-		t.Errorf("GitLab 源应走 %s 中转，实际: %s", relayBase, attempts[0])
-	}
-
-	if data, _ := os.ReadFile(path); string(data) != payload {
-		t.Errorf("内容 = %q, want %q", data, payload)
 	}
 }
 

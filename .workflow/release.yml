@@ -56,7 +56,7 @@
 # 附件必须逐个列名：插件不支持目录，assertFiles 填 bin 会把整个目录压成
 # bin.tar.gz 去上传，然后 400 失败。CNB / GitHub 那边增减产物时要同步改那份清单。
 #
-# nightly 保留策略（与 GitHub / CNB / GitLab / GitCode 的「只保留最近 3 个」同口径）：
+# nightly 保留策略（与 GitHub / CNB 的「只保留最近 3 个」同口径）：
 # 本条流水线的 release@gitee 插件只能**覆盖同名** Release（allowUpdate: true），
 # 没有删除历史 Release 的能力，所以 Gitee 侧的 nightly 会逐日堆积。
 # 要在这里也收敛到 3 个，得改成手写 Gitee v5 API（查列表 → 删旧的 → 建 Release → 传附件），
@@ -138,7 +138,7 @@ stages:
             fi
 
             # 预发布判定：只看版本号后缀。规则只有一份，在
-            # scripts/ci/resolve-prerelease.sh 里（五个平台与构建脚本 source 的也是它）。
+            # scripts/ci/resolve-prerelease.sh 里（三个平台 source 的也是它）。
             export VERSION="${RAW_VERSION}"
             # shellcheck disable=SC1091
             . scripts/ci/resolve-prerelease.sh

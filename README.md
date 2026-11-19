@@ -132,9 +132,8 @@ sudo dpkg -i fnmusic-sync_amd64.deb     # Debian / Ubuntu
 <summary>源码构建</summary>
 
 ```bash
-make build-linux-amd64      # 产物 bin/fnmusic-sync-linux-amd64
-make build-linux-all        # 2 个 Linux 架构（带标签 + 不带标签）
-make package-linux-all      # deb / fpk
+make goreleaser-snapshot    # 快照构建，产物在 dist/（无需 tag）
+make goreleaser-release     # 按当前 tag 构建到 dist/（CI 传 GORELEASER_CURRENT_TAG）
 ```
 
 构建/发布矩阵：**amd64 / arm64**（CI 打 Release 时交叉编译并上传附件）。
@@ -384,16 +383,14 @@ tail -f /var/log/fnmusic-sync/fnmusic-sync.log
 ## 构建与发布
 
 ```bash
-make build-linux-amd64     # 单架构
-make build-linux-all       # amd64/arm64（带标签 + 不带标签）
-make package-linux-all     # deb + fpk
-make clean-binaries        # 清理裸二进制，保留 tar.gz/安装包
-make clean-archives        # 清理裸二进制 + tar.gz，保留安装包
+make goreleaser-check      # 校验 .goreleaser.yaml
+make goreleaser-snapshot   # 快照构建到 dist/（无需 tag）
+make goreleaser-release    # 发布构建到 dist/（CI 传 GORELEASER_CURRENT_TAG=<tag>）
 ```
 
-版本号由 `git describe --tags` 决定，通过 `-ldflags -X` 注入到 `internal/buildinfo` 包，所以 `fnmusic-sync version` 能显示真实版本；本地 `go build` 不带 ldflags 时显示为 `dev`。
+构建与打包全部由 GoReleaser（`dist/`）完成：tar.gz、deb、fpk 各两架构。版本号由 tag 决定，通过 `-ldflags -X` 注入到 `internal/buildinfo` 包，所以 `fnmusic-sync version` 能显示真实版本；本地 `go build` 不带 ldflags 时显示为 `dev`。
 
-CI（五个平台的 release 流水线共用 `scripts/ci/render-release-body.sh`）在打 tag 时构建并发布 Release，正文含发布信息表、下载表、`SHA256SUMS` 校验说明与按渠道对比的更新内容。**预发布只由版本号后缀决定**（`v1.2.3-rc.1` / `-beta.1` / `-alpha.1` / `-nightly.20260101`），流水线只有一个版本号入参，没有预发布开关。
+CI（CNB / GitHub / Gitee 三个平台的 release 流水线共用 `scripts/ci/render-release-body.sh`）在打 tag 时构建并发布 Release，正文含发布信息表、下载表、`SHA256SUMS` 校验说明与按渠道对比的更新内容。**预发布只由版本号后缀决定**（`v1.2.3-rc.1` / `-beta.1` / `-alpha.1` / `-nightly.20260101`），流水线只有一个版本号入参，没有预发布开关。
 
 ## 目录结构
 

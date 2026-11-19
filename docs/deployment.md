@@ -8,22 +8,22 @@
 
 同一份 Go 代码，两种打包：deb 交给系统包管理器与 systemd，fpk 交给飞牛应用中心与它自己的进程管理脚本。**两者互斥**，`scripts/install.sh` 一旦检测到另一个形态存在就直接退出。
 
-| 维度       | deb（传统安装）                                           | fpk（飞牛应用包）                                                                    |
-|------------|-----------------------------------------------------------|--------------------------------------------------------------------------------------|
-| 安装入口   | `dpkg -i` / `apt` / `scripts/install.sh`                  | 飞牛应用中心上传 `.fpk`                                                              |
-| 二进制     | `/usr/bin/fnmusic-sync`（`.nfpm.yaml` 的 `contents.dst`） | `$TRIM_APPDEST/fnmusic-sync`，即 `/var/apps/fnmusic-sync/target/fnmusic-sync`        |
-| 配置       | `/etc/fnmusic-sync/config.yaml`                           | `$TRIM_PKGETC/config.yaml`，向导值另存 `$TRIM_PKGETC/config.env`                     |
-| 状态库     | `/var/lib/fnmusic-sync/state.db`                          | `$TRIM_PKGVAR/state.db`                                                              |
-| 数据库     | `/var/lib/fnmusic-sync/data.db`                           | `$TRIM_PKGVAR/data.db`                                                               |
-| 日志       | `/var/log/fnmusic-sync/`                                  | `$TRIM_PKGVAR/logs/`                                                                 |
-| 运行锁     | `/run/fnmusic-sync/run.lock`                              | `$TRIM_PKGVAR/run.lock`                                                              |
-| 进程管理   | systemd（unit 由二进制自己生成）                          | 飞牛调 `fpkg/cmd/main` 的 `start` / `stop` / `status`，PID 落 `$TRIM_PKGVAR/app.pid` |
-| 运行身份   | root（unit 无 `User=`）                                   | root（`fpkg/config/privilege` 的 `run-as: root`）                                    |
-| Web UI     | **没有**（`internal/webui` 带 `//go:build fpk`）          | `$TRIM_APPDEST/app.sock`，网关前缀 `/app/fnmusic-sync`                               |
-| 编译 tag   | 无 tag                                                    | `-tags fpk`（`BUILD_TAG=fpk`）                                                       |
-| 可用子命令 | `version` / `self-upgrade` / `service` / `sockets`        | `version` / `sockets`（`self-upgrade`、`service` 被 build tag 排除）                 |
-| 升级通道   | `self-upgrade`、`install.sh upgrade`、`apt`               | 应用中心，或 Web UI 的 `POST /api/upgrade`（内部调 `appcenter-cli install-local`）   |
-| 卸载       | `apt remove` / `purge`，前进 `scripts/preremove.sh`       | 应用中心，卸载向导 `wizard_keep_data` 决定是否删数据                                 |
+| 维度       | deb（传统安装）                                                 | fpk（飞牛应用包）                                                                    |
+|------------|-----------------------------------------------------------------|--------------------------------------------------------------------------------------|
+| 安装入口   | `dpkg -i` / `apt` / `scripts/install.sh`                        | 飞牛应用中心上传 `.fpk`                                                              |
+| 二进制     | `/usr/bin/fnmusic-sync`（`.goreleaser.yaml` 的 `nfpms.bindir`） | `$TRIM_APPDEST/fnmusic-sync`，即 `/var/apps/fnmusic-sync/target/fnmusic-sync`        |
+| 配置       | `/etc/fnmusic-sync/config.yaml`                                 | `$TRIM_PKGETC/config.yaml`，向导值另存 `$TRIM_PKGETC/config.env`                     |
+| 状态库     | `/var/lib/fnmusic-sync/state.db`                                | `$TRIM_PKGVAR/state.db`                                                              |
+| 数据库     | `/var/lib/fnmusic-sync/data.db`                                 | `$TRIM_PKGVAR/data.db`                                                               |
+| 日志       | `/var/log/fnmusic-sync/`                                        | `$TRIM_PKGVAR/logs/`                                                                 |
+| 运行锁     | `/run/fnmusic-sync/run.lock`                                    | `$TRIM_PKGVAR/run.lock`                                                              |
+| 进程管理   | systemd（unit 由二进制自己生成）                                | 飞牛调 `fpkg/cmd/main` 的 `start` / `stop` / `status`，PID 落 `$TRIM_PKGVAR/app.pid` |
+| 运行身份   | root（unit 无 `User=`）                                         | root（`fpkg/config/privilege` 的 `run-as: root`）                                    |
+| Web UI     | **没有**（`internal/webui` 带 `//go:build fpk`）                | `$TRIM_APPDEST/app.sock`，网关前缀 `/app/fnmusic-sync`                               |
+| 编译 tag   | 无 tag                                                          | `-tags fpk`（`BUILD_TAG=fpk`）                                                       |
+| 可用子命令 | `version` / `self-upgrade` / `service` / `sockets`              | `version` / `sockets`（`self-upgrade`、`service` 被 build tag 排除）                 |
+| 升级通道   | `self-upgrade`、`install.sh upgrade`、`apt`                     | 应用中心，或 Web UI 的 `POST /api/upgrade`（内部调 `appcenter-cli install-local`）   |
+| 卸载       | `apt remove` / `purge`，前进 `scripts/preremove.sh`             | 应用中心，卸载向导 `wizard_keep_data` 决定是否删数据                                 |
 
 fpk 形态下路径全部由三个环境变量推导（`cmd/fnmusic-sync/runtime.go`）：`TRIM_APPDEST` 非空即判定为 fpk，`TRIM_PKGETC`/`TRIM_PKGVAR` 缺失时分别回退到 `<APPDEST>/../etc` 与 `<APPDEST>/../var`。
 
@@ -161,17 +161,16 @@ sudo sh /tmp/install.sh upgrade --version v0.0.32
 
 `self-upgrade` 的版本来源由编译期注入的 `REPO_SOURCE` 决定（`internal/updater`）：
 
-| `REPO_SOURCE`      | 取 tag 的接口                                                                                              | 下载地址                                                       | 令牌                                           |
-|--------------------|------------------------------------------------------------------------------------------------------------|----------------------------------------------------------------|------------------------------------------------|
-| `github`           | `api.github.com/repos/dtapps/fnmusic-sync/releases?per_page=20`（列表，为了读到 `prerelease` / `draft`）   | `<repo>/releases/download/<tag>/<file>`                        | `GithubToken` 可选                             |
-| `gitlab`           | `gitlab.com/api/v4/projects/dtapps%2Ffnmusic-sync/releases`（`released_at` 倒序，跳过 `upcoming_release`） | `<repo>/-/releases/<tag>/downloads/<file>`（302 到通用包仓库） | `GitlabToken` 可选（私有项目必需，`read_api`） |
-| 其它（默认 `cnb`） | `api.cnb.cool/dtapp/fnmusic-sync/-/releases`                                                               | `<repo>/-/releases/download/<tag>/<file>`                      | `CnbToken` **必需**                            |
+| `REPO_SOURCE`      | 取 tag 的接口                                                                                            | 下载地址                                  | 令牌                |
+|--------------------|----------------------------------------------------------------------------------------------------------|-------------------------------------------|---------------------|
+| `github`           | `api.github.com/repos/dtapps/fnmusic-sync/releases?per_page=20`（列表，为了读到 `prerelease` / `draft`） | `<repo>/releases/download/<tag>/<file>`   | `GithubToken` 可选  |
+| 其它（默认 `cnb`） | `api.cnb.cool/dtapp/fnmusic-sync/-/releases`                                                             | `<repo>/-/releases/download/<tag>/<file>` | `CnbToken` **必需** |
 
-**CNB 路径要求二进制里带 `CnbToken`**，否则直接返回 `CNB 访问令牌未配置，暂时无法自动升级，请前往 … 手动下载`——自建或改源构建时这是第一个会撞的墙。GitLab 公开项目可匿名读 releases API；私有项目不带 `GitlabToken` 会拿到 404（GitLab 对未认证请求不说 401），提示语会让你去配 token。
+**CNB 路径要求二进制里带 `CnbToken`**，否则直接返回 `CNB 访问令牌未配置，暂时无法自动升级，请前往 … 手动下载`——自建或改源构建时这是第一个会撞的墙。
 
-下载会先走统计中转 `dl-stats.dtapp.net`（三个来源统一，中转不挑源站：GitHub 的 release asset 与 GitLab 的 Release 直链都实测能转发），失败自动回退源站。`SHA256SUMS`、`GIT_COMMIT`、`BUILD_TIME` 三个元数据文件在任何来源下都不走中转，否则统计会被元数据请求污染。
+下载会先走统计中转 `dl-stats.dtapp.net`（两个来源统一，中转不挑源站），失败自动回退源站。`SHA256SUMS`、`GIT_COMMIT`、`BUILD_TIME` 三个元数据文件在任何来源下都不走中转，否则统计会被元数据请求污染。
 
-**预发布怎么排除**：三个平台的信号能力不一样——GitHub 与 CNB 的 releases API 都有 `prerelease` 字段；**GitLab 的 Release 根本没有预发布概念**（只有 `upcoming_release`，语义是「计划发布」，不是预发布）。所以判定取**并集**：平台字段标了 **或** tag 带 semver 后缀（`v1.2.3-rc.1`、`v1.2.4-beta`），任一成立就算预发布，`FetchLatestTag` 优先返回正式版。三个平台只要有一个信号到位就不会漏，这就是“后缀约定 + prerelease 字段”的兼容之处：
+**预发布怎么排除**：GitHub 与 CNB 的 releases API 都有 `prerelease` 字段，但客户端不只看字段，还会按 tag 的 semver 后缀（`v1.2.3-rc.1`、`v1.2.4-beta`）再判一次：字段标了 **或** tag 带后缀，任一成立就算预发布，`FetchLatestTag` 优先返回正式版。这样平台标记口径变化时也不会把预发布推给稳定版用户：
 
 | 当前版本       | 会拿到什么                                                       |
 |----------------|------------------------------------------------------------------|
@@ -179,7 +178,7 @@ sudo sh /tmp/install.sh upgrade --version v0.0.32
 | `-rc` 等预发布 | 最新的预发布（预发布用户能继续往前走）                           |
 | `dev`（本地）  | 同上，视为预发布客户端                                           |
 
-这套规则**依赖发布时的 tag 命名**，所以发版流水线里**只有一个参数：版本号**。五个平台（CNB / GitHub / GitLab / Gitee / GitCode）共用同一份判定（`scripts/ci/resolve-prerelease.sh`），没有开关、没有「是否预发布」字段可填：
+这套规则**依赖发布时的 tag 命名**，所以发版流水线里**只有一个参数：版本号**。三个平台（CNB / GitHub / Gitee）共用同一份判定（`scripts/ci/resolve-prerelease.sh`），没有开关、没有「是否预发布」字段可填：
 
 | 版本号形态                | 判定     | 说明                                                   |
 |---------------------------|----------|--------------------------------------------------------|
@@ -192,9 +191,9 @@ sudo sh /tmp/install.sh upgrade --version v0.0.32
 
 后缀同时也是 **changelog 的渠道**：`scripts/ci/release-changelog.sh` 按 `rc / beta / alpha / nightly / stable` 分别找同渠道的上一个 tag，首次发某渠道（含 nightly）则回退到上一个正式版。正式版的对比基准永远只看正式版 tag，不会被 nightly 污染。
 
-**`nightly` 是关键词，不是版本号**：`.github/workflows/release.yml` 每天 UTC 00:00（北京时间 08:00）的定时任务把版本号留空，就等价于填 `nightly`；手动填也一样。流水线据此自动推导成 `<最近正式版 + 1 个补丁>-nightly.<UTC 构建日期>`——最近正式版 v0.2.7 → `v0.2.8-nightly.20261114`，规则在 `scripts/ci/resolve-prerelease.sh`（五个平台共用一份推导，别处再写一套只会把版本号算歪）。补丁号要 +1 是因为 nightly 走的是「下一个正式版」的版本号，否则 nightly 会抢走正式版的 tag 名，正式版就发不出去了。推导出来的 tag 走 nightly 渠道（预发布），所以稳定用户不会被推上 nightly；nightly Release 只保留最近 3 个（旧的连同 git tag 一起自动删掉），GitHub / CNB / GitLab / GitCode 各平台发布完各自清理，Gitee 侧插件没有删除能力、暂靠手工清理。
+**`nightly` 是关键词，不是版本号**：`.github/workflows/release.yml` 每天 UTC 00:00（北京时间 08:00）的定时任务把版本号留空，就等价于填 `nightly`；手动填也一样。流水线据此自动推导成 `<最近正式版 + 1 个补丁>-nightly.<UTC 构建日期>`——最近正式版 v0.2.7 → `v0.2.8-nightly.20261114`，规则在 `scripts/ci/resolve-prerelease.sh`（三个平台共用一份推导，别处再写一套只会把版本号算歪）。补丁号要 +1 是因为 nightly 走的是「下一个正式版」的版本号，否则 nightly 会抢走正式版的 tag 名，正式版就发不出去了。推导出来的 tag 走 nightly 渠道（预发布），所以稳定用户不会被推上 nightly；nightly Release 只保留最近 3 个（旧的连同 git tag 一起自动删掉），GitHub / CNB 各自清理，Gitee 侧插件没有删除能力、暂靠手工清理。
 
-**GitHub 是发版的总入口**：GitHub 发布成功后会自动把同版本号同步到 CNB / Gitee / GitLab / GitCode，再推一条 ServerChan3 通知（各平台同步状态一览）。同步用的 secret 全部可缺省，没配就跳过；清单见 [contributing.md](contributing.md) §GitHub 发版后的同步与通知。
+**GitHub 是发版的总入口**：GitHub 发布成功后会自动把同版本号同步到 CNB / Gitee，再推一条 ServerChan3 通知（各平台同步状态一览）。同步用的 secret 全部可缺省，没配就跳过；清单见 [contributing.md](contributing.md) §GitHub 发版后的同步与通知。
 
 判法与客户端 `internal/updater.isPrereleaseTag` 逐字对齐（客户端认的是任意 `-<prerelease>` 段，不枚举渠道名）—— 两边不一致的后果是「发出去的版本没人能升上去」或者「稳定用户被推到 rc / nightly 上」，两种都撤不回来。
 
@@ -241,7 +240,7 @@ sudo fnmusic-sync --check
 | deb  | `sudo sh install.sh uninstall` | `service stop`/`uninstall` → 删 unit → `dpkg -r` → `rm -f /usr/bin` 与 `/usr/local/bin`；`--purge` 再删三个目录                                    |
 | fpk  | 应用中心「卸载」               | 卸载向导 `wizard_keep_data`（默认 `true`）决定 `uninstall_callback` 是否 `rm -rf $TRIM_PKGETC $TRIM_PKGVAR`                                        |
 
-会保留什么，取决于包清单里到底有什么。`.nfpm.yaml` 的 `contents` 只有一项——二进制 `src: ./bin/fnmusic-sync-linux-${ARCH}` → `dst: /usr/bin/fnmusic-sync`。`/etc/fnmusic-sync`、`/var/log/fnmusic-sync`、`/var/lib/fnmusic-sync` 是 `postinstall` 用 `mkdir -p` 建的，`config.yaml`、`state.db`、`data.db` 是程序运行时生成的，**都不在包清单里**。因此：
+会保留什么，取决于包清单里到底有什么。deb 由 `.goreleaser.yaml` 的 `nfpms` 生成，只打包一个二进制（`ids: [fnmusic-sync]` + `bindir: /usr/bin` → `/usr/bin/fnmusic-sync`）。`/etc/fnmusic-sync`、`/var/log/fnmusic-sync`、`/var/lib/fnmusic-sync` 是 `postinstall` 用 `mkdir -p` 建的，`config.yaml`、`state.db`、`data.db` 是程序运行时生成的，**都不在包清单里**。因此：
 
 - `apt remove` / `apt purge` 之后，上面三个目录与其中内容**依然在**。「`apt purge` 会连配置一起删」是 README 里的旧说法，与包结构不符——要彻底清掉必须手动执行：
 
