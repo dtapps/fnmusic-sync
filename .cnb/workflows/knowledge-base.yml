@@ -5,6 +5,7 @@
     - stages:
         - name: 知识库构建
           image: cnbcool/knowledge-base
+          allowFailure: true
           settings:
             # 指定需要包含的文件，使用 Glob 模式匹配，默认为 **/**.md， 支持数组或逗号分隔
             include:
@@ -23,6 +24,7 @@
     - stages:
         - name: 知识库构建
           image: cnbcool/knowledge-base
+          allowFailure: true
           settings:
             # 指定需要包含的文件，使用 Glob 模式匹配，默认为 **/**.md， 支持数组或逗号分隔
             include:
@@ -41,6 +43,7 @@
     - stages:
         - name: 知识库构建
           image: cnbcool/knowledge-base
+          allowFailure: true
           settings:
             # 指定需要包含的文件，使用 Glob 模式匹配，默认为 **/**.md， 支持数组或逗号分隔
             include:

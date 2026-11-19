@@ -2,11 +2,10 @@
 #
 # 生成 Release 正文（Markdown）。
 #
-# 事实来源：五个平台的发布流水线（CNB / GitHub / GitLab / GitCode / Gitee）都调用这一份，
+# 事实来源：三个平台的发布流水线（CNB / GitHub / Gitee）都调用这一份，
 # 避免各写一遍表格/标题/下载链接，改一处忘一处：
 #   .cnb/workflows/release.yml        .github/workflows/release.yml
-#   .gitlab/workflows/release.yml     .gitcode/workflows/release.yml
-#   .workflow/release.yml（Gitee）    scripts/ci/build-linux-packages.sh（GitCode 打包时）
+#   .workflow/release.yml（Gitee）
 #
 # 只用环境变量传参（不解析位置参数）：
 #
@@ -35,8 +34,8 @@ set -eu
 #   parse_artifact_name <文件名>   解析出 PLAT / ARCH / EXT / KIND / APP
 #   describe_artifact [文件名]     输出说明文案
 # 本文件原先另存了一份同名同接口的本地实现，文案各写一套，改一处忘一处。
-# 现在只保留这一份事实来源：文案集中在那份脚本的 DESC_* 表，五个平台同步生效。
-# 注意：调用方（各平台 workflow 与 build-linux-packages.sh）的工作目录都是仓库根，
+# 现在只保留这一份事实来源：文案集中在那份脚本的 DESC_* 表，三个平台同步生效。
+# 注意：调用方（各平台 workflow）的工作目录都是仓库根，
 # 故这里用相对路径 source；与 scripts/ci/resolve-prerelease.sh 的用法一致。
 # shellcheck disable=SC1091
 . scripts/ci/describe-artifact.sh
@@ -157,12 +156,12 @@ render_body() {
       # shellcheck disable=SC2016
       printf '%s\n' '附件含 `SHA256SUMS`（`sha256sum` 标准格式，每行「哈希 + 两个空格 + 文件名」）。'
       # shellcheck disable=SC2016
-      printf '%s\n' '把 `SHA256SUMS` 和安装包下载到同一目录，然后执行：'
+      printf '%s\n' '把 `SHA256SUMS` 和需要校验的附件下载到同一目录，然后执行：'
       printf '\n'
       # shellcheck disable=SC2016
-      printf '%s\n' '- **Linux**：`sha256sum -c SHA256SUMS`'
+      printf '%s\n' '- **Linux**：`sha256sum --ignore-missing -c SHA256SUMS`'
       # shellcheck disable=SC2016
-      printf '%s\n' '- **macOS**：`shasum -a 256 -c SHA256SUMS`'
+      printf '%s\n' '- **macOS**：`shasum -a 256 --ignore-missing -c SHA256SUMS`'
       if [ -n "${windows_artifacts}" ]; then
         # 逐个架构给出命令：PowerShell 一次只校验一个文件，只写一个会漏掉另一个架构
         while IFS= read -r wf; do
@@ -242,8 +241,8 @@ if [ "${1:-}" = '--self-test' ]; then
   expect "${tmp_dir}/stable.md" '| fnOS | ARM64 | [fnmusic-sync-arm64.fpk]' 'fpk ARM64 下载行'
   expect "${tmp_dir}/stable.md" '- 修复 A' '更新内容保留'
   expect "${tmp_dir}/stable.md" '## 校验' '有 SHA256SUMS 时写校验节'
-  expect "${tmp_dir}/stable.md" 'sha256sum -c SHA256SUMS' 'Linux 校验命令'
-  expect "${tmp_dir}/stable.md" 'shasum -a 256 -c SHA256SUMS' 'macOS 校验命令'
+  expect "${tmp_dir}/stable.md" 'sha256sum --ignore-missing -c SHA256SUMS' 'Linux 校验命令'
+  expect "${tmp_dir}/stable.md" 'shasum -a 256 --ignore-missing -c SHA256SUMS' 'macOS 校验命令'
   reject "${tmp_dir}/stable.md" 'Windows（PowerShell）' '本项目无 Windows 产物时不写 Windows 命令'
   reject "${tmp_dir}/stable.md" '## ⚠️ 预发布版本' '正式版不出现预发布警示'
   reject "${tmp_dir}/stable.md" 'SHA256SUMS |' '校验文件不进下载表格'

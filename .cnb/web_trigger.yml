@@ -1,7 +1,7 @@
 # 分支详情页的自定义按钮：填版本号，触发 .cnb/workflows/release.yml。
 #
 # **只有一个输入：version。没有 pre_release 开关了。**
-# 预发布由版本号自己带着走（唯一规则，五个平台共用 scripts/ci/resolve-prerelease.sh）：
+# 预发布由版本号自己带着走（唯一规则，三个平台共用 scripts/ci/resolve-prerelease.sh）：
 #   v1.2.3                    → 正式版
 #   v1.2.3-rc.1               → 预发布（rc 渠道）
 #   v1.2.3-beta.1             → 预发布（beta 渠道）

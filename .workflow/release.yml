@@ -7,15 +7,16 @@
 #   - nfpm 只在 GitHub 放二进制，得靠第三方反代；
 #   - pnpm 12 的 npm 包只是个壳，真身是 @pnpm/exe 里 59MB 的原生二进制（Node SEA），
 #     在 plugin-24 容器里一启动就 Segmentation fault（exit 139），而它没有纯 JS 版本可退。
-# 同样的四个包 CNB 那边早就编好了，而且 CNB 是国内的：实测同一个 fpk，
+# 同样的六个包 CNB 那边早就编好了，而且 CNB 是国内的：实测同一个 fpk，
 #   CNB      3.15 MB/s（4MB / 1.3s）
 #   GitHub   13 KB/s（0.6MB / 45s）—— 差 240 倍
 # 所以这里只搬不建：一分钟内搬完 23MB。**来源由 DOWNLOAD_SOURCE 定死一个**
 # （cnb 或 github），不跨平台混用 —— 理由见下面「前置条件」那段。
 #
-# 产物（与另外四个平台逐字一致）：
+# 产物（与 CNB / GitHub 逐字一致）：
 #   bin/fnmusic-sync_amd64.deb  bin/fnmusic-sync_arm64.deb
 #   bin/fnmusic-sync-amd64.fpk  bin/fnmusic-sync-arm64.fpk
+#   bin/fnmusic-sync-linux-amd64.tar.gz  bin/fnmusic-sync-linux-arm64.tar.gz
 #
 # 两种触发方式：
 #   1) 外部系统 POST Webhook（发完 CNB / GitHub Release 直接调），见 triggers 段；
@@ -34,7 +35,7 @@
 #     但 tag 与 Release 字段仍要按同一规则落地。
 #
 # 附件与正文都跟 certflow 那份一致，但**整条链只认一个平台**：
-#   - DOWNLOAD_SOURCE=cnb：附件名是固定的四个，大小向 CNB 现问（Range 探 Content-Range），
+#   - DOWNLOAD_SOURCE=cnb：附件名是固定的六个，大小向 CNB 现问（Range 探 Content-Range），
 #     正文在本地按同样的表格格式生成 —— 全程不碰 GitHub 的接口。
 #     原因：包里的二进制注入了 buildinfo.RepoSource，客户端按它决定从哪查更新；
 #     附件从 CNB 来、正文从 GitHub 来，等于一次发布里挂着两个平台的叙事。
@@ -56,7 +57,7 @@
 # 附件必须逐个列名：插件不支持目录，assertFiles 填 bin 会把整个目录压成
 # bin.tar.gz 去上传，然后 400 失败。CNB / GitHub 那边增减产物时要同步改那份清单。
 #
-# nightly 保留策略（与 GitHub / CNB / GitLab / GitCode 的「只保留最近 3 个」同口径）：
+# nightly 保留策略（与 GitHub / CNB 的「只保留最近 3 个」同口径）：
 # 本条流水线的 release@gitee 插件只能**覆盖同名** Release（allowUpdate: true），
 # 没有删除历史 Release 的能力，所以 Gitee 侧的 nightly 会逐日堆积。
 # 要在这里也收敛到 3 个，得改成手写 Gitee v5 API（查列表 → 删旧的 → 建 Release → 传附件），
@@ -138,7 +139,7 @@ stages:
             fi
 
             # 预发布判定：只看版本号后缀。规则只有一份，在
-            # scripts/ci/resolve-prerelease.sh 里（五个平台与构建脚本 source 的也是它）。
+            # scripts/ci/resolve-prerelease.sh 里（三个平台 source 的也是它）。
             export VERSION="${RAW_VERSION}"
             # shellcheck disable=SC1091
             . scripts/ci/resolve-prerelease.sh
@@ -175,11 +176,15 @@ stages:
             # 校验节也必须与其它平台逐字一致。上游正文只在本地生成失败时兜底。
             cp release_body.md release_body.upstream.md
 
+            # 校验文件：上游由 GoReleaser 生成 tar.gz/deb、package-fpk.sh 追加 fpk。
+            # Gitee 只搬 tar.gz/deb/fpk，旧版本的 Release 也可能没有 SHA256SUMS，所以这里
+            # 仍按实际落盘文件重算一份：口径与上游一致（只含 tar.gz/deb/fpk），
+            # 保证正文里的 sha256sum -c SHA256SUMS 一定能通过。
             (
               cd bin
               if command -v sha256sum >/dev/null 2>&1; then
                 : > SHA256SUMS
-                for f in *.deb *.fpk; do
+                for f in *.deb *.fpk *.tar.gz; do
                   [ -e "$f" ] || continue
                   sha256sum "$f" >> SHA256SUMS
                 done
@@ -190,7 +195,7 @@ stages:
                 node -e '
                   const fs = require("fs"), crypto = require("crypto");
                   const lines = fs.readdirSync(".").filter(function (f) {
-                    return /\.(deb|fpk)$/.test(f);
+                    return /\.(deb|fpk|tar\.gz)$/.test(f);
                   }).sort().map(function (f) {
                     const h = crypto.createHash("sha256").update(fs.readFileSync(f)).digest("hex");
                     return h + "  " + f;
@@ -277,7 +282,7 @@ stages:
           - REL_ASSETS
         # 必须逐个列文件名。插件不支持目录：填 bin 会把整个目录压成
         # bin.tar.gz 去上传，然后 400 失败。
-        # 前四个是 CNB / GitHub 的产物（名字不带版本段，与下载阶段的落盘名逐字一致），
+        # 前六个是 CNB / GitHub 的产物（名字不带版本段，与下载阶段的落盘名逐字一致），
         # 最后一个是下载阶段本地算出的校验文件（没有 sha256sum 时不会存在，见上）。
         # 上游增减产物时要同步加行，少列一个不会报错，只是那个文件不会出现在 Gitee Release 里。
         assertFiles:
@@ -285,6 +290,8 @@ stages:
           - bin/fnmusic-sync_arm64.deb
           - bin/fnmusic-sync-amd64.fpk
           - bin/fnmusic-sync-arm64.fpk
+          - bin/fnmusic-sync-linux-amd64.tar.gz
+          - bin/fnmusic-sync-linux-arm64.tar.gz
           - bin/SHA256SUMS
         # 预发布：值由下载阶段判定后写进 GITEE_PARAMS，这里插值取 true / false。
         prerelease: ${PRERELEASE}

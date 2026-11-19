@@ -41,7 +41,7 @@
         echo "原始 version: [${version:-}]"
 
         # 归一化 + 格式校验 + 预发布判定只有一份实现，在 scripts/ci/resolve-prerelease.sh，
-        # 五个平台（CNB / GitHub / GitLab / Gitee / GitCode）共同 source 它。
+        # 三个平台（CNB / GitHub / Gitee）共同 source 它。
         # 这里只传版本号：预发布由 `-rc.1` / `-beta.1` / `-alpha.1` /
         # `-nightly.20260101` 这类后缀决定，
         # 页面上已经没有开关可以对账了（老的 pre_release 环境变量就算还在也不读）。
@@ -62,7 +62,7 @@
           echo "当前提交: $(git rev-parse --short HEAD)"
         fi
         # 容器里进程是 root、checkout 目录属主是宿主 uid，git 2.35+ 会以
-        # "detected dubious ownership" 直接失败（与 .gitlab-ci.yml 同一条纪律）。
+        # "detected dubious ownership" 直接失败（与 GitHub release.yml 同一条纪律）。
         git config --global --add safe.directory "$(pwd)" 2>/dev/null || true
         git fetch --tags --quiet --force || true
         # shellcheck disable=SC1091
@@ -126,35 +126,34 @@
     - name: 安装所有依赖
       script: make deps
 
-    - name: 打包 Linux 安装包（deb/fpk）
-      script: VERSION=${INTERIOR_VERSION} REPO_SOURCE=cnb CNB_TOKEN="$UPDATE_TOKEN" make package-linux-all
+    - name: 打包 Linux 产物（tar.gz/deb/fpk）
+      script: VERSION=${INTERIOR_VERSION} GORELEASER_CURRENT_TAG=${INTERIOR_VERSION} REPO_SOURCE=cnb CNB_TOKEN="$UPDATE_TOKEN"
+        make goreleaser-release
 
-    - name: 清理二进制文件 + .tar.gz 压缩包
-      script: make clean-archives
-
-    # 附件校验文件：用户下载后总要能核对一遍包没被篡改/没下坏。
-    # 正文的「校验」一节只在 bin/SHA256SUMS 存在时才写，所以这一步不能省。
-    - name: 生成校验文件
+    # 校验文件由 GoReleaser 生成 tar.gz/deb 部分，package-fpk.sh 在打完 fpk 后追加。
+    # 正文的「校验」一节只在 dist/SHA256SUMS 存在时才写，这里再兜底确认各类包都在。
+    - name: 校验校验文件
       script: |
         set -eu
-        cd bin
-        : > SHA256SUMS
-        for f in *.deb *.fpk; do
-          [ -e "$f" ] || continue
-          sha256sum "$f" >> SHA256SUMS
+        test -s dist/SHA256SUMS
+        for f in dist/*.deb dist/*.fpk dist/fnmusic-sync-linux-*.tar.gz; do
+          grep -qF "  ${f##*/}" dist/SHA256SUMS || {
+            echo "❌ SHA256SUMS 缺少 ${f##*/}"
+            exit 1
+          }
         done
-        cat SHA256SUMS
+        cat dist/SHA256SUMS
 
-    # 正文只有一份实现（scripts/ci/render-release-body.sh），五个平台的流水线都调它，
+    # 正文只有一份实现（scripts/ci/render-release-body.sh），CNB / GitHub / Gitee 的流水线都调它，
     # 避免各写一遍表格/标题/下载链接，改一处忘一处。
     - name: 生成 Release 正文
       script: |
         set -eu
         # 打包没出产物就别往下走：否则会发出一个零附件的 Release，正文表格是空的，
         # 看起来「成功」，用户点开什么都下不到。
-        count=$(find bin -maxdepth 1 -type f \( -name '*.deb' -o -name '*.fpk' \) | wc -l)
+        count=$(find dist -maxdepth 1 -type f \( -name '*.deb' -o -name '*.fpk' -o -name 'fnmusic-sync-linux-*.tar.gz' \) | wc -l)
         if [ "$count" -eq 0 ]; then
-          echo "❌ 打包没有产出任何 deb/fpk，先看 make package-linux-all 的日志"
+          echo "❌ 打包没有产出任何 deb/fpk/tar.gz，先看 make goreleaser-release 的日志"
           exit 1
         fi
         echo "产物 ${count} 个"
@@ -201,7 +200,7 @@
           COMMIT_URL="${CNB_ROOT}/-/commit" \
           COMMIT_SHA="${CNB_COMMIT:-}" \
           BUILD_TIME="$(date -u '+%Y-%m-%d %H:%M:%S UTC')" \
-          ARTIFACT_DIR=bin \
+          ARTIFACT_DIR=dist \
           OUT_FILE=release_body.md \
           CHANGELOG="${LATEST_CHANGE_LOG}" \
           sh scripts/ci/render-release-body.sh
@@ -254,7 +253,10 @@
         type: UPLOAD
         tag: ${INTERIOR_VERSION}
         attachments:
-          - 'bin/*'
+          - 'dist/*.deb'
+          - 'dist/*.fpk'
+          - 'dist/fnmusic-sync-linux-*.tar.gz'
+          - 'dist/SHA256SUMS'
       exports:
         FILES: FILES
 

@@ -125,9 +125,10 @@ body:
       label: 校验方式与已知问题
       description: '可选。附件校验方式（`SHA256SUMS`）以及本次已知的限制 / 未修复问题。'
       placeholder: |
-        校验：下载 SHA256SUMS 与安装包到同一目录后执行
-        - Debian/Ubuntu（deb）：sha256sum -c SHA256SUMS，再 sudo dpkg -i fnmusic-sync_<版本>_<架构>.deb
-        - 飞牛 fnOS（fpk）：sha256sum -c SHA256SUMS，再到应用中心手动安装 .fpk
+        校验：下载 SHA256SUMS 与需要校验的附件到同一目录后执行
+        - Debian/Ubuntu（deb）：sha256sum --ignore-missing -c SHA256SUMS，再 sudo dpkg -i fnmusic-sync_<版本>_<架构>.deb
+        - 飞牛 fnOS（fpk）：sha256sum --ignore-missing -c SHA256SUMS，再到应用中心手动安装 .fpk
+        - Linux 通用包（tar.gz）：sha256sum --ignore-missing -c SHA256SUMS，解压即用
 
         已知问题：（无 / 简述）
 

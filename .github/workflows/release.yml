@@ -1,9 +1,9 @@
 # 发布工作流
 # 两种触发：手动填版本号；每天 UTC 00:00 定时构建 nightly 预发布。
-# 均自动构建 Linux 安装包（deb/fpk）并发布 GitHub Release，
-# 再同步到 CNB / Gitee / GitLab / GitCode，最后推送通知。
+# 均自动构建 Linux 产物（tar.gz/deb/fpk）并发布 GitHub Release，
+# 再同步到 CNB / Gitee，最后推送通知。
 #
-# 版本号规则（实现见 scripts/ci/resolve-prerelease.sh，五个平台同口径）：
+# 版本号规则（实现见 scripts/ci/resolve-prerelease.sh，三个平台同口径）：
 #   1.2.3                    -> 正式版，Release 不勾选 prerelease
 #   1.2.3-rc.1               -> 预发布（rc 渠道）
 #   1.2.3-beta.1             -> 预发布（beta 渠道）
@@ -107,14 +107,14 @@ jobs:
           echo "原始 version: [${VERSION}]"
 
           # 容器里进程是 root、checkout 目录属主是宿主的 uid，git 2.35+ 会以
-          # "detected dubious ownership" 直接失败（与 GitLab 根文件同一条纪律）。
+          # "detected dubious ownership" 直接失败。
           # 用 GIT_CONFIG_* 给本次命令链放行：不写任何配置文件，也不依赖 HOME 可写。
           export GIT_CONFIG_COUNT=1
           export GIT_CONFIG_KEY_0=safe.directory
           export GIT_CONFIG_VALUE_0="$(pwd)"
 
           # 归一化 / 格式校验 / 预发布判定只有一份实现，在 scripts/ci/resolve-prerelease.sh，
-          # 五个平台（CNB / GitHub / GitLab / Gitee / GitCode）都 source 它。
+          # 三个平台（CNB / GitHub / Gitee）都 source 它。
           # 只传版本号：预发布由 `-rc.1` / `-beta.1` / `-alpha.1` /
           # `-nightly.20260101` 这类后缀决定；`nightly` 关键词也在那一份里展开成
           # <最近正式版+1 补丁>-nightly.<UTC 日期>（需要完整 tag 历史，故上面用 fetch-depth: 0）。
@@ -221,7 +221,7 @@ jobs:
             echo "✅ 比上一个正式版 ${latest:-（无）} 新"
           fi
 
-  # 构建 + 打包 Linux 安装包（deb/fpk）
+  # 构建 + 打包 Linux 产物（tar.gz/deb/fpk）
   build:
     needs: prepare
     runs-on: ubuntu-26.04
@@ -236,6 +236,9 @@ jobs:
           # 与 prepare 同一个提交：版本号推导与实际打包必须是同一个 commit，
           # 否则「推出来的 tag 指向 A、打出来的包是 B」。
           ref: ${{ inputs.commit || github.sha }}
+          # 需要上一个 tag 算 fpk 的更新内容，shallow clone 只有 1 个 commit，
+          # git describe / git log 都会退化。
+          fetch-depth: 0
 
       # 容器工作区是 runner 挂进来的 bind mount（属主是 runner 用户），容器内进程却是 root，
       - name: 让容器内的 git 可用
@@ -299,37 +302,38 @@ jobs:
         shell: bash
         run: make deps
 
-      - name: 打包 Linux 安装包（deb/fpk）
+      - name: 打包 Linux 产物（tar.gz/deb/fpk）
         shell: bash
         env:
           VERSION: ${{ needs.prepare.outputs.interior_version }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          VERSION=${VERSION} REPO_SOURCE=github GITHUB_TOKEN="${GITHUB_TOKEN}" make package-linux-all
+          VERSION=${VERSION} GORELEASER_CURRENT_TAG=${VERSION} REPO_SOURCE=github GITHUB_TOKEN="${GITHUB_TOKEN}" make goreleaser-release
 
-      - name: 清理二进制文件 + .tar.gz 压缩包
-        shell: bash
-        run: make clean-archives
-
-      # 附件校验文件：用户下载后总要能核对一遍包没被篡改/没下坏。
-      # 正文的「校验」一节只在 bin/SHA256SUMS 存在时才写，所以这一步不能省。
-      - name: 生成校验文件
+      # 校验文件由 GoReleaser 生成 tar.gz/deb 部分，package-fpk.sh 在打完 fpk 后追加。
+      # 正文的「校验」一节只在 dist/SHA256SUMS 存在时才写，这里再兜底确认各类包都在。
+      - name: 校验校验文件
         shell: bash
         run: |
           set -eu
-          cd bin
-          : > SHA256SUMS
-          for f in *.deb *.fpk; do
-            [ -e "${f}" ] || continue
-            sha256sum "${f}" >> SHA256SUMS
+          test -s dist/SHA256SUMS
+          for f in dist/*.deb dist/*.fpk dist/fnmusic-sync-linux-*.tar.gz; do
+            grep -qF "  ${f##*/}" dist/SHA256SUMS || {
+              echo "❌ SHA256SUMS 缺少 ${f##*/}"
+              exit 1
+            }
           done
-          cat SHA256SUMS
+          cat dist/SHA256SUMS
 
       - name: 上传产物
         uses: actions/upload-artifact@v7
         with:
           name: fnmusic-sync-release
-          path: bin/*
+          path: |
+            dist/*.deb
+            dist/*.fpk
+            dist/fnmusic-sync-linux-*.tar.gz
+            dist/SHA256SUMS
           if-no-files-found: error
           retention-days: 1
 
@@ -356,10 +360,10 @@ jobs:
           name: fnmusic-sync-release
           path: release
 
-      # 正文只有一份实现（scripts/ci/render-release-body.sh），另外四个平台也调用它，
+      # 正文只有一份实现（scripts/ci/render-release-body.sh），另外两个平台也调用它，
       # 避免各写一遍表格/标题/下载链接，改一处忘一处。
       # 下载表的「平台 / 说明」两列来自 scripts/ci/describe-artifact.sh
-      # （由 render-release-body.sh source 进去，五个平台共用同一份文案）。
+      # （由 render-release-body.sh source 进去，三个平台共用同一份文案）。
       - name: 生成 Release 正文
         shell: bash
         env:
@@ -387,7 +391,7 @@ jobs:
           # 更新内容：按渠道选对比基准（rc 对 rc、beta 对 beta、alpha 对 alpha、
           # nightly 对 nightly、正式版对正式版；
           # 首次发某渠道则回退到上一个正式版）。实现见 scripts/ci/release-changelog.sh，
-          # 五个平台共用一份，避免判定口径跑偏。
+          # 三个平台共用一份，避免判定口径跑偏。
           # GitHub 的提交路径是 /commit/<sha>，和 CNB 的 /-/commit 不同，前缀显式传
           CHANGELOG=$(COMMIT_URL="${REPO_URL}/commit" sh scripts/ci/release-changelog.sh "${VERSION}")
           # 直接 export 给同一步的脚本：写 $GITHUB_ENV 只对**后续** step 生效，
@@ -527,6 +531,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           ref: ${{ inputs.commit || github.sha }}
+          fetch-depth: 0
 
       - name: 生成公告正文
         shell: bash
@@ -696,15 +701,15 @@ jobs:
               return 'failed'
             }
 
-  # ── 以下四个 job：把这次发布同步到别的平台 ──────────────────────────────────
+  # ── 以下两个 job：把这次发布同步到别的平台 ──────────────────────────────────
   #
   # 语义与 certflow / kai 同口径：GitHub Release 发布成功后，各平台各发一份同版本号
   # 的 Release。fnmusic-sync 与那两个项目的差别是**各平台自己构建**（不是镜像 GitHub 的
-  # 附件）：CNB / GitLab / GitCode 各自跑自己的打包流水线，Gitee 走转发壳从上游取包。
+  # 附件）：CNB 跑自己的打包流水线，Gitee 走转发壳从上游取包。
   # 好处是每个平台的包都带自己的 buildinfo.RepoSource，客户端按它决定从哪个平台查更新；
   # 代价是同一次发版要各平台各构建一次。
   #
-  # 四个 job 的共同约定（改任何一个都要四个一起改）：
+  # 两个 job 的共同约定（改任何一个都要两个一起改）：
   #   1. 只传归一化后的 tag（v0.1.31 / v0.1.32-rc.1 / v0.1.33-nightly.20261114），
   #      预发布由各平台按 tag 后缀自行判定，不再额外传布尔（两套口径迟早打架）。
   #   2. token 放**job 级** env：step 自己的 env 在 if 求值阶段还读不到，
@@ -741,7 +746,7 @@ jobs:
           sleep 8
 
           API="https://api.cnb.cool"  # 私有化 / 自建端点改这里
-          REPO="dtapp/fnmusic-sync"  # CNB / GitCode 是 dtapp（不带 s）
+          REPO="dtapp/fnmusic-sync"  # CNB 是 dtapp（不带 s）
           EVENT="api_trigger_release"
           if [ "${PRERELEASE}" = "true" ]; then
             TITLE="GitHub 预发布同步 ${VERSION}"
@@ -851,131 +856,6 @@ jobs:
             echo "status=failed" >> "$GITHUB_OUTPUT"
           fi
 
-  # 触发 GitLab 的 release job（.gitlab/workflows/release.yml，由 .gitlab-ci.yml
-  # include；只在 CI_PIPELINE_SOURCE == "trigger" 时跑）。
-  # 用项目级 trigger token，只触发流水线、不绑用户。
-  # 令牌：GitLab 项目 → Settings → CI/CD → Pipeline trigger tokens → Add new token
-  # （形如 glptt-xxx），创建后填到 GitHub 仓库 secret SYNC_GITLAB_TRIGGER_TOKEN。
-  sync-gitlab:
-    needs: [release, prepare]
-    runs-on: ubuntu-26.04
-    outputs:
-      status: ${{ steps.status.outputs.status }}
-    env:
-      SYNC_GITLAB_TRIGGER_TOKEN: ${{ secrets.SYNC_GITLAB_TRIGGER_TOKEN }}
-      VERSION: ${{ needs.prepare.outputs.interior_version }}
-      # 要构建的提交：各平台自己构建，必须传同一个提交，否则「同一版本号、不同内容」
-      COMMIT: ${{ needs.prepare.outputs.git_commit_full }}
-    steps:
-      - name: 触发 GitLab 同步流水线
-        id: trigger
-        if: ${{ env.SYNC_GITLAB_TRIGGER_TOKEN != '' }}
-        shell: bash
-        run: |
-          set -eu
-          echo "等待 8 秒，确保 GitHub Release 附件已同步到 CDN ..."
-          sleep 8
-
-          API="https://gitlab.com/api/v4"  # 自建 GitLab 实例改这里
-          PROJECT="dtapps/fnmusic-sync"  # GitLab / Gitee 是 dtapps（带 s）
-          REF="main"
-          # 路径形式必须 URL 编码（/ → %2F）。
-          PROJ=$(printf '%s' "$PROJECT" | jq -sRr @uri)
-
-          echo "触发 GitLab 流水线: ${API}/projects/${PROJ}/trigger/pipeline (ref=${REF})"
-          HTTP=$(curl -s -o /tmp/gitlab_trigger.json -w "%{http_code}" -X POST \
-            --form "token=${SYNC_GITLAB_TRIGGER_TOKEN}" \
-            --form "ref=${REF}" \
-            --form "variables[EVENT]=api_trigger_release" \
-            --form "variables[VERSION]=${VERSION}" \
-            --form "variables[COMMIT]=${COMMIT}" \
-            "${API}/projects/${PROJ}/trigger/pipeline")
-
-          echo "GitLab trigger/pipeline 响应 HTTP=${HTTP}"
-          cat /tmp/gitlab_trigger.json || true
-          if [ "$HTTP" != "200" ] && [ "$HTTP" != "201" ]; then
-            echo "status=failed" >> "$GITHUB_OUTPUT"
-            echo "::warning::触发 GitLab 流水线失败（HTTP=${HTTP}），不影响 GitHub Release"
-          else
-            echo "status=triggered" >> "$GITHUB_OUTPUT"
-            echo "✓ 已成功请求 GitLab 执行同步流水线"
-          fi
-
-      - name: 记录同步状态
-        id: status
-        if: always()
-        shell: bash
-        run: |
-          if [ "${{ steps.trigger.outcome }}" = "skipped" ]; then
-            echo "status=skipped" >> "$GITHUB_OUTPUT"
-          elif [ -n "${{ steps.trigger.outputs.status }}" ]; then
-            echo "status=${{ steps.trigger.outputs.status }}" >> "$GITHUB_OUTPUT"
-          else
-            echo "status=failed" >> "$GITHUB_OUTPUT"
-          fi
-
-  # 触发 GitCode 的 release.yml（.gitcode/workflows/release.yml：自己构建 → 建
-  # GitCode Release → 逐个上传附件），该 workflow 已声明 on: workflow_dispatch。
-  # 令牌：GitCode → 头像 → 个人设置 → 访问令牌 → 新建访问令牌（勾 repo 读写），
-  # 创建后填到 GitHub 仓库 secret SYNC_GITCODE_TOKEN。
-  # access_token 按官方要求走 query，故日志不打印完整 URL。
-  sync-gitcode:
-    needs: [release, prepare]
-    runs-on: ubuntu-26.04
-    outputs:
-      status: ${{ steps.status.outputs.status }}
-    env:
-      SYNC_GITCODE_TOKEN: ${{ secrets.SYNC_GITCODE_TOKEN }}
-      VERSION: ${{ needs.prepare.outputs.interior_version }}
-      # 要构建的提交：各平台自己构建，必须传同一个提交，否则「同一版本号、不同内容」
-      COMMIT: ${{ needs.prepare.outputs.git_commit_full }}
-    steps:
-      - name: 触发 GitCode 同步流水线
-        id: trigger
-        if: ${{ env.SYNC_GITCODE_TOKEN != '' }}
-        shell: bash
-        run: |
-          set -eu
-          echo "等待 8 秒，确保 GitHub Release 附件已同步到 CDN ..."
-          sleep 8
-
-          API="https://api.gitcode.com/api/v8"  # 私有化部署改这里
-          REPO="dtapp/fnmusic-sync"             # GitCode / CNB 是 dtapp（不带 s）
-          WORKFLOW="release.yml"                # .gitcode/workflows/ 下的文件名
-          REF="main"
-          echo "触发 GitCode workflow: ${REPO} / ${WORKFLOW} (ref=${REF})"
-          HTTP=$(curl -s -o /tmp/gitcode_dispatch.json -w "%{http_code}" -X POST \
-            -H "Content-Type: application/json" \
-            -d "$(jq -n \
-              --arg ref "$REF" \
-              --arg version "${VERSION}" \
-              --arg commit "${COMMIT}" \
-              '{ref: $ref, inputs: {version: $version, commit: $commit}}')" \
-            "${API}/repos/${REPO}/actions/workflows/${WORKFLOW}/dispatches?access_token=${SYNC_GITCODE_TOKEN}")
-
-          echo "GitCode dispatches 响应 HTTP=${HTTP}"
-          cat /tmp/gitcode_dispatch.json || true
-          if [ "$HTTP" != "200" ] && [ "$HTTP" != "201" ]; then
-            echo "status=failed" >> "$GITHUB_OUTPUT"
-            echo "::warning::触发 GitCode 流水线失败（HTTP=${HTTP}），不影响 GitHub Release"
-          else
-            echo "status=triggered" >> "$GITHUB_OUTPUT"
-            echo "✓ 已成功请求 GitCode 执行同步流水线"
-          fi
-
-      - name: 记录同步状态
-        id: status
-        if: always()
-        shell: bash
-        run: |
-          if [ "${{ steps.trigger.outcome }}" = "skipped" ]; then
-            echo "status=skipped" >> "$GITHUB_OUTPUT"
-          elif [ -n "${{ steps.trigger.outputs.status }}" ]; then
-            echo "status=${{ steps.trigger.outputs.status }}" >> "$GITHUB_OUTPUT"
-          else
-            echo "status=failed" >> "$GITHUB_OUTPUT"
-          fi
-
   # 构建 / 发布 / 各平台同步全部完成后，通过 ServerChan3（方糖）推送 webhook 通知。
   # 需配置 secret SERVERCHAN_SENDKEY（形如 SCTxxxx 或 sctp{uid}t...）；未配置则跳过通知。
   # API 文档：https://doc.sc3.ft07.com/zh/serverchan3/server/api
@@ -985,7 +865,7 @@ jobs:
     # 等所有镜像同步 job 结束（未配置 secret 时它们只是跳过，不影响 success 判定）。
     # 用 !cancelled() 而不是纯 needs.release.result：某个 sync job 失败时，
     # 通知仍要发出去（里面正好显示「❌ 触发失败」），整条流水线才有可读的结果。
-    needs: [sync-cnb, sync-gitee, sync-gitlab, sync-gitcode, release, prepare]
+    needs: [sync-cnb, sync-gitee, release, prepare]
     runs-on: ubuntu-26.04
     if: ${{ !cancelled() && needs.release.result == 'success' }}
     env:
@@ -1018,14 +898,10 @@ jobs:
           REPO="${{ github.repository }}"
 
           # 各平台的 Release 页面（仓库路径各平台不同，别抄错）：
-          #   CNB / GitCode → dtapp（不带 s）；Gitee / GitLab → dtapps（带 s）
-          # URL 格式按各平台同步脚本的输出对齐：
-          #   GitLab 是 /-/releases/<tag>（没有 /tag 这一段），其余是 /releases/tag/<tag>
+          #   CNB → dtapp（不带 s）；Gitee → dtapps（带 s）
           GH_RELEASE_URL="https://github.com/${REPO}/releases/tag/${TAG}"
           CNB_RELEASE_URL="https://cnb.cool/dtapp/fnmusic-sync/-/releases/tag/${TAG}"
           GITEE_RELEASE_URL="https://gitee.com/dtapps/fnmusic-sync/releases/tag/${TAG}"
-          GITLAB_RELEASE_URL="https://gitlab.com/dtapps/fnmusic-sync/-/releases/${TAG}"
-          GITCODE_RELEASE_URL="https://gitcode.com/dtapp/fnmusic-sync/releases/tag/${TAG}"
 
           # 同步状态 → 中文标签。状态来自各 sync job 的 outputs：
           #   triggered=已触发（异步执行，进度看平台页面）/ skipped=未配置 secret / failed=触发失败
@@ -1059,9 +935,7 @@ jobs:
           DESP="${DESP}**GitHub Release**: [${TAG}](${GH_RELEASE_URL})  "$'\n'
           DESP="${DESP}**CNB Release**: [${TAG}](${CNB_RELEASE_URL})  "$'\n'
           DESP="${DESP}**Gitee Release**: [${TAG}](${GITEE_RELEASE_URL})  "$'\n'
-          DESP="${DESP}**GitLab Release**: [${TAG}](${GITLAB_RELEASE_URL})  "$'\n'
-          DESP="${DESP}**GitCode Release**: [${TAG}](${GITCODE_RELEASE_URL})  "$'\n'
-          DESP="${DESP}**镜像同步**: CNB $(sync_state "${{ needs['sync-cnb'].outputs.status }}") · Gitee $(sync_state "${{ needs['sync-gitee'].outputs.status }}") · GitLab $(sync_state "${{ needs['sync-gitlab'].outputs.status }}") · GitCode $(sync_state "${{ needs['sync-gitcode'].outputs.status }}")"
+          DESP="${DESP}**镜像同步**: CNB $(sync_state "${{ needs['sync-cnb'].outputs.status }}") · Gitee $(sync_state "${{ needs['sync-gitee'].outputs.status }}")"
 
           echo "推送 ServerChan3 通知: ${TITLE}"
           HTTP=$(curl -s -o /tmp/sc3.json -w "%{http_code}" -X POST \

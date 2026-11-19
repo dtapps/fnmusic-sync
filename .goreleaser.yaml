@@ -1,0 +1,154 @@
+# GoReleaser 配置：CNB / GitHub / Gitee 的构建与打包入口。
+#
+# 流水线只负责发版：调用 `make goreleaser-release` 构建到 dist/，再上传 tar.gz/deb/fpk 与 SHA256SUMS。
+# Release 的创建仍由各平台自己的步骤完成（见 release.disable）。
+#
+# 用法：
+#   make goreleaser-check      # 校验本文件
+#   make goreleaser-snapshot   # 快照构建（无需 tag）
+#   make goreleaser-release    # 发布构建（CI 需传 GORELEASER_CURRENT_TAG）
+#
+# 产物（dist/）：
+#   fnmusic-sync-linux-{amd64,arm64}.tar.gz
+#   fnmusic-sync-fpk-linux-{amd64,arm64}.tar.gz（仅 fpk 打包中间产物，不上传）
+#   fnmusic-sync_{amd64,arm64}.deb
+#   fnmusic-sync-{amd64,arm64}.fpk
+#   SHA256SUMS（tar.gz/deb 由 GoReleaser 写，fpk 由 package-fpk.sh 追加）
+version: 2
+
+project_name: fnmusic-sync
+
+# 本仓库的 tag 可能被 git 识别成 refs/tags/...（见 Makefile VERSION 注释），
+# 默认 snapshot 版本会带上斜杠并污染产物文件名，这里固定成干净的 semver。
+snapshot:
+  version_template: '0.0.0-SNAPSHOT-{{ .ShortCommit }}'
+
+# 默认文件名是 fnmusic-sync_<version>_checksums.txt，统一成发布约定用的 SHA256SUMS。
+# 算对外发布的 tar.gz 与 deb；fpk 归档（fnmusic-sync-fpk-linux-*）只是打 fpk 的中间
+# 产物，不进校验文件。fpk 成品在 goreleaser 结束后由 package-fpk.sh 追加。
+checksum:
+  name_template: SHA256SUMS
+  ids:
+    - fnmusic-sync
+    - fnmusic-sync-deb
+
+before:
+  hooks:
+    # 构建前端（internal/webui/www）并生成 deb 安装 / 卸载脚本
+    - make goreleaser-prepare
+
+builds:
+  # 传统安装模式（无 build tag）
+  - id: fnmusic-sync
+    main: ./cmd/fnmusic-sync
+    binary: fnmusic-sync
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    flags:
+      - -trimpath
+      - -buildvcs=false
+    ldflags:
+      - -s -w
+      - -X 'cnb.cool/dtapp/fnmusic-sync/internal/buildinfo.Version={{ if .IsSnapshot }}v{{ .Version }}{{ else }}{{ trimprefix
+        .Tag "refs/tags/" }}{{ end }}'
+      - -X 'cnb.cool/dtapp/fnmusic-sync/internal/buildinfo.GitCommit={{ .ShortCommit }}'
+      - -X 'cnb.cool/dtapp/fnmusic-sync/internal/buildinfo.BuildTime={{ time "2006-01-02 15:04:05 UTC" }}'
+      - -X 'cnb.cool/dtapp/fnmusic-sync/internal/buildinfo.BinaryName=fnmusic-sync'
+      - -X 'cnb.cool/dtapp/fnmusic-sync/internal/buildinfo.RepoSource={{ envOrDefault "REPO_SOURCE" "" }}'
+      - -X 'cnb.cool/dtapp/fnmusic-sync/internal/buildinfo.CnbToken={{ envOrDefault "CNB_TOKEN" "" }}'
+      - -X 'cnb.cool/dtapp/fnmusic-sync/internal/buildinfo.GithubToken={{ envOrDefault "GITHUB_TOKEN" "" }}'
+
+  # fnOS 安装包模式（fpk）：带前端 Web UI
+  - id: fnmusic-sync-fpk
+    main: ./cmd/fnmusic-sync
+    binary: fnmusic-sync-fpk
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    tags:
+      - fpk
+    flags:
+      - -trimpath
+      - -buildvcs=false
+    ldflags:
+      - -s -w
+      - -X 'cnb.cool/dtapp/fnmusic-sync/internal/buildinfo.Version={{ if .IsSnapshot }}v{{ .Version }}{{ else }}{{ trimprefix
+        .Tag "refs/tags/" }}{{ end }}'
+      - -X 'cnb.cool/dtapp/fnmusic-sync/internal/buildinfo.GitCommit={{ .ShortCommit }}'
+      - -X 'cnb.cool/dtapp/fnmusic-sync/internal/buildinfo.BuildTime={{ time "2006-01-02 15:04:05 UTC" }}'
+      - -X 'cnb.cool/dtapp/fnmusic-sync/internal/buildinfo.BinaryName=fnmusic-sync'
+      - -X 'cnb.cool/dtapp/fnmusic-sync/internal/buildinfo.RepoSource={{ envOrDefault "REPO_SOURCE" "" }}'
+      - -X 'cnb.cool/dtapp/fnmusic-sync/internal/buildinfo.CnbToken={{ envOrDefault "CNB_TOKEN" "" }}'
+      - -X 'cnb.cool/dtapp/fnmusic-sync/internal/buildinfo.GithubToken={{ envOrDefault "GITHUB_TOKEN" "" }}'
+
+# 更新内容统一由 scripts/ci/release-changelog.sh 按渠道生成（见 resolve-prev-tag.sh）。
+# 没有交给 GoReleaser 的两个硬原因：
+#   1) 流水线在 tag 创建前构建，而内置 git changelog 会执行
+#      `git log <prev>..<当前 tag>`；当前 tag 这个 ref 此时还不存在，开启会直接失败。
+#      GORELEASER_PREVIOUS_TAG 只能换基准，不能补出当前 tag。
+#   2) Release 正文要求按渠道选基准、按 Conventional Commits 分组、带提交链接、
+#      每组独立截断；内置 changelog 的 format / groups 表达不了这些。
+# changelog:
+#   disable: true
+
+archives:
+  # 归档默认会带上 LICENSE / README / CHANGELOG（goreleaser 的内置默认），
+  # 与 Makefile 只放二进制的 tar 略有差异，但文件名与自升级逻辑一致。
+  - id: fnmusic-sync
+    ids:
+      - fnmusic-sync
+    formats:
+      - tar.gz
+    name_template: '{{ .ProjectName }}-linux-{{ .Arch }}'
+
+  - id: fnmusic-sync-fpk
+    ids:
+      - fnmusic-sync-fpk
+    formats:
+      - tar.gz
+    name_template: '{{ .ProjectName }}-fpk-linux-{{ .Arch }}'
+
+nfpms:
+  - id: fnmusic-sync-deb
+    package_name: fnmusic-sync
+    # 与自升级逻辑保持一致：fnmusic-sync_{arch}.deb
+    file_name_template: '{{ .PackageName }}_{{ .Arch }}'
+    ids:
+      - fnmusic-sync
+    vendor: dtapp
+    homepage: https://cnb.cool/dtapp/fnmusic-sync
+    maintainer: liguangchun <13553695467@139.com>
+    description: |
+      fnOS 飞牛音乐 Last.fm / ListenBrainz 自动 scrobble 透明代理。
+      接管 trim-music 的 unix socket，解析播放事件并推送到 Last.fm 与 ListenBrainz。
+    license: MIT
+    section: default
+    priority: optional
+    # nfpm 会把 semver 预发布拆出来并用 ~ 拼接（0.1.32-rc.1 -> 0.1.32~rc.1-1），
+    # 与 Makefile 的 DEB_VERSION 同口径；release 固定为 1。
+    release: '1'
+    formats:
+      - deb
+    bindir: /usr/bin
+    scripts:
+      postinstall: .nfpm-scripts/postinstall.sh
+      preremove: .nfpm-scripts/preremove.sh
+    deb:
+      compression: xz
+
+# fpk 需要 fnpack，GoReleaser 没有对应的打包器；
+# 由 make goreleaser-snapshot / goreleaser-release 在构建结束后调用
+# scripts/goreleaser/package-fpk.sh 生成（直接执行 goreleaser 不会产出 fpk）。
+
+# 发布仍由现有五平台流水线负责，这里只产出 dist/ 下的构建产物
+release:
+  disable: true
