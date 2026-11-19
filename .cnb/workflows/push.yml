@@ -11,12 +11,42 @@
           - /root/.local/share/pnpm/store:copy-on-write # pnpm 全局存储 - 加速前端依赖安装
           - /go/pkg/mod:copy-on-write # 仅缓存 Go 模块下载，避免覆盖镜像内预装的 /go/bin 工具
       stages:
-        - name: 安装所有依赖
-          script: make deps
+        - name: 安装全部 Go 依赖
+          script: make deps-go
+
+        - name: 安装全部前端依赖
+          script: make deps-node
 
         # - name: 格式化/修复项目
         #   script: make format
 
-        - name: 检查/测试项目
+        - name: 运行 Go 静态检查
+          script: make check-go-vet
+
+        - name: 运行 Go lint 扫描
+          script: make  check-go-lint
+
+        - name: 运行 Go fix 问题
+          script: make check-go-fix
+
+        - name: 运行 Go 单元测试
+          script: make check-go-test
+
+        - name: 运行 Go 赖漏洞检查
+          script: make check-go-vuln
+
+        - name: 同步前端依赖 (确保环境一致)
+          script: make check-node-install
+
+        - name: 检查前端安全漏洞 (仅高危阻断)
+          script: make check-node-audit
+
+        - name: 检查前端过时依赖
           # CI=true：流水线里「过时依赖」只提示不阻塞（make check STRICT_CHECKS=0）
-          script: CI=true make check
+          script: CI=true make check-node-outdated
+
+        - name: 检测前端未使用的依赖 (knip)
+          script: make check-node-knip
+
+        - name: 运行前端单元测试
+          script: make check-node-vitest
