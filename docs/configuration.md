@@ -223,21 +223,21 @@ Web UI 的 `GET/PUT /api/library` 会返回并接受这个字段（`internal/web
 
 ## 5. 路径矩阵
 
-| 用途                 | 传统安装                                                                     | fpk 安装                                        | 决定代码                                                              |
-|----------------------|------------------------------------------------------------------------------|-------------------------------------------------|-----------------------------------------------------------------------|
-| 二进制               | `/usr/bin/fnmusic-sync`                                                      | `$TRIM_APPDEST/fnmusic-sync`                    | `.nfpm.yaml` 的 `contents.dst`（deb）、`fpkg/app/fnmusic-sync`（fpk） |
-| 配置文件             | `/etc/fnmusic-sync/config.yaml`                                              | `$TRIM_PKGETC/config.yaml`                      | `cmd/fnmusic-sync/runtime.go:45-75`                                   |
-| 运营状态库 state.db  | `/var/lib/fnmusic-sync/state.db`                                             | `$TRIM_PKGVAR/state.db`                         | 同上（`StatePath`）                                                   |
-| 数据库 data.db       | `/var/lib/fnmusic-sync/data.db`                                              | `$TRIM_PKGVAR/data.db`                          | `cmd/fnmusic-sync/main.go:147-159`（state 库同目录 + `data.db`）      |
-| 日志目录             | `/var/log/fnmusic-sync`                                                      | `$TRIM_PKGVAR/logs`                             | `runtime.go:58-64`                                                    |
-| 主日志               | `/var/log/fnmusic-sync/fnmusic-sync.log`                                     | `$TRIM_PKGVAR/logs/fnmusic-sync.log`            | `cmd/fnmusic-sync/logging.go:53-55`                                   |
-| 请求明细日志         | 同日志目录下的 `capture.log`、`feiniu.log`、`lastfm.log`、`listenbrainz.log` | 同左                                            | `internal/proxy/capture.go`、`main.go:194-196`                        |
-| 单实例锁             | `/run/fnmusic-sync/run.lock`                                                 | `$TRIM_PKGVAR/run.lock`                         | `runtime.go:29`、`main.go:355-380`                                    |
-| 代理监听 socket      | `/var/run/trim_music.socket`                                                 | 同左                                            | `internal/buildinfo/buildinfo.go`（常量）                             |
-| 官方 upstream socket | `/var/run/trim_music_upstream.socket`                                        | 同左                                            | 同上                                                                  |
-| Web UI socket        | 不启动                                                                       | `$TRIM_APPDEST/app.sock`                        | `cmd/fnmusic-sync/webui_fpk.go:12-30`                                 |
-| fpk 进程日志 / PID   | —                                                                            | `$TRIM_PKGVAR/info.log`、`$TRIM_PKGVAR/app.pid` | `fpkg/cmd/main`                                                       |
-| fpk 向导值           | —                                                                            | `$TRIM_PKGETC/config.env`（`wizard_debug`）     | `fpkg/cmd/install_callback`                                           |
+| 用途                 | 传统安装                                                                     | fpk 安装                                        | 决定代码                                                                    |
+|----------------------|------------------------------------------------------------------------------|-------------------------------------------------|-----------------------------------------------------------------------------|
+| 二进制               | `/usr/bin/fnmusic-sync`                                                      | `$TRIM_APPDEST/fnmusic-sync`                    | `.goreleaser.yaml` 的 `nfpms.bindir`（deb）、`fpkg/app/fnmusic-sync`（fpk） |
+| 配置文件             | `/etc/fnmusic-sync/config.yaml`                                              | `$TRIM_PKGETC/config.yaml`                      | `cmd/fnmusic-sync/runtime.go:45-75`                                         |
+| 运营状态库 state.db  | `/var/lib/fnmusic-sync/state.db`                                             | `$TRIM_PKGVAR/state.db`                         | 同上（`StatePath`）                                                         |
+| 数据库 data.db       | `/var/lib/fnmusic-sync/data.db`                                              | `$TRIM_PKGVAR/data.db`                          | `cmd/fnmusic-sync/main.go:147-159`（state 库同目录 + `data.db`）            |
+| 日志目录             | `/var/log/fnmusic-sync`                                                      | `$TRIM_PKGVAR/logs`                             | `runtime.go:58-64`                                                          |
+| 主日志               | `/var/log/fnmusic-sync/fnmusic-sync.log`                                     | `$TRIM_PKGVAR/logs/fnmusic-sync.log`            | `cmd/fnmusic-sync/logging.go:53-55`                                         |
+| 请求明细日志         | 同日志目录下的 `capture.log`、`feiniu.log`、`lastfm.log`、`listenbrainz.log` | 同左                                            | `internal/proxy/capture.go`、`main.go:194-196`                              |
+| 单实例锁             | `/run/fnmusic-sync/run.lock`                                                 | `$TRIM_PKGVAR/run.lock`                         | `runtime.go:29`、`main.go:355-380`                                          |
+| 代理监听 socket      | `/var/run/trim_music.socket`                                                 | 同左                                            | `internal/buildinfo/buildinfo.go`（常量）                                   |
+| 官方 upstream socket | `/var/run/trim_music_upstream.socket`                                        | 同左                                            | 同上                                                                        |
+| Web UI socket        | 不启动                                                                       | `$TRIM_APPDEST/app.sock`                        | `cmd/fnmusic-sync/webui_fpk.go:12-30`                                       |
+| fpk 进程日志 / PID   | —                                                                            | `$TRIM_PKGVAR/info.log`、`$TRIM_PKGVAR/app.pid` | `fpkg/cmd/main`                                                             |
+| fpk 向导值           | —                                                                            | `$TRIM_PKGETC/config.env`（`wizard_debug`）     | `fpkg/cmd/install_callback`                                                 |
 
 `state.db` 在日志里叫「数据库」，`data.db` 不会出现在启动日志里 —— 两者的职责与表结构见 [database.md](database.md)。
 

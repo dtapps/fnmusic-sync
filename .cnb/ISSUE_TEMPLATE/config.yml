@@ -22,4 +22,4 @@ contact_links:
 
   - name: 构建与发布流程
     url: https://cnb.cool/dtapp/fnmusic-sync/-/blob/main/docs/contributing.md
-    about: 版本号规则、构建产物（deb / fpk）与发布流程的说明
+    about: 版本号规则、构建产物（tar.gz / deb / fpk）与发布流程的说明

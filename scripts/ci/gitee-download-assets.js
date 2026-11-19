@@ -216,7 +216,7 @@ function probeSize(url) {
 }
 
 // 落盘校验：网关/反代拿 200 回一个 HTML 错误页时，大小可能对得上，内容却全是文本。
-// deb 必须是 ar 归档（!<arch>），fpk 必须是 gzip（1f 8b）。
+// deb 必须是 ar 归档（!<arch>），fpk / tar.gz 必须是 gzip（1f 8b）。
 function looksRight(dest, name) {
   const fd = fs.openSync(dest, 'r');
   const buf = Buffer.alloc(8);
@@ -225,7 +225,7 @@ function looksRight(dest, name) {
   if (/\.deb$/.test(name)) {
     return buf.slice(0, 8).toString('ascii') === '!<arch>\n';
   }
-  if (/\.fpk$/.test(name)) {
+  if (/\.(fpk|tar\.gz)$/.test(name)) {
     return buf[0] === 0x1f && buf[1] === 0x8b;
   }
   return true;
@@ -344,7 +344,7 @@ function downloadFile(asset, dest, expectedSize) {
 }
 
 // ---------- 主流程 ----------
-// 与另外四个平台逐字一致的四个产物。cnb 源不查任何元数据接口：名字是固定的，
+// 与 CNB / GitHub 逐字一致的六个产物。cnb 源不查任何元数据接口：名字是固定的，
 // 大小用 probeSize 向 CNB 现问，正文本地生成 —— 全程不碰 GitHub 的 API，
 // 免得出现「附件从 CNB 来、更新内容从 GitHub 来」这种自相矛盾的发布。
 const CNB_FILES = [
@@ -352,10 +352,12 @@ const CNB_FILES = [
   { name: 'fnmusic-sync_arm64.deb', arch: 'arm64', desc: 'Debian / Ubuntu' },
   { name: 'fnmusic-sync-amd64.fpk', arch: 'amd64', desc: '飞牛 fnOS' },
   { name: 'fnmusic-sync-arm64.fpk', arch: 'arm64', desc: '飞牛 fnOS' },
+  { name: 'fnmusic-sync-linux-amd64.tar.gz', arch: 'amd64', desc: 'Linux 通用包（解压即用）' },
+  { name: 'fnmusic-sync-linux-arm64.tar.gz', arch: 'arm64', desc: 'Linux 通用包（解压即用）' },
 ];
 
 // ⚠ 这份正文只是兜底：.workflow/release.yml 在下载之后会调用
-// scripts/ci/render-release-body.sh 覆盖它（那是五个平台共用的唯一实现，
+// scripts/ci/render-release-body.sh 覆盖它（那是三个平台共用的唯一实现，
 // 含校验节与提交行）。只有那个脚本在 Gitee 环境里跑不起来时，才会用到这份。
 function localBody(sizes) {
   const pre = (process.env.PRERELEASE || 'false').trim() === 'true';

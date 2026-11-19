@@ -10,6 +10,9 @@
           - /root/.cache/go-build:copy-on-write # Go 构建缓存 - 加速编译
           - /root/.local/share/pnpm/store:copy-on-write # pnpm 全局存储 - 加速前端依赖安装
           - /go/pkg/mod:copy-on-write # 仅缓存 Go 模块下载，避免覆盖镜像内预装的 /go/bin 工具
+      # CNB 不会自动注入 CI：make 里「过时依赖只提示」等 CI 分支靠它生效。
+      env:
+        CI: 'true'
       stages:
         - name: 安装全部 Go 依赖
           script: make deps-go
@@ -42,8 +45,7 @@
           script: make check-node-audit
 
         - name: 检查前端过时依赖
-          # CI=true：流水线里「过时依赖」只提示不阻塞（make check STRICT_CHECKS=0）
-          script: CI=true make check-node-outdated
+          script: make check-node-outdated
 
         - name: 检测前端未使用的依赖 (knip)
           script: make check-node-knip

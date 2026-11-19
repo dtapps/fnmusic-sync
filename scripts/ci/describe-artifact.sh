@@ -34,6 +34,7 @@ set -eu
 [ -n "${DESC_LINUX_APPIMAGE+x}" ] || DESC_LINUX_APPIMAGE='AppImage 便携版（chmod +x 后直接运行）'
 [ -n "${DESC_LINUX_DEB+x}" ] || DESC_LINUX_DEB='Debian/Ubuntu 安装包（dpkg -i）'
 [ -n "${DESC_LINUX_RPM+x}" ] || DESC_LINUX_RPM='Fedora/RHEL 安装包（rpm -i）'
+[ -n "${DESC_LINUX_APK+x}" ] || DESC_LINUX_APK='Alpine Linux 安装包（apk add）'
 [ -n "${DESC_LINUX_PKG_TAR_ZST+x}" ] || DESC_LINUX_PKG_TAR_ZST='Arch Linux 安装包（pacman -U）'
 [ -n "${DESC_LINUX_TARGZ+x}" ] || DESC_LINUX_TARGZ='Linux 通用包（tar.gz，解压即用）'
 [ -n "${DESC_WINDOWS_INSTALLER+x}" ] || DESC_WINDOWS_INSTALLER='Windows 安装程序（exe，双击安装）'
@@ -88,6 +89,10 @@ parse_artifact_name() {
       EXT='.rpm'
       stem="${fname%.rpm}"
       ;;
+    *.apk)
+      EXT='.apk'
+      stem="${fname%.apk}"
+      ;;
     *.fpk)
       EXT='.fpk'
       stem="${fname%.fpk}"
@@ -132,7 +137,7 @@ parse_artifact_name() {
     *)
       # 文件名里没有 os 段（如 项目名_amd64.deb）：按扩展名推断平台
       case "${EXT}" in
-        .deb | .rpm | .pkg.tar.zst | .AppImage) PLAT='Linux' ;;
+        .deb | .rpm | .apk | .pkg.tar.zst | .AppImage) PLAT='Linux' ;;
         .fpk) PLAT='fnOS' ;;
         .exe | .exe.zip | .zip) PLAT='Windows' ;;
         *) PLAT="${os}" ;;
@@ -157,6 +162,7 @@ describe_artifact() {
     Linux::.AppImage) tpl="${DESC_LINUX_APPIMAGE}" ;;
     Linux::.deb) tpl="${DESC_LINUX_DEB}" ;;
     Linux::.rpm) tpl="${DESC_LINUX_RPM}" ;;
+    Linux::.apk) tpl="${DESC_LINUX_APK}" ;;
     Linux::.pkg.tar.zst) tpl="${DESC_LINUX_PKG_TAR_ZST}" ;;
     Linux::.tar.gz) tpl="${DESC_LINUX_TARGZ}" ;;
     Windows:installer:.exe) tpl="${DESC_WINDOWS_INSTALLER}" ;;
@@ -210,6 +216,7 @@ if [ "${1:-}" = '--self-test' ]; then
   check_parse 'App-1.2.3-nightly.20260101-linux-amd64.pkg.tar.zst' 'Linux:x86_64:.pkg.tar.zst:'
   check_parse 'App-1.2.3-nightly.20260101-windows-amd64-install.exe' 'Windows:x86_64:.exe:installer'
   check_parse 'App_amd64.deb' 'Linux:x86_64:.deb:'
+  check_parse 'App-linux-arm64.apk' 'Linux:ARM64:.apk:'
   check_parse 'App-arm64.fpk' 'fnOS:ARM64:.fpk:'
   check_parse 'App-windows-arm64.exe.zip' 'Windows:ARM64:.exe.zip:'
 
@@ -220,6 +227,7 @@ if [ "${1:-}" = '--self-test' ]; then
   check_desc 'App-1.2.3-nightly.20260101-linux-amd64.AppImage' 'AppImage 便携版（chmod +x 后直接运行）'
   check_desc 'App-1.2.3-nightly.20260101-linux-amd64.deb' 'Debian/Ubuntu 安装包（dpkg -i）'
   check_desc 'App-1.2.3-nightly.20260101-linux-amd64.rpm' 'Fedora/RHEL 安装包（rpm -i）'
+  check_desc 'App-1.2.3-nightly.20260101-linux-amd64.apk' 'Alpine Linux 安装包（apk add）'
   check_desc 'App-1.2.3-nightly.20260101-linux-amd64.pkg.tar.zst' 'Arch Linux 安装包（pacman -U）'
   check_desc 'App-1.2.3-nightly.20260101-windows-amd64-install.exe' 'Windows 安装程序（exe，双击安装）'
   # 下划线架构 + fnOS 包

@@ -2,8 +2,8 @@
 #
 # 版本号归一化 + 预发布判定。
 #
-# 事实来源：五个平台的 release 流水线（CNB / GitHub / GitLab / GitCode / Gitee）
-# 与 scripts/ci/build-linux-packages.sh 都 source 这一份实现，避免各写一套
+# 事实来源：三个平台的 release 流水线（CNB / GitHub / Gitee）
+# 都 source 这一份实现，避免各写一套
 # grep 正则、判断口径慢慢跑偏：
 #
 #   v1.2.3 / 1.2.3        -> TAG=v1.2.3        PRERELEASE=false   正式版
@@ -40,7 +40,7 @@
 # 「同渠道的上一个 tag」是另一回事（changelog 的对比基准），在那边单独由
 # scripts/ci/resolve-prev-tag.sh 判定，不要和这里的正则混用。
 #
-# 拉取 tag 是调用方的责任（GitHub 用 fetch-depth: 0，CNB / GitLab / GitCode 各自
+# 拉取 tag 是调用方的责任（GitHub 用 fetch-depth: 0，CNB 自己
 # git fetch --tags），这里不做兜底 fetch。
 #
 # 环境变量：
@@ -172,7 +172,7 @@ resolve_version() {
   # 后缀判定：-rc / -beta / -alpha / -nightly（大小写不敏感，rc1 / rc.1 / 裸 rc 都算预发布）
   # 匹配要求后缀出现在版本号末尾，避免 v1.2.3-source、v1.2.3-hotfix 这类被误判。
   # nightly 必须在这里：漏了它，v1.2.3-nightly.20260101 会被判成正式版，
-  # GitHub/CNB 不勾 prerelease、GitLab/GitCode 标成 latest，稳定用户会被推到 nightly 上。
+  # GitHub/CNB 不勾 prerelease，稳定用户会被推到 nightly 上。
   if printf '%s' "${TAG}" | grep -qiE -- '-(rc|beta|alpha|nightly)([.-]?[0-9A-Za-z.-]*)$'; then
     PRERELEASE="true"
     VERSION_TYPE="预发布"
@@ -232,7 +232,7 @@ check_version() {
 }
 
 # source 只带进函数，不调用 resolve_version 就什么都算不出来。
-# 五个平台的流水线都靠这个调用，漏一处第一步就会在 set -u 下红掉 —— 这里把约定钉死。
+# 三个平台的流水线都靠这个调用，漏一处第一步就会在 set -u 下红掉 —— 这里把约定钉死。
 if [ -n "${TAG:-}" ]; then
   printf '  ✗ 仅 source 就已经设置了 TAG=%s，函数不该有副作用\n' "${TAG}"
   failures=$((failures + 1))

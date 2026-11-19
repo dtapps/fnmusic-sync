@@ -26,8 +26,7 @@
 # 临时文件
 /temp
 
-# nfpm 打包临时文件（Makefile 生成并清理）
-.nfpm-*.yaml
+# deb 安装脚本（Makefile 的 goreleaser-prepare 生成）
 .nfpm-scripts/
 
 # 日志文件

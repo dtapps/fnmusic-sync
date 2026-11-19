@@ -16,6 +16,9 @@ permissions:
   contents: read
   packages: read # 拉取 GHCR 上的 CI 镜像（公开镜像亦可匿名拉，写上以防仓库转私有）
 
+env:
+  CI: 'true'
+
 # 并发策略：同一分支的多次触发串行排队，绝不取消「正在运行」的旧运行。
 # cancel-in-progress: false 表示新运行进入 pending 等待，而非抢占/取消 in-progress。
 # queue: max 让同一 group 最多保留 100 个 pending（默认 queue: single 只留 1 个，
@@ -82,87 +85,43 @@ jobs:
             pnpm-${{ runner.os }}-
 
       - name: 安装全部 Go 依赖
-        env:
-          GOPATH: ${{ env.GO_PATH_DIR }}
-          GOBIN: ${{ env.GO_BIN_DIR }}
         run: make deps-go
 
       - name: 安装全部前端依赖
-        env:
-          GOPATH: ${{ env.GO_PATH_DIR }}
-          GOBIN: ${{ env.GO_BIN_DIR }}
         run: make deps-node
 
       - name: 生成 sqlc 代码
-        env:
-          GOPATH: ${{ env.GO_PATH_DIR }}
-          GOBIN: ${{ env.GO_BIN_DIR }}
         run: make sqlc
 
       # - name: 格式化/修复项目
-      #   env:
-      #     GOPATH: ${{ env.GO_PATH_DIR }}
-      #     GOBIN: ${{ env.GO_BIN_DIR }}
       #   run: make format
 
       - name: 运行 Go 静态检查
-        env:
-          GOPATH: ${{ env.GO_PATH_DIR }}
-          GOBIN: ${{ env.GO_BIN_DIR }}
         run: make check-go-vet
 
       - name: 运行 Go lint 扫描
-        env:
-          GOPATH: ${{ env.GO_PATH_DIR }}
-          GOBIN: ${{ env.GO_BIN_DIR }}
         run: make check-go-lint
 
       - name: 运行 Go fix 问题
-        env:
-          GOPATH: ${{ env.GO_PATH_DIR }}
-          GOBIN: ${{ env.GO_BIN_DIR }}
         run: make check-go-fix
 
       - name: 运行 Go 单元测试
-        env:
-          GOPATH: ${{ env.GO_PATH_DIR }}
-          GOBIN: ${{ env.GO_BIN_DIR }}
         run: make check-go-test
 
       - name: 运行 Go 赖漏洞检查
-        env:
-          GOPATH: ${{ env.GO_PATH_DIR }}
-          GOBIN: ${{ env.GO_BIN_DIR }}
         run: make check-go-vuln
 
       - name: 同步前端依赖 (确保环境一致)
-        env:
-          GOPATH: ${{ env.GO_PATH_DIR }}
-          GOBIN: ${{ env.GO_BIN_DIR }}
         run: make check-node-install
 
       - name: 检查前端安全漏洞 (仅高危阻断)
-        env:
-          GOPATH: ${{ env.GO_PATH_DIR }}
-          GOBIN: ${{ env.GO_BIN_DIR }}
         run: make check-node-audit
 
       - name: 检查前端过时依赖
-        env:
-          GOPATH: ${{ env.GO_PATH_DIR }}
-          GOBIN: ${{ env.GO_BIN_DIR }}
-          # 显式声明：流水线里「过时依赖」只提示不阻塞（make check STRICT_CHECKS=0）
-          CI: 'true'
         run: make check-node-outdated
 
       - name: 检测前端未使用的依赖 (knip)
-        env:
-          GOPATH: ${{ env.GO_PATH_DIR }}
-          GOBIN: ${{ env.GO_BIN_DIR }}
         run: make check-node-knip
 
       - name: 运行前端单元测试
-        env:
-          GOPATH: ${{ env.GO_PATH_DIR }}
-          GOBIN: ${{ env.GO_BIN_DIR }}
         run: make check-node-vitest

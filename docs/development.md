@@ -8,15 +8,14 @@
 
 版本号不是拍脑袋写的，全部来自两处仓库内的硬证据 `go.mod`、`cmd/frontend/package.json`，加上 CI 统一镜像 `dtapps/golang/fnpack` 的 `ARG`（该 Dockerfile 不在本仓库，见 [ci-image.md](ci-image.md)）。
 
-| 组件   | 仓库内要求的版本               | 依据                                                                                 |
-|--------|--------------------------------|--------------------------------------------------------------------------------------|
-| Go     | 1.27.3                         | `go.mod` 的 `go 1.27.3`；CI 基础镜像 `golang:1.27.3-trixie`                          |
-| Node   | 26.12.1（CI）／25.9.0（nvmrc） | `dtapps/golang/fnpack` 镜像的 `ARG NODE_VERSION`；`cmd/frontend/.nvmrc`              |
-| pnpm   | 12.16.0（CI）／12.15.0（锁定） | `dtapps/golang/fnpack` 镜像的 `ARG PNPM_VERSION`；`package.json` 的 `packageManager` |
-| sqlc   | v1.31.1                        | `dtapps/golang/fnpack` 镜像的 `ARG SQLC_VERSION`；生成代码头部同样记录该版本         |
-| nfpm   | 2.48.0                         | `dtapps/golang/fnpack` 镜像的 `ARG NFPM_VERSION`，仅 deb 打包需要                    |
-| fnpack | 1.2.3                          | `dtapps/golang/fnpack` 镜像的 `ARG FNPACK_VERSION`，仅 fpk 打包需要                  |
-| UPX    | 5.2.1                          | `dtapps/golang/fnpack` 镜像的 `ARG UPX_VERSION`，可选压缩                            |
+| 组件       | 仓库内要求的版本               | 依据                                                                                 |
+|------------|--------------------------------|--------------------------------------------------------------------------------------|
+| Go         | 1.27.3                         | `go.mod` 的 `go 1.27.3`；CI 基础镜像 `golang:1.27.3-trixie`                          |
+| Node       | 26.12.1（CI）／25.9.0（nvmrc） | `dtapps/golang/fnpack` 镜像的 `ARG NODE_VERSION`；`cmd/frontend/.nvmrc`              |
+| pnpm       | 12.16.0（CI）／12.15.0（锁定） | `dtapps/golang/fnpack` 镜像的 `ARG PNPM_VERSION`；`package.json` 的 `packageManager` |
+| sqlc       | v1.31.1                        | `dtapps/golang/fnpack` 镜像的 `ARG SQLC_VERSION`；生成代码头部同样记录该版本         |
+| goreleaser | v2.20.2                        | `Makefile` 的 `GORELEASER_VERSION`，缺失时由 `goreleaser-install` 自动安装           |
+| fnpack     | 1.2.3                          | `dtapps/golang/fnpack` 镜像的 `ARG FNPACK_VERSION`，仅 fpk 打包需要                  |
 
 Node 与 pnpm 的版本在仓库里有**两份互相不一致的记录**：CI 镜像用 `ARG NODE_VERSION=26.12.1` / `PNPM_VERSION=12.16.0`，而 `cmd/frontend/.nvmrc` 写 `25.9.0`、`cmd/frontend/package.json` 的 `packageManager` 写 `pnpm@12.15.0`。本地装哪个都不会立刻出错，但遇到「本地过、CI 不过」时，先按 CI 镜像里的实际版本对齐：`docker run --rm --platform linux/amd64 ghcr.io/dtapps/golang/fnpack:latest bash -c 'node -v && pnpm -v'`。
 
@@ -27,8 +26,8 @@ Node 与 pnpm 的版本在仓库里有**两份互相不一致的记录**：CI �
 | 来源                               | 覆盖的工具                                                                       | 版本策略                                                  |
 |------------------------------------|----------------------------------------------------------------------------------|-----------------------------------------------------------|
 | `make tool-deps`（`Makefile`）     | sqlc、golangci-lint、govulncheck、gojq、yamlfmt、shfmt、sql-formatter、dockerfmt | 全部 `@latest`，不锁版本                                  |
-| 手工 `go install` / 系统包管理器   | markdownfmt、nfpm、fnpack、upx                                                   | 自行决定                                                  |
-| CI 统一镜像 `dtapps/golang/fnpack` | 上述全部（含 markdownfmt、nfpm、fnpack、upx）+ Node + pnpm                       | 全部 `ARG` 锁死，可复现（ARG 在镜像项目里，本仓不再声明） |
+| 手工 `go install` / 系统包管理器   | markdownfmt、fnpack、goreleaser                                                  | 自行决定（goreleaser 由 `make` 按固定版本安装）           |
+| CI 统一镜像 `dtapps/golang/fnpack` | 上述全部（含 markdownfmt、fnpack）+ Node + pnpm                                  | 全部 `ARG` 锁死，可复现（ARG 在镜像项目里，本仓不再声明） |
 
 `make tool-deps` 的实际安装清单（逐条对应 `Makefile` 的 `tool-deps` 目标）：
 
@@ -52,13 +51,13 @@ Node 与 pnpm 的版本在仓库里有**两份互相不一致的记录**：CI �
    ~/go/bin/markdownfmt -w docs/development.md
    ```
 
-2. **`nfpm`、`fnpack`、`upx` 也不在 `tool-deps` 里。** 它们决定 `package-linux-*` 能不能跑；而 `make check` 依赖 `package-linux`（见下节），所以缺 `fnpack` 时 `make check` 会直接失败，而不是只报一个 lint 错。
+2. **`fnpack` 与 `goreleaser` 也不在 `tool-deps` 里。** `fnpack` 决定 fpk 能不能打；`goreleaser` 缺失时 `make goreleaser-*` 会按 `GORELEASER_VERSION` 自动 `go install`。
 
 3. **`tool-deps` 用 `@latest`，CI 镜像用固定 `ARG`。** 本地 `golangci-lint` 比 CI 新时会多出一批告警。看到只在本地出现的 lint 报错，先比版本：CI 是 `GOLANGCI_LINT_VERSION=v2.15.0`。`sqlc` 同理——生成文件头写着 `sqlc v1.31.1`，用更新版本重新 `make sqlc` 会把这行改掉，产出与仓库现有生成代码不一致的 diff。
 
 ## Make 目标参考
 
-`Makefile` 顶部集中定义了几个全局变量，读目标之前先知道它们：`VERSION`（`git describe --tags --always --dirty`，剥掉 `refs/tags/` 前缀）、`PKG_VERSION`（去掉 `v` 前缀，进 deb/fpk 元数据）、`COMMIT`、`BUILDTIME`、`REPO_SOURCE`（默认 `cnb`）、`BUILD_TAG`（固定 `fpk`）、`ENABLE_UPX` / `ENABLE_ARCHIVE`（默认 1）。
+`Makefile` 顶部集中定义了几个全局变量，读目标之前先知道它们：`VERSION`（`git describe --tags --always --dirty`，剥掉 `refs/tags/` 前缀）、`PKG_VERSION`（去掉 `v` 前缀，进 deb/fpk 元数据）、`REPO_SOURCE`（默认 `cnb`）、`GORELEASER_VERSION`（固定版本）。
 
 | 目标                                | 做什么                                                                                                 | 产物                                                                                                   | 依赖                                                                     |
 |-------------------------------------|--------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------|
@@ -73,20 +72,16 @@ Node 与 pnpm 的版本在仓库里有**两份互相不一致的记录**：CI �
 | `dev-server`                        | `go run ./cmd/devserver`，监听 `:8080`                                                                 | `tests/configs/config.yaml`、`tests/configs/state.db`、`tests/logs/`                                   | `cmd/devserver/main.go` 存在（见下文）                                   |
 | `dev-frontend`                      | `cd cmd/frontend && pnpm dev`，Vite `:5173`，把 `/app/fnmusic-sync/api` 代理到 `:8080`                 | 无（内存热更新）                                                                                       | `pnpm install`                                                           |
 | `build-frontend`                    | `sed` 把 `PKG_VERSION` 写进 `cmd/frontend/package.json`，再 `pnpm build`                               | `internal/webui/www/app.js`、`app.css`、`chunks/`、`images/`                                           | pnpm                                                                     |
-| `build-linux-amd64`                 | 编译两份 amd64 二进制：不带 tag / 带 `fpk` tag；各自 UPX 压缩 + `tar.gz`                               | `bin/fnmusic-sync-linux-amd64{,.tar.gz}`、`bin/fnmusic-sync-fpk-linux-amd64{,.tar.gz}`                 | Go                                                                       |
-| `build-linux-arm64`                 | 同上，arm64                                                                                            | `bin/fnmusic-sync-linux-arm64{,.tar.gz}`、`bin/fnmusic-sync-fpk-linux-arm64{,.tar.gz}`                 | Go                                                                       |
-| `build-linux-all`                   | `backup-version` → `build-frontend` → `build-linux-amd64` → `build-linux-arm64` → `restore-version`    | 上面全部                                                                                               | Go、pnpm                                                                 |
-| `package-linux-deb`                 | 用**不带 tag** 的二进制 + `.nfpm.yaml` 打两次 `nfpm package -p deb`                                    | `bin/fnmusic-sync_amd64.deb`、`bin/fnmusic-sync_arm64.deb`                                             | nfpm、`build-linux-all`                                                  |
-| `package-linux-fpk`                 | 把**带 tag** 的二进制拷进 `fpkg/app/fnmusic-sync`，替换 manifest 占位符后 `fnpack build`               | `bin/fnmusic-sync-amd64.fpk`、`bin/fnmusic-sync-arm64.fpk`                                             | fnpack、`build-linux-all`                                                |
-| `package-linux-all`                 | `package-linux-deb` + `package-linux-fpk`                                                              | `bin/` 下 deb + fpk 共 4 个包                                                                          | 上述两者                                                                 |
-| `package-linux`                     | `package-linux-all` 的别名                                                                             | 同上                                                                                                   | 同上                                                                     |
+| `goreleaser-install`                | 按 `GORELEASER_VERSION` 安装 goreleaser（已存在则跳过）                                                | `$(go env GOPATH)/bin/goreleaser`                                                                      | Go、网络                                                                 |
+| `goreleaser-check`                  | `goreleaser check` 校验配置                                                                            | —                                                                                                      | `goreleaser-install`                                                     |
+| `goreleaser-prepare`                | `backup-version` → `build-frontend` → `restore-version` → 生成 `.nfpm-scripts/`                        | 前端产物、安装/卸载脚本                                                                                | Go、pnpm                                                                 |
+| `goreleaser-snapshot`               | 快照构建（无需 tag）+ 调 `package-fpk.sh` 打 fpk                                                       | `dist/` 下 tar.gz / deb / fpk                                                                          | goreleaser、fnpack                                                       |
+| `goreleaser-release`                | 按 tag 构建 + 打 fpk（CI 需传 `GORELEASER_CURRENT_TAG`，否则当前提交必须有 tag）                       | `dist/` 下 tar.gz / deb / fpk                                                                          | goreleaser、fnpack                                                       |
 | `format`                            | 顺序执行 8 个 `format-*`：go、frontend、yaml、json、markdown、shell、sql、docker                       | 就地改写源文件                                                                                         | gofmt、pnpm、gojq、yamlfmt、markdownfmt、shfmt、sql-formatter、dockerfmt |
 | `check`                             | `check-node` + `check-go`                                                                              | 无（只检查，不产出安装包）                                                                             | 全部格式化/lint 工具 + pnpm                                              |
 | `check-node`                        | 前端：同步依赖 → audit → outdated → `pnpm run lint`（tsc + oxlint）→ knip 未使用依赖 → `vitest run`    | 无                                                                                                     | pnpm                                                                     |
 | `check-go`                          | `go vet ./...` + golangci-lint（多平台 + `--fix`）→ `go test ./...`                                    | 修复后的源文件                                                                                         | golangci-lint、Go 工具链                                                 |
-| `clean`                             | `rm -rf bin && mkdir bin`                                                                              | 空 `bin/`                                                                                              | 无                                                                       |
-| `clean-binaries`                    | 删 4 个裸二进制，保留 `.tar.gz` 与安装包                                                               | —                                                                                                      | `bin/` 已有产物                                                          |
-| `clean-archives`                    | 删裸二进制 + `.tar.gz`，只留安装包                                                                     | —                                                                                                      | 同上                                                                     |
+| `clean`                             | `rm -rf bin && mkdir bin`（只用于清版本备份）                                                          | 空 `bin/`                                                                                              | 无                                                                       |
 | `backup-version`                    | 把 `cmd/frontend/package.json` 复制成 `bin/package.json.ver.bak`（已存在则沿用）                       | 备份文件                                                                                               | 无                                                                       |
 | `restore-version`                   | 用备份覆盖回 `package.json` 并删备份                                                                   | —                                                                                                      | 有备份                                                                   |
 | `sync` / `sync-cnb` / `sync-github` | 多远程 `fetch` + `merge --ff-only`                                                                     | —                                                                                                      | 配好 `origin` / `github` remote                                          |
@@ -94,16 +89,16 @@ Node 与 pnpm 的版本在仓库里有**两份互相不一致的记录**：CI �
 
 `format` 的覆盖面有明确边界，别以为跑完就万事大吉：
 
-| 子目标            | 覆盖范围                                                                                                 | 备注                                                 |
-|-------------------|----------------------------------------------------------------------------------------------------------|------------------------------------------------------|
-| `format-go`       | 仓库内全部 Go：`gofmt -w -s .`、`go fmt ./...`、`go fix ./...`                                           | 含 `cmd/frontend` 之外的目录                         |
-| `format-frontend` | `cmd/frontend` 的 `src/**` 以及 `internal/webui/www/**`（排除 `www/app.css`、`www/app.js`）              | 走 `prettier` + `prettier-plugin-svelte`；失败只警告 |
-| `format-yaml`     | `.cnb`、`.github`、`.gitlab`、`.cnb.yml`、`.nfpm.yaml`、`internal/db`、`.golangci.yml`、`.gitlab-ci.yml` | 用 `.yamlfmt` 配置                                   |
-| `format-json`     | `fpkg/wizard/*`、`fpkg/app/ui/config`、`fpkg/config/privilege`、`fpkg/config/resource`                   | 用 `gojq .` 重排                                     |
-| `format-markdown` | 全仓 `*.md`（排除 `node_modules`、`.git`、`.vscode`、`.idea`、`.codebuddy`、`.trae`、`.mimocode`）       | 缺 `markdownfmt` 时静默跳过                          |
-| `format-shell`    | **只有** `fpkg/cmd/*`，参数 `shfmt -w -i 2 -ci -bn -s -ln bash`                                          | `scripts/*.sh` 不在范围内                            |
-| `format-sql`      | `internal/db/*.sql`、`internal/datadb/*.sql`，`sql-formatter --fix -l sql`                               | 格式化会改写 SQL 排版                                |
-| `format-docker`   | `.cnb`、`.github` 下的 `Dockerfile*`（GitLab 侧用外部统一镜像，仓内已无 Dockerfile）                     | 先找 `dockerfmt`，找不到就跳过                       |
+| 子目标            | 覆盖范围                                                                                           | 备注                                                 |
+|-------------------|----------------------------------------------------------------------------------------------------|------------------------------------------------------|
+| `format-go`       | 仓库内全部 Go：`gofmt -w -s .`、`go fmt ./...`、`go fix ./...`                                     | 含 `cmd/frontend` 之外的目录                         |
+| `format-frontend` | `cmd/frontend` 的 `src/**` 以及 `internal/webui/www/**`（排除 `www/app.css`、`www/app.js`）        | 走 `prettier` + `prettier-plugin-svelte`；失败只警告 |
+| `format-yaml`     | `.cnb`、`.github`、`.workflow`、`.cnb.yml`、`.goreleaser.yaml`、`internal/db`、`.golangci.yml`     | 用 `.yamlfmt` 配置                                   |
+| `format-json`     | `fpkg/wizard/*`、`fpkg/app/ui/config`、`fpkg/config/privilege`、`fpkg/config/resource`             | 用 `gojq .` 重排                                     |
+| `format-markdown` | 全仓 `*.md`（排除 `node_modules`、`.git`、`.vscode`、`.idea`、`.codebuddy`、`.trae`、`.mimocode`） | 缺 `markdownfmt` 时静默跳过                          |
+| `format-shell`    | **只有** `fpkg/cmd/*`，参数 `shfmt -w -i 2 -ci -bn -s -ln bash`                                    | `scripts/*.sh` 不在范围内                            |
+| `format-sql`      | `internal/db/*.sql`、`internal/datadb/*.sql`，`sql-formatter --fix -l sql`                         | 格式化会改写 SQL 排版                                |
+| `format-docker`   | `.cnb`、`.github` 下的 `Dockerfile*`（仓内已无 Dockerfile）                                        | 先找 `dockerfmt`，找不到就跳过                       |
 
 ### 新人最常用的 5 条命令
 
@@ -112,7 +107,7 @@ make deps                                   # 拉 Go 与前端依赖（每次切
 make sqlc                                   # 改过 schema.sql / queries.sql 后必跑
 make dev-server                             # 终端 1：Go API :8080
 make dev-frontend                           # 终端 2：Vite :5173（热更新）
-make build-linux-amd64                      # 只验编译，产物在 bin/
+make goreleaser-snapshot                    # 验完整构建，产物在 dist/
 ```
 
 提交前把最后一步换成 `make format && make check`（顺序与原因见 [contributing.md](contributing.md)）。
@@ -125,7 +120,7 @@ make build-linux-amd64                      # 只验编译，产物在 bin/
 |----------------------------------------|------|-------------------------------------------------------------------------------------------------|
 | 跑单元测试                             | ✅   | `go test ./...`、`pnpm --dir cmd/frontend exec vitest run`，不依赖任何 socket                   |
 | 调前端页面与 API                       | ✅   | `make dev-server` + `make dev-frontend`，`cmd/devserver` 在 `:8080` 复刻了 webui 的全部 handler |
-| 验打包链路                             | ✅   | `make package-linux-all`，但需要 `nfpm` + `fnpack`（Linux amd64 宿主）                          |
+| 验打包链路                             | ✅   | `make goreleaser-snapshot`，但需要 `fnpack`（Linux amd64 宿主）                                 |
 | `--check` 体检                         | ⚠️   | 只能看到「socket 不存在」；没有真实 socket 时结论必然是失败                                     |
 | socket 接管 / 502 复现                 | ❌   | 依赖 `/var/run/trim_music.socket` 与 `www-data` 的 nginx，只能在 fnOS 真机验证                  |
 | 播放事件识别（track_play / HLS 分片）  | ❌   | 事件来自飞牛 App 的真实请求，必须真机抓                                                         |
@@ -355,7 +350,7 @@ sudo tail -200 /var/log/fnmusic-sync/goroutine-dump.txt
 | `gofmt`/`go fmt`/`go fix` | 标准                                 | 全部 Go                                                                               |
 | `prettier`                | `package.json` 的 `format` 脚本参数  | `cmd/frontend` + `internal/webui/www`                                                 |
 | `oxlint`                  | `cmd/frontend/.oxlintrc.json`        | `no-unused-vars`（`_` 前缀豁免）、`no-explicit-any` 为 warn，`no-console` 关闭        |
-| `yamlfmt`                 | `.yamlfmt`（2 空格、120 列、单引号） | `.cnb`、`.github`、`.gitlab` 等 YAML                                                  |
+| `yamlfmt`                 | `.yamlfmt`（2 空格、120 列、单引号） | `.cnb`、`.github`、`.workflow` 等 YAML                                                |
 | `markdownfmt`             | 无配置文件                           | 全仓 Markdown                                                                         |
 | `shfmt`                   | `-i 2 -ci -bn -s -ln bash`           | 仅 `fpkg/cmd/*`                                                                       |
 | `sql-formatter`           | `--fix -l sql`                       | `internal/{db,datadb}/*.sql`                                                          |
