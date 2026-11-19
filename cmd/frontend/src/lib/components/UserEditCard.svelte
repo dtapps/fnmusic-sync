@@ -402,7 +402,7 @@
     </div>
   </Collapsible>
 
-  <Button variant="primary" class="w-full mt-4" onclick={onSave}
-    >{$currentUser.isAdmin ? $_('users.save') : $_('common.save')}</Button
-  >
+  <Button variant="primary" class="w-full mt-4" onclick={onSave}>
+    {$currentUser.isAdmin ? $_('users.save') : $_('common.save')}
+  </Button>
 </Card>

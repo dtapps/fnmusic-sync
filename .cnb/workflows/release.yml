@@ -18,12 +18,22 @@
     - https://cnb.cool/dtapp/envs/-/blob/main/fnmusic-sync.yml
   # 公告评论的两个开关/内容（job 级 env，所有 stage 都能读到）：
   # - ANNOUNCEMENT_COMMENT_ENABLED：是否在公告 Issue 上追加评论（true / false）；
-  # - ANNOUNCEMENT_COMMENT_TEXT：评论内容，默认让仓库里的 NPC（CodeBuddy）根据公告里的
-  #   更新内容整理一份用户友好的更新日志，并以评论形式发回。
+  # - ANNOUNCEMENT_COMMENT_TEXT：评论内容，默认让仓库里的 NPC（CodeBuddy）按「对比哪两个
+  #   tag」整理一份用户友好的更新日志，并以评论形式发回。
+  #
+  # ⚠️ {{PREVIOUSTAG}} / {{CURRENTTAG}} 不是 CNB 的模板语法：env 里的值就是字面量，
+  #   流水线不会替我们替换，直接发出去就是两个花括号。真实 tag 在「发布公告评论」stage
+  #   发评论前用 sed 换掉（基准 tag 由「准备发版公告」stage 调
+  #   scripts/ci/resolve-prev-tag.sh 算出并落盘）。所以模板里**不要出现 | 和 &**：
+  #   sed 用 | 当分隔符，& 在替换串里是特殊字符。
   env:
     ANNOUNCEMENT_COMMENT_ENABLED: 'true'
     ANNOUNCEMENT_COMMENT_TEXT: |-
-      @CodeBuddy 请根据本次发布的更新内容（见上方），整理一份用户友好的更新日志，并作为评论发布在这里。
+      @CodeBuddy 请对比标签 {{PREVIOUSTAG}} 和 {{CURRENTTAG}} 的差异（git log / git diff {{PREVIOUSTAG}}...{{CURRENTTAG}}），整理一份用户友好的更新日志，并作为评论发布在这里。
+      要求：
+      1. 忽略所有测试文件和文档文件的改动，只写用户能感知到的变更；
+      2. 按「新增 / 变更 / 修复 / 破坏性变更」分组，每条一句话说清对用户的影响，不要罗列提交哈希和纯内部重构；
+      3. 与上方公告里的「更新内容」保持一致，不要出现两套说法；取不到 git 历史时，就直接按上方公告的内容改写。
   stages:
     - name: 解析版本号（预发布看后缀）
       script: |
@@ -117,7 +127,7 @@
       script: make deps
 
     - name: 打包 Linux 安装包（deb/fpk）
-      script: VERSION=${INTERIOR_VERSION} REPO_SOURCE=cnb CNB_TOKEN="$FNMUSIC_SYNC_TOKEN" make package-linux-all
+      script: VERSION=${INTERIOR_VERSION} REPO_SOURCE=cnb CNB_TOKEN="$UPDATE_TOKEN" make package-linux-all
 
     - name: 清理二进制文件 + .tar.gz 压缩包
       script: make clean-archives
@@ -307,9 +317,9 @@
 
         API="${CNB_API_ENDPOINT:-https://api.cnb.cool}"
         REPO="dtapp/fnmusic-sync"
-        TOKEN="${FNMUSIC_SYNC_TOKEN:-}"
+        TOKEN="${UPDATE_TOKEN:-}"
         if [ -z "${TOKEN}" ]; then
-          echo "⚠ 没有 FNMUSIC_SYNC_TOKEN，跳过 nightly 清理"
+          echo "⚠ 没有 UPDATE_TOKEN，跳过 nightly 清理"
           exit 0
         fi
 
@@ -420,6 +430,20 @@
         export STABLE_URL="${WEB_BASE}/releases/latest"
         # stage 1 已切到本次发布的提交，HEAD 即发布提交。
         export COMMIT_SHA="$(git rev-parse HEAD 2>/dev/null || true)"
+
+        # 公告评论要指明「对比哪两个 tag」。基准必须和 Release 正文同口径（正式版对比
+        # 上一个正式版，不掺 rc/beta），所以直接调 resolve-prev-tag.sh —— 它是正文
+        # （release-changelog.sh）与这里共用的唯一一份判定，别另写一套 tag 排序。
+        #
+        # 补一次 tag 拉取：stage 1 用 `git fetch --depth 1 <commit>` 只取单个提交，
+        # 不保证带 tag。加 --force 是为了覆盖被改动过的旧 tag；失败不阻断
+        # （取不到就退回「按公告正文改写」）。
+        # 故意不加 --depth：给一个完整克隆的仓库加 --depth 反而会把它变浅、截掉历史。
+        git fetch --tags --quiet --force >/dev/null 2>&1 || true
+        PREV_TAG="$(sh scripts/ci/resolve-prev-tag.sh "${VERSION}" 2>/dev/null || true)"
+        # 落盘给下一步（评论 stage 跑在 cnb-cli 镜像里，不保证有 git，也不该重算一遍）。
+        printf '%s' "${PREV_TAG}" > announcement-prev-tag.txt
+        echo "对比基准 tag：${PREV_TAG:-（无，评论将按公告正文改写）}"
 
         # 渲染失败也不让发布流水线变红：正文渲染不出来只是少一条公告，
         # 而这里变红会被 GitHub 侧 sync-cnb 记成「同步失败」，反而误导。
@@ -564,6 +588,12 @@
     # - ANNOUNCEMENT_COMMENT_ENABLED：是否发评论；
     # - ANNOUNCEMENT_COMMENT_TEXT：评论内容（只放提示语本身，不夹带更新内容——
     #   NPC 自己会读上面那条公告）。
+    #
+    # 提示语里的 {{PREVIOUSTAG}} / {{CURRENTTAG}} 由本 stage 替换成真实 tag：
+    #   - CURRENTTAG 就是本次发布的 tag（INTERIOR_VERSION）；
+    #   - PREVIOUSTAG 来自「准备发版公告」落盘的 announcement-prev-tag.txt，
+    #     取不到（首次发这个渠道 / 补发历史版本）就换成一句文字说明，
+    #     NPC 那边会退回「按公告正文改写」，不会拿着假 tag 去 diff。
     - name: 发布公告评论
       image: cnbcool/cnb-cli
       if: *not_nightly
@@ -588,8 +618,17 @@
           exit 0
         fi
 
+        # 先替换占位符再落盘：env 里的 {{...}} 只是字面量，不替换就会原样发出去。
+        # sed 用 | 作分隔符、& 在替换串里是特殊字符，所以模板里不允许出现这两个字符
+        # （tag 已被 resolve-prerelease.sh 的字符白名单约束：只有 [0-9A-Za-z._+-]）。
+        CUR_TAG="${INTERIOR_VERSION}"
+        PREV_TAG="$(cat announcement-prev-tag.txt 2>/dev/null || true)"
+        [ -n "${PREV_TAG}" ] || PREV_TAG='（首个版本，无对比基准）'
+
         # 评论内容只放提示语本身，不夹带更新内容：NPC 自己会读上面那条公告。
-        printf '%s' "${ANNOUNCEMENT_COMMENT_TEXT:-}" > announcement-comment.md
+        printf '%s' "${ANNOUNCEMENT_COMMENT_TEXT:-}" \
+          | sed "s|{{PREVIOUSTAG}}|${PREV_TAG}|g; s|{{CURRENTTAG}}|${CUR_TAG}|g" \
+            > announcement-comment.md
         if [ ! -s announcement-comment.md ]; then
           echo "⚠️ 评论内容为空（ANNOUNCEMENT_COMMENT_TEXT），不追加评论"
           exit 0

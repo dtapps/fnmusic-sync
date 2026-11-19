@@ -76,12 +76,12 @@
                   {:else}-{/if}
                 </td>
                 <td class="px-3 py-2 font-mono text-xs text-muted-foreground truncate">{u.token}</td>
-                <td class="px-3 py-2 whitespace-nowrap text-xs text-muted-foreground"
-                  >{formatDateTime(u.first_seen_at) || '-'}</td
-                >
-                <td class="px-3 py-2 whitespace-nowrap text-xs text-muted-foreground"
-                  >{formatDateTime(u.last_seen_at) || '-'}</td
-                >
+                <td class="px-3 py-2 whitespace-nowrap text-xs text-muted-foreground">
+                  {formatDateTime(u.first_seen_at) || '-'}
+                </td>
+                <td class="px-3 py-2 whitespace-nowrap text-xs text-muted-foreground">
+                  {formatDateTime(u.last_seen_at) || '-'}
+                </td>
               </tr>
             {/each}
           </tbody>

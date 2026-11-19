@@ -131,50 +131,66 @@
       <button
         class="px-3 sm:px-4 py-1.5 sm:py-2 rounded-md text-xs sm:text-sm whitespace-nowrap transition-colors cursor-pointer shrink-0
           {$activeTab === 'sockets' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'}"
-        onclick={() => setActiveTab('sockets')}>{$_('tabs.sockets')}</button
+        onclick={() => setActiveTab('sockets')}
       >
+        {$_('tabs.sockets')}
+      </button>
       <button
         class="px-3 sm:px-4 py-1.5 sm:py-2 rounded-md text-xs sm:text-sm whitespace-nowrap transition-colors cursor-pointer shrink-0
           {$activeTab === 'users' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'}"
-        onclick={() => setActiveTab('users')}>{$_('tabs.users')}</button
+        onclick={() => setActiveTab('users')}
       >
+        {$_('tabs.users')}
+      </button>
       {#if $currentUser.isAdmin}
         <button
           class="px-3 sm:px-4 py-1.5 sm:py-2 rounded-md text-xs sm:text-sm whitespace-nowrap transition-colors cursor-pointer shrink-0
             {$activeTab === 'users_list'
             ? 'bg-primary text-primary-foreground'
             : 'text-muted-foreground hover:bg-muted'}"
-          onclick={() => setActiveTab('users_list')}>{$_('tabs.users_list')}</button
+          onclick={() => setActiveTab('users_list')}
         >
+          {$_('tabs.users_list')}
+        </button>
       {/if}
       {#if $currentUser.isAdmin}
         <button
           class="px-3 sm:px-4 py-1.5 sm:py-2 rounded-md text-xs sm:text-sm whitespace-nowrap transition-colors cursor-pointer shrink-0
             {$activeTab === 'settings' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'}"
-          onclick={() => setActiveTab('settings')}>{$_('tabs.settings')}</button
+          onclick={() => setActiveTab('settings')}
         >
+          {$_('tabs.settings')}
+        </button>
       {/if}
       <button
         class="px-3 sm:px-4 py-1.5 sm:py-2 rounded-md text-xs sm:text-sm whitespace-nowrap transition-colors cursor-pointer shrink-0
           {$activeTab === 'state' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'}"
-        onclick={() => setActiveTab('state')}>{$_('tabs.state')}</button
+        onclick={() => setActiveTab('state')}
       >
+        {$_('tabs.state')}
+      </button>
       <button
         class="px-3 sm:px-4 py-1.5 sm:py-2 rounded-md text-xs sm:text-sm whitespace-nowrap transition-colors cursor-pointer shrink-0
           {$activeTab === 'playlist' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'}"
-        onclick={() => setActiveTab('playlist')}>{$_('tabs.playlist')}</button
+        onclick={() => setActiveTab('playlist')}
       >
+        {$_('tabs.playlist')}
+      </button>
       <button
         class="px-3 sm:px-4 py-1.5 sm:py-2 rounded-md text-xs sm:text-sm whitespace-nowrap transition-colors cursor-pointer shrink-0
           {$activeTab === 'synclog' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'}"
-        onclick={() => setActiveTab('synclog')}>{$_('tabs.synclog')}</button
+        onclick={() => setActiveTab('synclog')}
       >
+        {$_('tabs.synclog')}
+      </button>
       {#if $currentUser.isAdmin}
         <button
           class="px-3 sm:px-4 py-1.5 sm:py-2 rounded-md text-xs sm:text-sm whitespace-nowrap transition-colors cursor-pointer shrink-0
             {$activeTab === 'logs' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'}"
-          onclick={() => setActiveTab('logs')}>{$_('tabs.logs')}</button
+          onclick={() => setActiveTab('logs')}
         >
+          {$_('tabs.logs')}
+        </button>
       {/if}
     </nav>
   </header>

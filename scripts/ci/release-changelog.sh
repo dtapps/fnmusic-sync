@@ -23,6 +23,12 @@
 #   sh scripts/ci/release-changelog.sh <版本号>
 #   # 输出（多行 Markdown）到 stdout；挑不出基准时 exit 1，由工作流中断发布
 #
+#   sh scripts/ci/release-changelog.sh --base <版本号>
+#   # 只输出「对比基准」（同渠道的上一个 tag）到 stdout，不渲染正文。
+#   # 给发版公告评论填 {{PREVIOUSTAG}} 用：公告与正文必须对同一个基准，
+#   # 所以不允许调用方自己再写一套挑 tag 的逻辑。
+#   # 仓库里一个 tag 都没有（真正的首次发布）时输出空行并 exit 0。
+#
 # 环境变量：
 #   COMMIT_URL  选填，提交链接前缀。拼成 ${COMMIT_URL}/<sha>。
 #               GitHub 是 ${REPO_URL}/commit，CNB 是 ${REPO_URL}/-/commit。
@@ -34,9 +40,16 @@
 
 set -eu
 
+# --base：只算基准，不渲染正文（给发版公告评论填 {{PREVIOUSTAG}}）
+mode='changelog'
+if [ "${1:-}" = '--base' ]; then
+  mode='base'
+  shift
+fi
+
 version="${1:-}"
 if [ -z "${version}" ]; then
-  printf '用法: %s <版本号>\n' "${0##*/}" >&2
+  printf '用法: %s [--base] <版本号>\n' "${0##*/}" >&2
   exit 2
 fi
 
@@ -133,6 +146,11 @@ if [ -z "${base}" ]; then
   others="$(printf '%s\n' "${all_tags}" | sed '/^$/d' | grep -vxF "${version}" || true)"
   # 一个 tag 都没有，或只有当前版本自己 → 这就是这个仓库/渠道的第一次发布
   if [ -z "${others}" ]; then
+    # --base 模式输出空行：调用方（发版公告评论）据此把占位符换成「首次发布」，
+    # 不能直接写中文进去，否则 ann 评论模板里的 git diff 会拼出无效区间。
+    if [ "${mode}" = 'base' ]; then
+      exit 0
+    fi
     printf '首次发布\n'
     exit 0
   fi
@@ -141,6 +159,13 @@ if [ -z "${base}" ]; then
     "$(printf '%s\n' "${others}" | sed '/^$/d' | wc -l | tr -d ' ')" "${channel}" >&2
   printf '常见原因：clone 时没拉取 tag（GitHub 需要 fetch-depth: 0），或 tag 命名不符合预期。\n' >&2
   exit 1
+fi
+
+# --base 模式到此为止：只把基准 tag 交出去，后面都是正文渲染。
+# 放在这里而不是更早，是为了和正文用**同一段**选基准逻辑，公告与正文不会各挑一个。
+if [ "${mode}" = 'base' ]; then
+  printf '%s\n' "${base}"
+  exit 0
 fi
 
 # 基准就是当前版本（重跑同一次发布）→ 没有可对比的提交

@@ -346,9 +346,9 @@
       <div class="flex flex-col gap-3">
         <div class="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3">
           <label class="text-xs font-medium sm:min-w-[120px]">{$_('upgrade.current_version')}</label>
-          <span class="text-sm text-muted-foreground"
-            >{upgradeInfo?.current_version || (upgradeInfo === null && '...') || '-'}</span
-          >
+          <span class="text-sm text-muted-foreground">
+            {upgradeInfo?.current_version || (upgradeInfo === null && '...') || '-'}
+          </span>
         </div>
         {#if upgradeInfo}
           <div class="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3">
