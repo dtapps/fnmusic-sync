@@ -30,6 +30,9 @@
 #   - VERSION          可选。DOWNLOAD_SOURCE=github 时不填就按 GitHub 最新 Release 判定；
 #                      =cnb 时不填会直接报错（CNB 的 API 匿名 401，查不到最新 tag）。
 #                      补发历史版本时才填，带不带 v 都行（v0.1.31 / 0.1.31）
+#   - FNMUSIC_GITEE_TOKEN  可选，Gitee 个人令牌（repo 读写）。只用于发布后清理旧
+#                      nightly（v5 API 删 Release + git push --delete 删 tag）；不配则跳过。
+#                      参数名不能以 GITEE_ 开头：该前缀由 Gitee 流水线自己占用。
 #   - 没有 PRERELEASE 参数了：预发布由 VERSION 的后缀决定（v0.1.32-rc.1 /
 #     v0.1.32-nightly.20260101 是预发布，v0.1.31 是正式版）。这条流水线只搬不建，
 #     但 tag 与 Release 字段仍要按同一规则落地。
@@ -58,10 +61,10 @@
 # bin.tar.gz 去上传，然后 400 失败。CNB / GitHub 那边增减产物时要同步改那份清单。
 #
 # nightly 保留策略（与 GitHub / CNB 的「只保留最近 3 个」同口径）：
-# 本条流水线的 release@gitee 插件只能**覆盖同名** Release（allowUpdate: true），
-# 没有删除历史 Release 的能力，所以 Gitee 侧的 nightly 会逐日堆积。
-# 要在这里也收敛到 3 个，得改成手写 Gitee v5 API（查列表 → 删旧的 → 建 Release → 传附件），
-# 参考 certflow 的 scripts/ci/gitee-release-publish.js；在那之前靠手工清理。
+# 发布结束后由 cleanup-stage 调用 scripts/ci/delete-release.sh --platform gitee --keep 3，
+# 只删「预发布 + tag 以 -nightly.YYYYMMDD 结尾」的旧 Release。Gitee 没有删 tag 的接口，
+# 脚本用 token 走 git push --delete；清理失败只告警，不影响已完成的发布。
+# （release@gitee 插件的 allowUpdate 只负责覆盖同名 Release，不承担历史清理。）
 version: '1.0'
 name: release
 displayName: 发布版本
@@ -87,6 +90,9 @@ strategy:
 ref_variable:
   - DOWNLOAD_SOURCE
   - VERSION
+  # 旧 nightly 清理用的 Gitee 个人令牌（可选）。删除脚本读 RELEASE_GITEE_TOKEN，
+  # 下面 cleanup-stage 里做映射；平台只对声明过的变量做插值，漏了就是空字符串。
+  - FNMUSIC_GITEE_TOKEN
   # 下面三个**不是**仓库级全局参数，也不该由人去配：下载阶段算出来后写进 GITEE_PARAMS，
   # 下游 release@gitee 的 description / prerelease / releaseName 从这里插值取值。
   # 仍然要在这里声明一次 —— 平台只对声明过的变量做插值，漏了就是空字符串。
@@ -297,3 +303,40 @@ stages:
         prerelease: ${PRERELEASE}
         # 同 tag 已存在时覆盖，代替手写的「先删旧 Release」
         allowUpdate: true
+
+  # 发布完成后清理旧 nightly（只保留最近 3 个）。
+  # 删除逻辑统一在 scripts/ci/delete-release.sh（与 GitHub / CNB 共用一份）：
+  # Gitee 的 Release 走 v5 API 删，tag 没有删除接口，脚本用 token 走 git push --delete。
+  # 清理是收尾工作：令牌 / 工具缺失或接口失败只告警，不能让已完成的发布变红。
+  - name: cleanup-stage
+    displayName: 清理旧 nightly
+    strategy: naturally
+    trigger: auto
+    executor: []
+    steps:
+      - step: build@nodejs
+        name: cleanup_nightly
+        displayName: 只保留最近 3 个 nightly
+        nodeVersion: 20.19.0
+        commands:
+          - |
+            set +u
+            # 平台做的是文本插值：没配全局参数时 ${FNMUSIC_GITEE_TOKEN} 会原样留下，清成空串
+            TOKEN="${FNMUSIC_GITEE_TOKEN}"
+            case "${TOKEN}" in
+              '${'*) TOKEN="" ;;
+            esac
+            set -u
+            if [ -z "${TOKEN}" ]; then
+              echo "⚠ 未配置全局参数 FNMUSIC_GITEE_TOKEN，跳过 nightly 清理"
+              exit 0
+            fi
+            if ! command -v curl >/dev/null 2>&1 || ! command -v jq >/dev/null 2>&1; then
+              echo "⚠ 镜像缺少 curl 或 jq，跳过 nightly 清理（delete-release.sh 依赖两者）"
+              exit 0
+            fi
+            # 删除脚本用通用的 RELEASE_* 变量；平台全局参数叫 FNMUSIC_GITEE_TOKEN，这里映射
+            export RELEASE_GITEE_TOKEN="${TOKEN}"
+            export RELEASE_GITEE_REPO="dtapps/fnmusic-sync"
+            sh scripts/ci/delete-release.sh --platform gitee --keep 3 ||
+              echo "⚠ 清理旧 nightly 失败（不影响本次发布）"

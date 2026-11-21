@@ -205,7 +205,7 @@ jobs:
               echo "❌ tag ${VERSION} 已存在，不能重复发布"
               echo "   已有指向: $(git rev-parse --short "${VERSION}")"
               echo "   当前 HEAD: $(git rev-parse --short HEAD)"
-              echo "   确需重发：gh release delete ${VERSION} --yes --cleanup-tag，再重跑本工作流"
+              echo "   确需重发：sh scripts/ci/delete-release.sh --platform github --tag ${VERSION}，再重跑本工作流"
               exit 1
               ;;
             esac
@@ -414,7 +414,9 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ needs.prepare.outputs.interior_version }}
         run: |
-          gh release delete "${VERSION}" --yes --cleanup-tag 2>/dev/null || true
+          # 删除 Release 与 tag 的口径统一走 scripts/ci/delete-release.sh（GitHub / CNB 共用）；
+          # 删不掉不阻断：后续发布同名 Release 时覆盖即可，别让收尾工作拖红。
+          sh scripts/ci/delete-release.sh --platform github --tag "${VERSION}" || true
 
       - name: 发布 Release
         uses: softprops/action-gh-release@v3
@@ -445,56 +447,11 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          KEEP_NIGHTLY: '3'
         run: |
-          set -eu
-          repo="${GITHUB_REPOSITORY}"
-          list="$(mktemp)"
-          trap 'rm -f "${list}"' EXIT
-
-          # gh / jq 是 runner 镜像自带的；万一哪天镜像里没有，就跳过清理，
-          # 别让收尾工作把已经发出去的 Release 拖成红灯
-          if ! command -v gh >/dev/null 2>&1 || ! command -v jq >/dev/null 2>&1; then
-            echo "⚠️ 缺少 gh 或 jq，跳过 nightly 清理"
-            exit 0
-          fi
-
-          # 拉不到列表就跳过清理，不让这一步把已经发出去的 Release 拖成红灯
-          if ! gh api --paginate "repos/${repo}/releases?per_page=100" >"${list}"; then
-            echo "⚠️ 拉取 Release 列表失败，跳过 nightly 清理"
-            exit 0
-          fi
-
-          # gh --paginate 可能输出一个或多个 JSON 数组，jq -s 'add' 两种都能合成一个数组
-          total=$(jq -s 'add | length' "${list}")
-          echo "仓库共有 ${total} 个 Release"
-
-          # 只认 nightly 渠道：tag 形如 v0.1.31-nightly.20261116（排除 draft）
-          # 按发布时间倒序，第 (KEEP_NIGHTLY+1) 个及以后的一律删掉
-          olds=$(jq -sr --argjson keep "${KEEP_NIGHTLY}" '
-            add
-            | [ .[]
-                  | select(.draft == false)
-                  | select(.tag_name | test("^v[0-9]+\\.[0-9]+\\.[0-9]+-nightly\\.[0-9]+$")) ]
-            | sort_by(.published_at // .created_at) | reverse
-            | .[$keep:] | .[] | "\(.id)\t\(.tag_name)"
-          ' "${list}")
-
-          if [ -z "${olds}" ]; then
-            echo "✅ nightly Release 不超过 ${KEEP_NIGHTLY} 个，不用清理"
-            exit 0
-          fi
-
-          echo "${olds}" | while IFS="$(printf '\t')" read -r id tag; do
-            [ -n "${id}" ] || continue
-            echo "删除旧 nightly Release: ${tag}（id=${id}）"
-            # 删不掉只告警：Release 已经发出去了，清理是收尾工作，不该把整条流水线拖红
-            gh api -X DELETE "repos/${repo}/releases/${id}" || echo "  ⚠️ Release ${tag} 删除失败，忽略"
-            # git tag 一起删：nightly 每天一个 tag，不删的话仓库里的 tag 会无限堆积。
-            # tag 是 Release 名字的来源，留下孤儿 tag 会让 Release 列表看起来仍有旧的 nightly。
-            gh api -X DELETE "repos/${repo}/git/refs/tags/${tag}" >/dev/null 2>&1 \
-              || echo "  ⚠️ tag ${tag} 删除失败，忽略"
-          done
+          # 只删「预发布 + tag 以 -nightly.YYYYMMDD 结尾」的 Release，保留最新 3 个，
+          # 连 Release 带 tag 一起删。实现见 scripts/ci/delete-release.sh（与 CNB 共用），
+          # 该脚本清理失败只告警、始终退出 0，不会把已经发出去的 Release 拖成红灯。
+          sh scripts/ci/delete-release.sh --platform github --keep 3
 
   # GitHub 侧的发版公告：Release 发布成功后，在仓库 Discussions 里开一条讨论。
   #

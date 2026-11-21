@@ -309,80 +309,13 @@
     # nightly 每天一个 tag，不清理的话 CNB 上的 Release + tag + 附件会无限堆积；
     # GitHub 那边删掉的旧 nightly 也不会自动从 CNB 消失。
     # 只处理日期 nightly（tag 以 -nightly.YYYYMMDD 结尾），rc / beta / alpha 与正式版一律不动。
+    # 删除口径与 GitHub 共用 scripts/ci/delete-release.sh（CNB 的 tag 删除路径必须带
+    # git 段 /-/git/tags/…），该脚本清理失败只告警、始终退出 0，不拖红已完成的发布。
     - name: 清理旧 nightly（只保留最近 3 个）
       script: |
         set -eu
-        TAG="${INTERIOR_VERSION}"
-        case "${PRE_RELEASE}:${TAG}" in
-        true:*-nightly.[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]) ;;
-        *) echo "非日期 nightly 发布（${TAG}），跳过清理"; exit 0 ;;
-        esac
-
-        # 清理是「尽力而为」：从这里开始关掉 errexit。stage 一红整条流水线就算失败，
-        # 而发布本身已经完成了，所以任何一步失败只打印，不让 stage 失败。
-        set +e
-
-        API="${CNB_API_ENDPOINT:-https://api.cnb.cool}"
-        REPO="dtapp/fnmusic-sync"
-        TOKEN="${UPDATE_TOKEN:-}"
-        if [ -z "${TOKEN}" ]; then
-          echo "⚠ 没有 UPDATE_TOKEN，跳过 nightly 清理"
-          exit 0
-        fi
-
-        # 列表形状兼容裸数组与 {items|list|data: [...]} 包装
-        RAW=$(curl -sS -H "Authorization: Bearer ${TOKEN}" \
-          -H "Accept: application/vnd.cnb.api+json" \
-          "${API}/${REPO}/-/releases?page=1&page_size=100")
-        if ! printf '%s' "${RAW}" | jq -e . >/dev/null 2>&1; then
-          echo "⚠ 获取 Release 列表失败，跳过 nightly 清理"
-          printf '  响应：%s\n' "$(printf '%s' "${RAW}" | head -c 200)"
-          exit 0
-        fi
-
-        OLD_TAGS=$(printf '%s' "${RAW}" | jq -r '
-          (if type == "array" then . else (.items // .list // .data // []) end)
-          | .[]
-          | select((.draft // false) | not)
-          | select(.prerelease == true)
-          | .tag_name
-          | select(test("-nightly\\.[0-9]{8}$"))
-        ' 2>/dev/null | sort -rV || true)
-
-        TOTAL=$(printf '%s\n' "${OLD_TAGS}" | grep -c . || true)
-        if [ "${TOTAL:-0}" -le 3 ]; then
-          echo "nightly Release 共 ${TOTAL:-0} 个，无需清理"
-          exit 0
-        fi
-
-        # 前 3 个是保留项，其余逐个删：删 Release 不会连带删 tag，两个对象必须分别删。
-        printf '%s\n' "${OLD_TAGS}" | tail -n +4 | while IFS= read -r OLD; do
-          [ -n "${OLD}" ] || continue
-          REL=$(curl -sS -H "Authorization: Bearer ${TOKEN}" \
-            -H "Accept: application/vnd.cnb.api+json" \
-            "${API}/${REPO}/-/releases/tags/${OLD}")
-          ID=$(printf '%s' "${REL}" | jq -r '.id // .release_id // empty' 2>/dev/null)
-          if [ -n "${ID}" ]; then
-            CODE=$(curl -s -o /dev/null -w "%{http_code}" -X DELETE \
-              -H "Authorization: Bearer ${TOKEN}" \
-              -H "Accept: application/vnd.cnb.api+json" \
-              "${API}/${REPO}/-/releases/${ID}")
-            case "${CODE}" in
-            200|204) echo "已删除旧 nightly release ${OLD}（id=${ID}）" ;;
-            *) echo "⚠ 删除 release ${OLD}（id=${ID}）失败 HTTP=${CODE}" ;;
-            esac
-          else
-            echo "⚠ 未取到 ${OLD} 的 release id，跳过删除"
-          fi
-          TCODE=$(curl -s -o /dev/null -w "%{http_code}" -X DELETE \
-            -H "Authorization: Bearer ${TOKEN}" \
-            -H "Accept: application/vnd.cnb.api+json" \
-            "${API}/${REPO}/-/tags/${OLD}")
-          case "${TCODE}" in
-          200|204) echo "已删除同名 tag ${OLD}" ;;
-          *) echo "⚠ 删除 tag ${OLD} 失败 HTTP=${TCODE}" ;;
-          esac
-        done
+        # 用流水线自动注入的 CNB_TOKEN（不要用 UPDATE_TOKEN，那是升级通道查更新用的）
+        sh scripts/ci/delete-release.sh --platform cnb --keep 3
 
     # 发布成功后同步开一条「发版公告」Issue。
     #

@@ -223,7 +223,7 @@ git status           # 确认 format 的改动都进本次提交
 
 - `nightly` 的基准是仓库里最大的 `vX.Y.Z` tag，补丁号 +1 是因为 nightly 要走「下一个正式版」的版本号，否则 nightly 会抢走正式版的 tag 名。推导要完整 tag 历史，所以各平台都要 `git fetch --tags` / `fetch-depth: 0`。
 - nightly 是预发布（`prerelease=true`），稳定用户不会被推上 nightly。
-- 保留策略：nightly 只保留**最近 3 个** Release，多余的连同 git tag 一起删（GitHub / CNB 各自清理）。Gitee 的 `release@gitee` 插件只能覆盖同名 Release、没有删除能力，那边的 nightly 暂靠手工清理。
+- 保留策略：nightly 只保留**最近 3 个** Release，多余的连同 git tag 一起删（GitHub / CNB / Gitee 各自清理，删除逻辑统一在 `scripts/ci/delete-release.sh`）。Gitee 的 `release@gitee` 插件只能覆盖同名 Release、没有删除能力，旧 nightly 由发布流水线的 `cleanup-stage` 在发完后调该脚本收敛。
 
 ### GitHub 发版后的同步与通知
 
