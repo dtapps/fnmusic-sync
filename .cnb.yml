@@ -5,14 +5,15 @@
 # .trigger_release 锚点与 master 下的两个 *trigger_release 引用必须留在同一个文件里，
 # 不能把锚点定义放这里、引用放 release.yml。
 include:
+  - path: ".cnb/pai.yml"
   - .cnb/workflows/announcement-cleanup.yml
-  - .cnb/workflows/cnb-sechook.yml
-  - .cnb/workflows/code-review.yml
-  - .cnb/workflows/code-security-config.yml
-  - .cnb/workflows/codewiki.yml
-  - .cnb/workflows/knowledge-base.yml
   - .cnb/workflows/pull-coverage.yml
   - .cnb/workflows/push-coverage.yml
   - .cnb/workflows/push.yml
   - .cnb/workflows/release.yml
-  - .cnb/workflows/sca.yml
+  - https://cnb.cool/dtapp/ci-templates/-/blob/main/cnb-sechook.yml
+  - https://cnb.cool/dtapp/ci-templates/-/blob/main/code-review.yml
+  - https://cnb.cool/dtapp/ci-templates/-/blob/main/code-security-config.yml
+  - https://cnb.cool/dtapp/ci-templates/-/blob/main/codewiki.yml
+  - https://cnb.cool/dtapp/ci-templates/-/blob/main/knowledge-base.yml
+  - https://cnb.cool/dtapp/ci-templates/-/blob/main/sca.yml

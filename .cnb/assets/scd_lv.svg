@@ -1,0 +1,97 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="300" height="300" viewBox="0 0 300 300">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#e74c3c;stop-opacity:1" />
+      <stop offset="50%" style="stop-color:#c0392b;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#8e44ad;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="headGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#b09a8b;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#8d6e63;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="earGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#a1887f;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#795548;stop-opacity:1" />
+    </linearGradient>
+    <radialGradient id="muzzleGrad" cx="50%" cy="40%" r="60%">
+      <stop offset="0%" style="stop-color:#efe2cc;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#d9c9b3;stop-opacity:1" />
+    </radialGradient>
+  </defs>
+
+  <!-- 背景：红到发紫 -->
+  <rect width="300" height="300" rx="60" fill="url(#bg)"/>
+
+  <!-- 背景小星星：全年连击的社区活跃度 -->
+  <g fill="#ffffff" opacity="0.55">
+    <path d="M62 66 l3 8 8 3 -8 3 -3 8 -3 -8 -8 -3 8 -3 Z"/>
+    <path d="M244 58 l2.6 7 7 2.6 -7 2.6 -2.6 7 -2.6 -7 -7 -2.6 7 -2.6 Z"/>
+    <path d="M252 196 l2.2 6 6 2.2 -6 2.2 -2.2 6 -2.2 -6 -6 -2.2 6 -2.2 Z"/>
+    <path d="M48 210 l2.2 6 6 2.2 -6 2.2 -2.2 6 -2.2 -6 -6 -2.2 6 -2.2 Z"/>
+    <path d="M238 140 l2 5.4 5.4 2 -5.4 2 -2 5.4 -2 -5.4 -5.4 -2 5.4 -2 Z"/>
+  </g>
+
+  <!-- 左耳 -->
+  <g transform="rotate(-16 92 82)">
+    <ellipse cx="92" cy="82" rx="24" ry="56" fill="url(#earGrad)"/>
+    <ellipse cx="92" cy="88" rx="11" ry="36" fill="#e8c9c0"/>
+  </g>
+  <!-- 右耳 -->
+  <g transform="rotate(16 208 82)">
+    <ellipse cx="208" cy="82" rx="24" ry="56" fill="url(#earGrad)"/>
+    <ellipse cx="208" cy="88" rx="11" ry="36" fill="#e8c9c0"/>
+  </g>
+
+  <!-- 头 -->
+  <ellipse cx="150" cy="182" rx="86" ry="80" fill="url(#headGrad)"/>
+  <!-- 头顶毛发刘海 -->
+  <path d="M84 138 Q92 104 118 108 Q124 92 138 106 Q146 88 156 104 Q168 90 176 106 Q196 94 204 118 Q220 120 216 146 Z" fill="#795548"/>
+  <!-- 头两侧鬃毛 -->
+  <path d="M64 150 Q58 176 66 200 L78 190 Q72 172 76 158 Z" fill="#795548"/>
+  <path d="M236 150 Q242 176 234 200 L222 190 Q228 172 224 158 Z" fill="#795548"/>
+
+  <!-- 脸/口鼻 -->
+  <ellipse cx="150" cy="218" rx="52" ry="44" fill="url(#muzzleGrad)"/>
+  <ellipse cx="150" cy="232" rx="24" ry="14" fill="#cbb49b" opacity="0.5"/>
+
+  <!-- 眼睛：憨厚而坚定 -->
+  <ellipse cx="118" cy="162" rx="13" ry="15" fill="#3e2723"/>
+  <ellipse cx="182" cy="162" rx="13" ry="15" fill="#3e2723"/>
+  <circle cx="122" cy="157" r="4.5" fill="#ffffff"/>
+  <circle cx="186" cy="157" r="4.5" fill="#ffffff"/>
+  <circle cx="115" cy="166" r="2" fill="#ffffff" opacity="0.7"/>
+  <circle cx="179" cy="166" r="2" fill="#ffffff" opacity="0.7"/>
+
+  <!-- 眉毛：隐忍但乐观 -->
+  <path d="M104 140 Q118 132 132 138" stroke="#5d4037" stroke-width="5" fill="none" stroke-linecap="round"/>
+  <path d="M168 138 Q182 132 196 140" stroke="#5d4037" stroke-width="5" fill="none" stroke-linecap="round"/>
+
+  <!-- 鼻孔 -->
+  <ellipse cx="137" cy="222" rx="6" ry="8" fill="#a1887f"/>
+  <ellipse cx="163" cy="222" rx="6" ry="8" fill="#a1887f"/>
+
+  <!-- 嘴角：憨厚微笑 -->
+  <path d="M134 242 Q150 254 166 242" stroke="#6d4c41" stroke-width="5" fill="none" stroke-linecap="round"/>
+
+  <!-- 腮红：红的发紫 -->
+  <ellipse cx="90" cy="196" rx="16" ry="10" fill="#e74c3c" opacity="0.6"/>
+  <ellipse cx="210" cy="196" rx="16" ry="10" fill="#8e44ad" opacity="0.6"/>
+
+  <!-- 汗水：全年无休干活辛苦 -->
+  <path d="M238 118 Q244 130 238 138 Q232 130 238 118 Z" fill="#81d4fa" opacity="0.9"/>
+
+  <!-- 王冠：社区活跃度全年连击 -->
+  <path d="M118 132 L126 96 L138 118 L150 90 L162 118 L174 96 L182 132 Z" fill="#f1c40f" stroke="#e67e22" stroke-width="3" stroke-linejoin="round"/>
+  <circle cx="126" cy="96" r="4" fill="#e67e22"/>
+  <circle cx="150" cy="90" r="4" fill="#e67e22"/>
+  <circle cx="174" cy="96" r="4" fill="#e67e22"/>
+
+  <!-- 铃铛项圈 -->
+  <rect x="82" y="254" width="136" height="16" rx="8" fill="#f39c12" stroke="#e67e22" stroke-width="2"/>
+  <circle cx="150" cy="278" r="14" fill="#f1c40f" stroke="#e67e22" stroke-width="3"/>
+  <circle cx="150" cy="282" r="4" fill="#e67e22"/>
+  <path d="M150 264 L150 270" stroke="#e67e22" stroke-width="2.5" stroke-linecap="round"/>
+
+  <!-- 生产队红五星徽章 -->
+  <path d="M112 262 l2.6 6.8 7.2 0.8 -5.4 4.9 1.5 7.1 -5.9 -4.2 -5.9 4.2 1.5 -7.1 -5.4 -4.9 7.2 -0.8 Z" fill="#c62828" stroke="#ffd54f" stroke-width="1.5"/>
+</svg>

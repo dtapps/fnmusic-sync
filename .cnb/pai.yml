@@ -1,0 +1,12 @@
+.pai_npc: &pai_npc
+  - stages:
+      - name: pai huo
+        image: ${CNB_DOCKER_REGISTRY}/npc/pai:latest
+        settings:
+          PAI_SAY: '你怎么看。'
+          PAI_REPLY: '蒸蚌，**${CNB_BUILD_USER_NPC_NAME}**，你是所有英雄里排名靠前的！'
+          PAI_REPLY_IMAGE: ${CNB_WEB_ENDPOINT}/npc/pai/-/git/raw/main/.cnb/assets/zhengbang.jpg
+
+π:
+  issue.comment@npc: *pai_npc
+  pull_request.comment@npc: *pai_npc

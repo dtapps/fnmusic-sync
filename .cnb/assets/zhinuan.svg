@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="300" height="300" viewBox="0 0 300 300">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#1abc9c;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#8e44ad;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  <rect width="300" height="300" rx="20" fill="url(#bg)"/>
+  <text x="150" y="130" font-family="sans-serif" font-size="70" fill="white" text-anchor="middle">知暖</text>
+  <text x="150" y="210" font-family="sans-serif" font-size="45" fill="rgba(255,255,255,0.8)" text-anchor="middle">知心人</text>
+</svg>

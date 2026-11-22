@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#667eea"/>
+      <stop offset="100%" style="stop-color:#764ba2"/>
+    </linearGradient>
+  </defs>
+  <!-- Background circle -->
+  <circle cx="256" cy="256" r="240" fill="url(#bg)"/>
+  
+  <!-- Face -->
+  <ellipse cx="256" cy="280" rx="120" ry="130" fill="#FFE4C4"/>
+  
+  <!-- Glasses -->
+  <g fill="none" stroke="#333" stroke-width="6">
+    <circle cx="200" cy="260" r="40"/>
+    <circle cx="312" cy="260" r="40"/>
+    <path d="M240 260 L272 260"/>
+    <path d="M160 260 L140 250"/>
+    <path d="M352 260 L372 250"/>
+  </g>
+  
+  <!-- Eyes behind glasses -->
+  <circle cx="200" cy="260" r="12" fill="#333"/>
+  <circle cx="312" cy="260" r="12" fill="#333"/>
+  <!-- Eye sparkles -->
+  <circle cx="204" cy="256" r="4" fill="#fff"/>
+  <circle cx="316" cy="256" r="4" fill="#fff"/>
+  
+  <!-- Eyebrows (slightly raised, skeptical look) -->
+  <path d="M165 220 Q200 210 235 225" stroke="#666" stroke-width="8" fill="none" stroke-linecap="round"/>
+  <path d="M277 225 Q312 210 347 220" stroke="#666" stroke-width="8" fill="none" stroke-linecap="round"/>
+  
+  <!-- Nose -->
+  <path d="M256 270 L250 300 L262 300" stroke="#DEB887" stroke-width="4" fill="none"/>
+  
+  <!-- Mouth (subtle smirk) -->
+  <path d="M210 340 Q256 370 302 340" stroke="#c97064" stroke-width="6" fill="none" stroke-linecap="round"/>
+  
+  <!-- Hair (slightly messy) -->
+  <g fill="#4a4a4a">
+    <path d="M136 200 Q160 120 256 100 Q352 120 376 200 Q380 180 360 170 Q340 140 256 130 Q172 140 152 170 Q132 180 136 200"/>
+    <path d="M170 180 Q180 150 200 160"/>
+    <path d="M340 180 Q330 150 310 160"/>
+  </g>
+  
+  <!-- Hand near mouth (whispering gesture) -->
+  <g transform="translate(360, 320) rotate(-20)">
+    <ellipse cx="0" cy="0" rx="35" ry="45" fill="#FFE4C4"/>
+    <ellipse cx="-5" cy="-30" rx="25" ry="15" fill="#FFE4C4"/>
+  </g>
+  
+  <!-- Whisper lines -->
+  <g stroke="#fff" stroke-width="3" fill="none" opacity="0.6">
+    <path d="M390 280 Q410 275 400 260"/>
+    <path d="M400 290 Q420 285 410 270"/>
+  </g>
+</svg>
