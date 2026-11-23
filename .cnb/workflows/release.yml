@@ -18,25 +18,23 @@
     - https://cnb.cool/dtapp/envs/-/blob/main/github.yml
     - https://cnb.cool/dtapp/envs/-/blob/main/fnmusic-sync.yml
     - https://cnb.cool/dtapp/envs/-/blob/main/npc.yml
-  # 公告评论的内容（job 级 env，所有 stage 都能读到）：
-  # - NPC_ENABLED：来自 imports 的 npc.yml，NPC 总开关；关闭则整条公告链路都不执行（见「准备发版公告」的 if）；
-  # - ANNOUNCEMENT_COMMENT_TEXT：评论内容，默认让仓库里的 NPC（CodeBuddy）按「对比哪两个
-  #   tag」整理一份用户友好的更新日志，并以评论形式发回。
+  # 公告评论的开关/内容：
+  # - NPC_ENABLED：从 envs/npc.yml 导入的全局总开关，false 时所有 NPC 触发点都不工作；
+  # - ANNOUNCEMENT_COMMENT_TEXT：评论正文，@ 本仓库自定义 NPC「发版日志助手」
+  #   （在 .cnb/settings.yml 的 npc.roles 里定义，要求写在它的 prompt 里），
+  #   只给出要对比的两个 tag；这里不再重复写要求，避免两处维护。
+  #   @ 后的仓库路径用 {{REPOSLUG}}，发评论前替换成流水线注入的 CNB_REPO_SLUG，
+  #   不写死 dtapp/certflow——仓库改名 / fork 后仍能 @ 到本仓库的角色。
   #
-  # ⚠️ {{PREVIOUSTAG}} / {{CURRENTTAG}} 不是 CNB 的模板语法：env 里的值就是字面量，
-  #   流水线不会替我们替换，直接发出去就是两个花括号。真实 tag 在「发布公告评论」stage
+  # ⚠️ {{PREVIOUSTAG}} / {{CURRENTTAG}} / {{REPOSLUG}} 不是 CNB 的模板语法：env 里的值就是字面量，
+  #   流水线不会替我们替换，直接发出去就是两个花括号。真实值在「发布公告评论」stage
   #   发评论前用 sed 换掉（基准 tag 由「准备发版公告」stage 调
   #   scripts/ci/resolve-prev-tag.sh 算出并落盘）。所以模板里**不要出现 | 和 &**：
   #   sed 用 | 当分隔符，& 在替换串里是特殊字符。
-  # CNB 不会自动注入 CI：make 的构建并行度（2）与严格检查放宽都依赖 CI=true。
   env:
     CI: 'true'
     ANNOUNCEMENT_COMMENT_TEXT: |-
-      @CodeBuddy 请对比标签 {{PREVIOUSTAG}} 和 {{CURRENTTAG}} 的差异（git log / git diff {{PREVIOUSTAG}}...{{CURRENTTAG}}），整理一份用户友好的更新日志，并作为评论发布在这里。
-      要求：
-      1. 忽略所有测试文件和文档文件的改动，只写用户能感知到的变更；
-      2. 按「新增 / 变更 / 修复 / 破坏性变更」分组，每条一句话说清对用户的影响，不要罗列提交哈希和纯内部重构；
-      3. 与上方公告里的「更新内容」保持一致，不要出现两套说法；取不到 git 历史时，就直接按上方公告的内容改写。
+      @{{REPOSLUG}}(发版日志助手) 请对比标签 {{PREVIOUSTAG}} 和 {{CURRENTTAG}} 的差异。
   stages:
     - name: 解析版本号（预发布看后缀）
       script: |
@@ -527,18 +525,19 @@
           head -20 announcement-result.txt 2>/dev/null || true
         fi
 
-    # 在公告 Issue 上追加一条评论：把「整理一份用户友好的更新日志」交给仓库里的 NPC
-    # （.cnb/settings.yml 里导入的 npc/CodeBuddy）去做，它会把整理好的日志作为评论发回来。
+    # 在公告 Issue 上追加一条评论：把「整理一份用户友好的更新日志」交给本仓库自定义 NPC
+    # 「发版日志助手」（.cnb/settings.yml 的 npc.roles 里定义）去做，它会把整理好的日志作为评论发回来。
     #
     # NPC 总开关 NPC_ENABLED 来自 imports 的 npc.yml，由公告链路共用的 if 判断（见「准备发版公告」）：
     # 关闭则准备/创建/评论三个 stage 全部不执行，不触发 NPC。评论内容在 job 级 env 的
-    # ANNOUNCEMENT_COMMENT_TEXT 里（只放提示语本身，不夹带更新内容——NPC 自己会读上面那条公告）。
+    # ANNOUNCEMENT_COMMENT_TEXT 里（只放提示语本身，不夹带更新内容——要求写在角色的 prompt 里）。
     #
-    # 提示语里的 {{PREVIOUSTAG}} / {{CURRENTTAG}} 由本 stage 替换成真实 tag：
+    # 提示语里的 {{PREVIOUSTAG}} / {{CURRENTTAG}} / {{REPOSLUG}} 由本 stage 替换成真实值：
     #   - CURRENTTAG 就是本次发布的 tag（INTERIOR_VERSION）；
     #   - PREVIOUSTAG 来自「准备发版公告」落盘的 announcement-prev-tag.txt，
     #     取不到（首次发这个渠道 / 补发历史版本）就换成一句文字说明，
-    #     NPC 那边会退回「按公告正文改写」，不会拿着假 tag 去 diff。
+    #     NPC 那边会退回「按公告正文改写」，不会拿着假 tag 去 diff；
+    #   - REPOSLUG 用流水线注入的 CNB_REPO_SLUG，保证 @ 到本仓库的角色（改名 / fork 后仍有效）。
     - name: 发布公告评论
       image: cnbcool/cnb-cli
       if: *announce_if
@@ -556,14 +555,15 @@
 
         # 先替换占位符再落盘：env 里的 {{...}} 只是字面量，不替换就会原样发出去。
         # sed 用 | 作分隔符、& 在替换串里是特殊字符，所以模板里不允许出现这两个字符
-        # （tag 已被 resolve-prerelease.sh 的字符白名单约束：只有 [0-9A-Za-z._+-]）。
+        # （tag 已被 resolve-prerelease.sh 的字符白名单约束：只有 [0-9A-Za-z._+-]；
+        #   repo slug 形如 dtapp/fnmusic-sync，同样不含 | 和 &）。
         CUR_TAG="${INTERIOR_VERSION}"
         PREV_TAG="$(cat announcement-prev-tag.txt 2>/dev/null || true)"
         [ -n "${PREV_TAG}" ] || PREV_TAG='（首个版本，无对比基准）'
 
-        # 评论内容只放提示语本身，不夹带更新内容：NPC 自己会读上面那条公告。
+        # 评论内容只放提示语本身，不夹带更新内容：要求写在角色 prompt 里，NPC 自己会读上面那条公告。
         printf '%s' "${ANNOUNCEMENT_COMMENT_TEXT:-}" \
-          | sed "s|{{PREVIOUSTAG}}|${PREV_TAG}|g; s|{{CURRENTTAG}}|${CUR_TAG}|g" \
+          | sed "s|{{PREVIOUSTAG}}|${PREV_TAG}|g; s|{{CURRENTTAG}}|${CUR_TAG}|g; s|{{REPOSLUG}}|${REPO}|g" \
             > announcement-comment.md
         if [ ! -s announcement-comment.md ]; then
           echo "⚠️ 评论内容为空（ANNOUNCEMENT_COMMENT_TEXT），不追加评论"
