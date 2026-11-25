@@ -33,10 +33,12 @@ jobs:
             yq -r '.updates[].labels[]?' .github/dependabot.yml >> "$labels_file"
           fi
 
-          # Renovate 标签（文件存在时）：JSON5 有注释/尾逗号，先转成标准 JSON 再提取
+          # Renovate 标签（文件存在时）：JSON5 有注释/尾逗号/裸 key，先转成标准 JSON 再提取
           # 取顶层 labels 与 packageRules[].addLabels，与 Dependabot 标签合并后统一去重
+          # 裸 key 的正则必须兼容单行内联对象（如 {matchManagers: [...], addLabels: [...]}），
+          # 不能用 ^\s* 只匹配行首，否则内联 key 不会被加引号、JSON.parse 直接报错。
           if [ -f .github/renovate.json5 ]; then
-            node -e 'const fs=require("fs");const s=fs.readFileSync(".github/renovate.json5","utf8").split("\n").filter(l=>!l.trim().startsWith("//")).join("\n").replace(/^(\s*)([A-Za-z_$][\w$]*)(\s*:)/gm,"$1\"$2\"$3").replace(/,(\s*[}\]])/g,"$1");const c=JSON.parse(s);console.log([...(c.labels||[]),...(c.packageRules||[]).flatMap(r=>r.addLabels||[])].join("\n"))' >> "$labels_file"
+            node -e 'const fs=require("fs");const s=fs.readFileSync(".github/renovate.json5","utf8").split("\n").filter(l=>!l.trim().startsWith("//")).join("\n").replace(/([{,]\s*)([A-Za-z_$][\w$]*)(\s*:)/g,"$1\"$2\"$3").replace(/,(\s*[}\]])/g,"$1");const c=JSON.parse(s);console.log([...(c.labels||[]),...(c.packageRules||[]).flatMap(r=>r.addLabels||[])].join("\n"))' >> "$labels_file"
           fi
 
           # 跨两个文件统一去重：同名标签（如 dependencies/go/frontend）只创建一次

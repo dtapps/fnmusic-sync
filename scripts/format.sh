@@ -12,9 +12,10 @@
 #   放进单个 shell 脚本后，if/else 的分支天然正确：缺失即跳过，不再误报失败。
 #
 # 用法：
-#   scripts/format.sh              # 上述 6 类（不含 Go / 前端）
+#   scripts/format.sh              # 上述 7 类（不含 Go / 前端）
 #   scripts/format.sh yaml         # 仅 YAML
-#   scripts/format.sh json         # 仅 JSON
+#   scripts/format.sh json         # 仅严格 JSON
+#   scripts/format.sh json5        # 仅 JSON5（含注释、无引号 key、尾逗号）
 #   scripts/format.sh sql          # 仅 SQL
 #   scripts/format.sh shell        # 仅 Shell 脚本
 #   scripts/format.sh markdown     # 仅 Markdown
@@ -54,6 +55,8 @@ YAMLFMT_CMD="yamlfmt"
 YAMLFMT_INSTALL="go install github.com/google/yamlfmt/cmd/yamlfmt@latest"
 JSONFMT_CMD="gojq"
 JSONFMT_INSTALL="go install github.com/itchyny/gojq/cmd/gojq@latest"
+JSON5FMT_CMD="jsonfmt"
+JSON5FMT_INSTALL="go install github.com/mitranim/jsonfmt/jsonfmt@latest"
 SQLFMT_CMD="sql-formatter"
 SQLFMT_INSTALL="go install github.com/wasilibs/go-sql-formatter/v15/cmd/sql-formatter@latest"
 MARKDOWNFMT_CMD="markdownfmt"
@@ -80,20 +83,34 @@ YAML_EXCLUDES=(
   "cmd/frontend/pnpm-lock.yaml"
 )
 
-# JSON：工具参数（gojq 过滤器）、扫描目录、文件名匹配、排除路径
-# 当前项目未启用；JSON_TARGETS=() 即整个步骤跳过（不检查工具、不扫描文件），
-# 复制到别的项目时按实际目录填写，不存在的目录会自动跳过。
+# JSON：严格 JSON，工具参数（gojq 过滤器）、目标、文件名匹配、排除路径
+# 规则：
+# - 目录：递归扫描 JSON_GLOB（*.json），受 JSON_EXCLUDES 约束；
+# - 文件：按显式路径直接格式化，不看后缀，适合 fpkg 这类无后缀 JSON；
+# - JSON_EXCLUDES 只对目录扫描生效，显式文件一定会被处理；
+# - 带注释 / 无引号 key / 尾逗号的 JSON5 不在这里，走下面的 JSON5 步骤。
+# JSON_TARGETS=() 即整个步骤跳过；不存在的目标会自动跳过。
 JSONFMT_ARGS=(.)
 JSON_TARGETS=(
-  ".github/renovate.json5"
   "cmd/frontend/"
-  "fpkg/wizard/"
-  "fpkg/app/ui/"
-  "fpkg/config/"
+  "fpkg/app/ui/config"
+  "fpkg/config/privilege"
+  "fpkg/config/resource"
+  "fpkg/wizard/config"
+  "fpkg/wizard/install"
+  "fpkg/wizard/uninstall"
 )
 JSON_GLOB="*.json"
 JSON_EXCLUDES=(
   '*/node_modules/*'
+)
+
+# JSON5：用 jsonfmt（Go 工具）处理 gojq 无法解析的 JSON5。
+# - 它保留注释、无引号 key、尾逗号；-t 表示多行时保留尾逗号；
+# - 只收显式文件路径，不做目录扫描；JSON5_TARGETS=() 即跳过。
+JSON5FMT_ARGS=(-t)
+JSON5_TARGETS=(
+  ".github/renovate.json5"
 )
 
 # SQL：工具参数（-l 指定方言）、扫描目录、文件名匹配、排除路径
@@ -118,12 +135,30 @@ MARKDOWN_EXCLUDES=(
   './.trae/*'
 )
 
-# Shell：shfmt 参数、目标目录（SHELL_TARGETS=() 即跳过该步骤）
+# Shell：shfmt 参数、目标、文件名匹配、排除路径
+# shfmt 收到目录时会自己递归“检测 shell 文件”（不是按后缀），可能扫到
+# node_modules/.bin 等外部脚本；这里统一自己收集文件再交给 shfmt：
+# - 目录：递归扫描 SHELL_GLOB（*.sh），受 SHELL_EXCLUDES 约束；
+# - 文件：按显式路径直接格式化，不看后缀（fpkg/cmd 下都是无后缀脚本）；
+# - SHELL_EXCLUDES 只对目录扫描生效，显式文件一定会被处理。
+# SHELL_TARGETS=() 即整个步骤跳过；不存在的目标会自动跳过。
 SHFMT_ARGS=(-w -i 2 -ci -bn -s -ln bash)
 SHELL_TARGETS=(
   "cmd/frontend/"
   "scripts/"
-  "fpkg/cmd/*"
+  "fpkg/cmd/config_callback"
+  "fpkg/cmd/config_init"
+  "fpkg/cmd/install_callback"
+  "fpkg/cmd/install_init"
+  "fpkg/cmd/main"
+  "fpkg/cmd/uninstall_callback"
+  "fpkg/cmd/uninstall_init"
+  "fpkg/cmd/upgrade_callback"
+  "fpkg/cmd/upgrade_init"
+)
+SHELL_GLOB="*.sh"
+SHELL_EXCLUDES=(
+  '*/node_modules/*'
 )
 
 # Dockerfile：扫描目录、文件名匹配、dockerfmt 参数
@@ -262,8 +297,34 @@ fmt_shell() {
     return 0
   fi
 
-  log "使用 $SHFMT_CMD 格式化 Shell..."
-  "$SHFMT_CMD" ${SHFMT_ARGS[@]+"${SHFMT_ARGS[@]}"} ${FILTERED[@]+"${FILTERED[@]}"} || {
+  local f p
+  local -a find_args=()
+  for p in ${SHELL_EXCLUDES[@]+"${SHELL_EXCLUDES[@]}"}; do
+    find_args+=(-not -path "$p")
+  done
+
+  # 不把目录直接交给 shfmt：它自带的 detect 会按可执行位/shebang 递归识别，
+  # 容易扫进 node_modules/.bin；这里按 SHELL_GLOB + SHELL_EXCLUDES 自己收集。
+  local -a shell_files=()
+  for p in ${FILTERED[@]+"${FILTERED[@]}"}; do
+    if [ -d "$p" ]; then
+      while IFS= read -r -d '' f; do
+        shell_files+=("$f")
+      done < <(find "$p" -type f -name "$SHELL_GLOB" ${find_args[@]+"${find_args[@]}"} -print0)
+    elif [ -f "$p" ]; then
+      shell_files+=("$p")
+    else
+      log "跳过非目录/非文件的 Shell 目标: $p"
+    fi
+  done
+
+  if [ "${#shell_files[@]}" -eq 0 ]; then
+    log "没有可格式化的 Shell 文件，跳过。"
+    return 0
+  fi
+
+  log "使用 $SHFMT_CMD 格式化 Shell（${#shell_files[@]} 个文件）..."
+  "$SHFMT_CMD" ${SHFMT_ARGS[@]+"${SHFMT_ARGS[@]}"} ${shell_files[@]+"${shell_files[@]}"} || {
     printf '❌ %s 格式化失败\n' "$SHFMT_CMD" >&2
     return 1
   }
@@ -300,38 +361,93 @@ fmt_json() {
     return 0
   fi
 
-  local dir f p tmp count=0
+  local f p tmp count=0
   local -a find_args=()
   for p in ${JSON_EXCLUDES[@]+"${JSON_EXCLUDES[@]}"}; do
     find_args+=(-not -path "$p")
   done
 
+  # 目录只扫 JSON_GLOB；显式文件直接加入，不看后缀（fpkg 的配置就是无后缀 JSON）。
+  local -a json_files=()
+  for p in ${FILTERED[@]+"${FILTERED[@]}"}; do
+    if [ -d "$p" ]; then
+      while IFS= read -r -d '' f; do
+        json_files+=("$f")
+      done < <(find "$p" -type f -name "$JSON_GLOB" ${find_args[@]+"${find_args[@]}"} -print0)
+    elif [ -f "$p" ]; then
+      json_files+=("$p")
+    else
+      log "跳过非目录/非文件的 JSON 目标: $p"
+    fi
+  done
+
+  if [ "${#json_files[@]}" -eq 0 ]; then
+    log "没有可格式化的 JSON 文件，跳过。"
+    return 0
+  fi
+
   log "使用 $JSONFMT_CMD 格式化 JSON..."
-  for dir in ${FILTERED[@]+"${FILTERED[@]}"}; do
-    [ -d "$dir" ] || {
-      log "跳过非目录的 JSON 目标: $dir"
-      continue
-    }
-    while IFS= read -r -d '' f; do
-      tmp="$(mktemp "${f}.XXXXXX")" || return 1
-      if ! "$JSONFMT_CMD" ${JSONFMT_ARGS[@]+"${JSONFMT_ARGS[@]}"} "$f" >"$tmp"; then
-        printf '❌ %s 格式化失败: %s\n' "$JSONFMT_CMD" "$f" >&2
-        rm -f "$tmp"
-        return 1
-      fi
-      # mktemp 生成的文件是 600，写回而非 mv，避免改变原文件权限。
-      if ! cat "$tmp" >"$f"; then
-        printf '❌ 写回失败: %s（临时文件保留在 %s）\n' "$f" "$tmp" >&2
-        return 1
-      fi
+  for f in ${json_files[@]+"${json_files[@]}"}; do
+    case "$f" in
+      *.json5 | *.jsonc)
+        log "跳过 JSON5/JSONC 文件（gojq 不支持，请用 JSON5 步骤）: $f"
+        continue
+        ;;
+    esac
+    tmp="$(mktemp "${f}.XXXXXX")" || return 1
+    if ! "$JSONFMT_CMD" ${JSONFMT_ARGS[@]+"${JSONFMT_ARGS[@]}"} "$f" >"$tmp"; then
+      printf '❌ %s 格式化失败: %s\n' "$JSONFMT_CMD" "$f" >&2
       rm -f "$tmp"
-      count=$((count + 1))
-    done < <(find "$dir" -type f -name "$JSON_GLOB" ${find_args[@]+"${find_args[@]}"} -print0)
+      return 1
+    fi
+    # mktemp 生成的文件是 600，写回而非 mv，避免改变原文件权限。
+    if ! cat "$tmp" >"$f"; then
+      printf '❌ 写回失败: %s（临时文件保留在 %s）\n' "$f" "$tmp" >&2
+      return 1
+    fi
+    rm -f "$tmp"
+    count=$((count + 1))
   done
   if [ "$count" -eq 0 ]; then
     log "没有可格式化的 JSON 文件，跳过。"
+    return 0
   fi
   log "JSON 格式化完成（${JSONFMT_CMD}，${count} 个文件）。"
+}
+
+fmt_json5() {
+  targets_exist "JSON5" ${JSON5_TARGETS[@]+"${JSON5_TARGETS[@]}"} || return 0
+  if ! command -v "$JSON5FMT_CMD" >/dev/null 2>&1; then
+    skip "$JSON5FMT_CMD" "$JSON5FMT_INSTALL" "JSON5" || return 1
+    return 0
+  fi
+
+  local f tmp count=0
+  log "使用 $JSON5FMT_CMD 格式化 JSON5..."
+  for f in ${FILTERED[@]+"${FILTERED[@]}"}; do
+    if [ ! -f "$f" ]; then
+      log "跳过非文件的 JSON5 目标: $f"
+      continue
+    fi
+    # jsonfmt 从 stdin 读、往 stdout 写；沿用 JSON 步骤的临时文件写回方式保权限。
+    tmp="$(mktemp "${f}.XXXXXX")" || return 1
+    if ! "$JSON5FMT_CMD" ${JSON5FMT_ARGS[@]+"${JSON5FMT_ARGS[@]}"} <"$f" >"$tmp"; then
+      printf '❌ %s 格式化失败: %s\n' "$JSON5FMT_CMD" "$f" >&2
+      rm -f "$tmp"
+      return 1
+    fi
+    if ! cat "$tmp" >"$f"; then
+      printf '❌ 写回失败: %s（临时文件保留在 %s）\n' "$f" "$tmp" >&2
+      return 1
+    fi
+    rm -f "$tmp"
+    count=$((count + 1))
+  done
+  if [ "$count" -eq 0 ]; then
+    log "没有可格式化的 JSON5 文件，跳过。"
+    return 0
+  fi
+  log "JSON5 格式化完成（${JSON5FMT_CMD}，${count} 个文件）。"
 }
 
 fmt_sql() {
@@ -375,6 +491,9 @@ main() {
     json)
       run_step "JSON 格式化" fmt_json
       ;;
+    json5)
+      run_step "JSON5 格式化" fmt_json5
+      ;;
     sql)
       run_step "SQL 格式化" fmt_sql
       ;;
@@ -390,16 +509,17 @@ main() {
     all)
       run_step "YAML 格式化" fmt_yaml
       run_step "JSON 格式化" fmt_json
+      run_step "JSON5 格式化" fmt_json5
       run_step "SQL 格式化" fmt_sql
       run_step "Shell 格式化" fmt_shell
       run_step "Markdown 格式化" fmt_markdown
       run_step "Dockerfile 格式化" fmt_docker
       ;;
     -h | --help)
-      printf '用法: %s [yaml|json|sql|shell|markdown|docker|all]\n' "$0"
+      printf '用法: %s [yaml|json|json5|sql|shell|markdown|docker|all]\n' "$0"
       ;;
     *)
-      printf '用法: %s [yaml|json|sql|shell|markdown|docker|all]\n' "$0" >&2
+      printf '用法: %s [yaml|json|json5|sql|shell|markdown|docker|all]\n' "$0" >&2
       exit 2
       ;;
   esac
