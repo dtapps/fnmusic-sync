@@ -45,6 +45,18 @@ jobs:
       - name: 检出代码
         uses: actions/checkout@v7
 
+      # 缓存同步下来的模板脚本；key 绑定仓库内脚本内容，脚本一改就换新缓存，
+      # 避免旧缓存把已跟踪脚本（如 resolve-prerelease.sh）恢复成旧版本。
+      - name: 缓存脚本
+        uses: actions/cache@v6
+        with:
+          path: scripts/ci
+          key: ci-scripts-${{ hashFiles('scripts/ci/**') }}
+
+      - name: 同步脚本
+        shell: bash
+        run: make fetch-scripts
+
       - name: 设置 Go 工具链目录
         shell: bash
         run: |
@@ -80,8 +92,11 @@ jobs:
           restore-keys: |
             pnpm-${{ runner.os }}-
 
-      - name: 安装所有依赖
-        run: make deps
+      - name: 安装全部 Go 依赖
+        run: make deps-go
+
+      - name: 安装全部前端依赖
+        run: make deps-node
 
       - name: 生成 Go 测试覆盖率（Cobertura）
         run: make cover-go-cobertura

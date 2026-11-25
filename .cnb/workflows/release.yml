@@ -1,6 +1,7 @@
 # 发布流水线主体：runner / 依赖 / 全部 stages 只定义这一份。
 # 下面 master 的两个触发口都通过 *trigger_release 引用它，改 stages 只改这里。
 .trigger_release: &trigger_release
+  name: 发布
   runner:
     tags: cnb:arch:amd64 # 指定 Runner 必须有这个标签
   services:
@@ -11,6 +12,7 @@
       - /root/.cache/go-build:copy-on-write # Go 构建缓存 - 加速编译
       - /root/.local/share/pnpm/store:copy-on-write # pnpm 全局存储 - 加速前端依赖安装
       - /go/pkg/mod:copy-on-write # 仅缓存 Go 模块下载，避免覆盖镜像内预装的 /go/bin 工具
+      - ./scripts/ci:copy-on-write # 模板脚本缓存；卷会整体挂载该目录，同步前需先还原跟踪文件
   # 导入外部环境变量/配置。多文件必须用 YAML 数组（逗号分隔字符串不生效）；
   # 同名变量后面的覆盖前面的，故项目专属的 fnmusic-sync.yml 放在通用 github.yml 之后。
   # npc.yml 提供 NPC_ENABLED：NPC 总开关，关闭时不发公告评论即不触发 NPC。
@@ -32,10 +34,15 @@
   #   scripts/ci/resolve-prev-tag.sh 算出并落盘）。所以模板里**不要出现 | 和 &**：
   #   sed 用 | 当分隔符，& 在替换串里是特殊字符。
   env:
-    CI: 'true'
     ANNOUNCEMENT_COMMENT_TEXT: |-
       @{{REPOSLUG}}(发版日志助手) 请对比标签 {{PREVIOUSTAG}} 和 {{CURRENTTAG}} 的差异。
   stages:
+    - name: 同步脚本
+      script: |
+        # 卷会整体挂载 scripts/ci，先把本次提交里跟踪的脚本还原（未跟踪的模板脚本由缓存/下载提供）
+        git checkout -- scripts/ci
+        make fetch-scripts
+
     - name: 解析版本号（预发布看后缀）
       script: |
         set -eu
@@ -97,11 +104,6 @@
         git fetch --tags --quiet --force || true
         count=$(git tag -l 'v*' | wc -l | tr -d ' ')
         echo "本地版本 tag: ${count} 个"
-        if [ "$count" -eq 0 ]; then
-          echo "❌ 一个版本 tag 都没有，changelog 会退化成「首次发布」"
-          echo "   检查 checkout 是否带 tag，或手动 git fetch --tags"
-          exit 1
-        fi
 
         # tag 不能已经存在：重跑同一次发布会把 tag 挪到新提交上
         if git rev-parse -q --verify "refs/tags/${INTERIOR_VERSION}" >/dev/null; then

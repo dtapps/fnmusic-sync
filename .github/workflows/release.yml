@@ -37,6 +37,7 @@ on:
           版本；无后缀即正式版'
         required: true
         type: string
+        default: 'nightly'
       commit:
         description: '要构建的提交（留空则使用默认分支最新提交）'
         required: false
@@ -46,9 +47,6 @@ on:
 permissions:
   contents: write
   packages: read # 拉取 GHCR 上的 CI 镜像（公开镜像亦可匿名拉，写上以防仓库转私有）
-
-env:
-  CI: 'true'
 
 # 并发策略：同一分支的多次触发串行排队，绝不取消「正在运行」的旧运行。
 # cancel-in-progress: false 表示新运行进入 pending 等待，而非抢占/取消 in-progress。
@@ -84,6 +82,18 @@ jobs:
           # 构建指定提交（留空 → 触发时的默认分支最新提交）：
           # 定时任务没有 inputs，github.sha 就是默认分支当时的 HEAD。
           ref: ${{ inputs.commit || github.sha }}
+
+      # 缓存同步下来的模板脚本；key 绑定仓库内脚本内容，脚本一改就换新缓存，
+      # 避免旧缓存把已跟踪脚本（如 resolve-prerelease.sh）恢复成旧版本。
+      - name: 缓存脚本
+        uses: actions/cache@v6
+        with:
+          path: scripts/ci
+          key: ci-scripts-${{ hashFiles('scripts/ci/**') }}
+
+      - name: 同步脚本
+        shell: bash
+        run: make fetch-scripts
 
       # 容器工作区是 runner 挂进来的 bind mount（属主是 runner 用户），容器内进程却是 root，
       - name: 让容器内的 git 可用
@@ -188,10 +198,6 @@ jobs:
           git fetch --tags --quiet --force || true
           count=$(git tag -l 'v*' | wc -l | tr -d ' ')
           echo "本地版本 tag: ${count} 个"
-          if [ "$count" -eq 0 ]; then
-            echo "❌ 一个版本 tag 都没有，changelog 会退化成「首次发布」"
-            exit 1
-          fi
 
           if git rev-parse -q --verify "refs/tags/${VERSION}" >/dev/null; then
             # nightly 同一天重跑 / 补发：允许覆盖同名 tag（每天一个 tag，重建的是同一个）。
@@ -242,6 +248,18 @@ jobs:
           # 需要上一个 tag 算 fpk 的更新内容，shallow clone 只有 1 个 commit，
           # git describe / git log 都会退化。
           fetch-depth: 0
+
+      # 缓存同步下来的模板脚本；key 绑定仓库内脚本内容，脚本一改就换新缓存，
+      # 避免旧缓存把已跟踪脚本（如 resolve-prerelease.sh）恢复成旧版本。
+      - name: 缓存脚本
+        uses: actions/cache@v6
+        with:
+          path: scripts/ci
+          key: ci-scripts-${{ hashFiles('scripts/ci/**') }}
+
+      - name: 同步脚本
+        shell: bash
+        run: make fetch-scripts
 
       # 容器工作区是 runner 挂进来的 bind mount（属主是 runner 用户），容器内进程却是 root，
       - name: 让容器内的 git 可用
@@ -358,6 +376,18 @@ jobs:
           # 与 prepare / build 同一个提交：Release 正文里的「提交」链接、
           # changelog 的对比区间都要指向真正被构建的那一个。
           ref: ${{ inputs.commit || github.sha }}
+
+      # 缓存同步下来的模板脚本；key 绑定仓库内脚本内容，脚本一改就换新缓存，
+      # 避免旧缓存把已跟踪脚本（如 resolve-prerelease.sh）恢复成旧版本。
+      - name: 缓存脚本
+        uses: actions/cache@v6
+        with:
+          path: scripts/ci
+          key: ci-scripts-${{ hashFiles('scripts/ci/**') }}
+
+      - name: 同步脚本
+        shell: bash
+        run: make fetch-scripts
 
       - name: 下载所有产物
         uses: actions/download-artifact@v8
@@ -494,6 +524,18 @@ jobs:
         with:
           ref: ${{ inputs.commit || github.sha }}
           fetch-depth: 0
+
+      # 缓存同步下来的模板脚本；key 绑定仓库内脚本内容，脚本一改就换新缓存，
+      # 避免旧缓存把已跟踪脚本（如 resolve-prerelease.sh）恢复成旧版本。
+      - name: 缓存脚本
+        uses: actions/cache@v6
+        with:
+          path: scripts/ci
+          key: ci-scripts-${{ hashFiles('scripts/ci/**') }}
+
+      - name: 同步脚本
+        shell: bash
+        run: make fetch-scripts
 
       - name: 生成公告正文
         shell: bash

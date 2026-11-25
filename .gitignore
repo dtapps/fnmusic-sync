@@ -68,3 +68,8 @@ cmd/frontend/coverage
 
 # Ai
 AGENTS.md
+
+# 同步
+/scripts/ci/delete-release.sh
+/scripts/ci/describe-artifact.sh
+/scripts/ci/render-ci-notice.sh

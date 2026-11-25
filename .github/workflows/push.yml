@@ -16,9 +16,6 @@ permissions:
   contents: read
   packages: read # 拉取 GHCR 上的 CI 镜像（公开镜像亦可匿名拉，写上以防仓库转私有）
 
-env:
-  CI: 'true'
-
 # 并发策略：同一分支的多次触发串行排队，绝不取消「正在运行」的旧运行。
 # cancel-in-progress: false 表示新运行进入 pending 等待，而非抢占/取消 in-progress。
 # queue: max 让同一 group 最多保留 100 个 pending（默认 queue: single 只留 1 个，
@@ -39,6 +36,18 @@ jobs:
     steps:
       - name: 检出代码
         uses: actions/checkout@v7
+
+      # 缓存同步下来的模板脚本；key 绑定仓库内脚本内容，脚本一改就换新缓存，
+      # 避免旧缓存把已跟踪脚本（如 resolve-prerelease.sh）恢复成旧版本。
+      - name: 缓存脚本
+        uses: actions/cache@v6
+        with:
+          path: scripts/ci
+          key: ci-scripts-${{ hashFiles('scripts/ci/**') }}
+
+      - name: 同步脚本
+        shell: bash
+        run: make fetch-scripts
 
       # 容器镜像已预装 Go 工具链（GOPATH=/go，工具在 /go/bin 且已在 PATH），
       # 这里把路径常量写入 $GITHUB_ENV，供后续 make 步骤的 GOPATH/GOBIN 引用。
@@ -108,7 +117,7 @@ jobs:
       - name: 运行 Go 单元测试
         run: make check-go-test
 
-      - name: 运行 Go 赖漏洞检查
+      - name: 运行 Go 依赖漏洞检查
         run: make check-go-vuln
 
       - name: 同步前端依赖 (确保环境一致)

@@ -336,7 +336,7 @@ format-shell:
 
 # 格式化/修复项目
 .PHONY: format
-format: format-node format-go format-yaml format-json format-json5 format-sql format-markdown format-docker format-shell
+format: fetch-scripts format-node format-go format-yaml format-json format-json5 format-sql format-markdown format-docker format-shell
 
 #####################
 ## 检查 / 测试 相关
@@ -384,7 +384,7 @@ check-go-test:
 	@echo "[Check] -> 运行 Go 单元测试 (Tags: $(LINT_TAGS))..."
 	$(LINT_ENV) go test -tags=$(LINT_TAGS) $(GO_COVER_TEST_FLAGS) $(GO_COVER_SCAN)
 
-# 运行 Go 赖漏洞检查
+# 运行 Go 依赖漏洞检查
 .PHONY: check-go-vuln
 check-go-vuln:
 	@echo "[Check] -> 运行 Go 依赖漏洞检查 (Tags: $(LINT_TAGS))..."
@@ -540,3 +540,13 @@ junit-node:
 	@echo "[Coverage] 前端 JUnit → $(NODE_JUNIT_XML)"
 	@mkdir -p $(NODE_COVER_DIR)
 	cd $(NODE_DIR) && $(NODE_VITEST_ENV) pnpm exec vitest run --reporter=junit --outputFile=$(CURDIR)/$(NODE_JUNIT_XML)
+
+#####################
+## 同步 相关
+#####################
+
+# 同步 CI 模板脚本（缺失下载，sha256 不同则更新）
+.PHONY: fetch-scripts
+fetch-scripts:
+	@echo "[Scripts] 同步 CI 模板脚本..."
+	sh scripts/ci/fetch-scripts.sh

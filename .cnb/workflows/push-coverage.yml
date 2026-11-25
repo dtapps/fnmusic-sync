@@ -1,7 +1,8 @@
 '**':
   push:
     # Go 单元测试覆盖率（全量红线）。
-    - runner:
+    - name: Go 单元测试覆盖率（全量红线）
+      runner:
         tags: cnb:arch:amd64
       docker:
         image: docker.cnb.cool/dtapp/golang/fnpack:latest # 统一使用预构建的 CI 环境镜像
@@ -9,9 +10,19 @@
           - /root/.cache/go-build:copy-on-write # Go 构建缓存 - 加速编译
           - /root/.local/share/pnpm/store:copy-on-write # pnpm 全局存储 - 加速前端依赖安装
           - /go/pkg/mod:copy-on-write # 仅缓存 Go 模块下载，避免覆盖镜像内预装的 /go/bin 工具
+          - ./scripts/ci:copy-on-write # 模板脚本缓存；卷会整体挂载该目录，同步前需先还原跟踪文件
       stages:
-        - name: 安装所有依赖
-          script: make deps
+        - name: 同步脚本
+          script: |
+            # 卷会整体挂载 scripts/ci，先把本次提交里跟踪的脚本还原（未跟踪的模板脚本由缓存/下载提供）
+            git checkout -- scripts/ci
+            make fetch-scripts
+
+        - name: 安装全部 Go 依赖
+          script: make deps-go
+
+        - name: 安装全部前端依赖
+          script: make deps-node
 
         - name: 生成测试覆盖率
           script: make cover-go # 产出 coverage.out
@@ -34,7 +45,8 @@
           script: 'echo "coverage: lines=$COVERAGE_LINES diff=$COVERAGE_DIFF_PCT"'
 
     # 前端单元测试覆盖率（全量红线）。
-    - runner:
+    - name: 前端单元测试覆盖率（全量红线）
+      runner:
         tags: cnb:arch:amd64
       docker:
         image: docker.cnb.cool/dtapp/golang/fnpack:latest # 统一使用预构建的 CI 环境镜像
@@ -42,9 +54,19 @@
           - /root/.cache/go-build:copy-on-write # Go 构建缓存 - 加速编译
           - /root/.local/share/pnpm/store:copy-on-write # pnpm 全局存储 - 加速前端依赖安装
           - /go/pkg/mod:copy-on-write # 仅缓存 Go 模块下载，避免覆盖镜像内预装的 /go/bin 工具
+          - ./scripts/ci:copy-on-write # 模板脚本缓存；卷会整体挂载该目录，同步前需先还原跟踪文件
       stages:
-        - name: 安装所有依赖
-          script: make deps
+        - name: 同步脚本
+          script: |
+            # 卷会整体挂载 scripts/ci，先把本次提交里跟踪的脚本还原（未跟踪的模板脚本由缓存/下载提供）
+            git checkout -- scripts/ci
+            make fetch-scripts
+
+        - name: 安装全部 Go 依赖
+          script: make deps-go
+
+        - name: 安装全部前端依赖
+          script: make deps-node
 
         - name: 生成前端测试覆盖率
           script: make cover-node # 产出 cmd/frontend/coverage/lcov.info

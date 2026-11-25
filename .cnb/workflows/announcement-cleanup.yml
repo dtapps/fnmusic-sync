@@ -19,7 +19,8 @@
 # 刚刷新过的公告本来就该继续挂着，这个口径反而更合理。
 main:
   'crontab: 0 0 * * *':
-    - runner:
+    - name: 公告清理
+      runner:
         tags: cnb:arch:amd64
       env:
         # 公告多少天后过期（天）

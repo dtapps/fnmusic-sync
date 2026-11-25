@@ -32,6 +32,7 @@ branch:
               自动推导当天夜间构建版本）
             required: true # 是否必填
             type: input
+            default: nightly
           commit:
             name: 构建提交
             description: 可选：要发布的代码版本（完整 SHA / 分支 / tag）；留空则用当前分支 HEAD
