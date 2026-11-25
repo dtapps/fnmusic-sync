@@ -1,10 +1,11 @@
-name: 从 Dependabot 同步标签
+name: 同步依赖更新机器人标签
 
 on:
   push:
     branches: ['**']
     paths:
       - '.github/dependabot.yml'
+      - '.github/renovate.json5'
   workflow_dispatch:
 
 permissions:
@@ -18,16 +19,30 @@ jobs:
       - name: 检出代码
         uses: actions/checkout@v7
 
-      - name: 从 dependabot.yml 自动创建标签
+      - name: 从 dependabot.yml / renovate.json5 自动创建标签
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
 
-          # 提取所有 labels 并去重
-          labels=$(yq -r '.updates[].labels[]?' .github/dependabot.yml | sort -u)
+          labels_file=$(mktemp)
+          trap 'rm -f "$labels_file"' EXIT
 
-          echo "📋 发现以下标签："
+          # Dependabot 标签（文件存在时）
+          if [ -f .github/dependabot.yml ]; then
+            yq -r '.updates[].labels[]?' .github/dependabot.yml >> "$labels_file"
+          fi
+
+          # Renovate 标签（文件存在时）：JSON5 有注释/尾逗号，先转成标准 JSON 再提取
+          # 取顶层 labels 与 packageRules[].addLabels，与 Dependabot 标签合并后统一去重
+          if [ -f .github/renovate.json5 ]; then
+            node -e 'const fs=require("fs");const s=fs.readFileSync(".github/renovate.json5","utf8").split("\n").filter(l=>!l.trim().startsWith("//")).join("\n").replace(/^(\s*)([A-Za-z_$][\w$]*)(\s*:)/gm,"$1\"$2\"$3").replace(/,(\s*[}\]])/g,"$1");const c=JSON.parse(s);console.log([...(c.labels||[]),...(c.packageRules||[]).flatMap(r=>r.addLabels||[])].join("\n"))' >> "$labels_file"
+          fi
+
+          # 跨两个文件统一去重：同名标签（如 dependencies/go/frontend）只创建一次
+          labels=$(sed '/^[[:space:]]*$/d' "$labels_file" | sort -u)
+
+          echo "📋 发现以下标签（已去重）："
           echo "$labels"
 
           # 为每个标签自动生成颜色和描述
@@ -42,8 +57,7 @@ jobs:
               color="0${color:2:5}"
             fi
 
-            # 描述直接用标签名
-            desc="Auto-synced from dependabot.yml"
+            desc="Auto-synced from dependabot.yml / renovate.json5"
 
             # 创建或更新标签
             gh label create "$label" \

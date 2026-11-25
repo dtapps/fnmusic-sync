@@ -1,0 +1,90 @@
+{
+  $schema: "https://docs.renovatebot.com/renovate-schema.json",
+
+  // 定位：Dependabot 为主，Renovate 为备用；由 .github/workflows/renovate.yml
+  //       每天定时运行，也可在 Actions 页面手动触发。
+  // 备用策略：dependencyDashboardApproval=true，定时运行只刷新 Dependency Dashboard，
+  //           不自动开 PR；Dependabot 失效时人工在 Dashboard 勾选需要的更新再创建 PR，
+  //           因此两套机器人不会重复提 PR，也无需停用 dependabot.yml。
+  extends: ["config:recommended"],
+
+  // 频率由 workflow 的 cron 控制（每天 00:00 UTC）；这里不额外限制时段。
+  timezone: "Asia/Shanghai",
+  schedule: ["at any time"],
+
+  // 依赖集中在 go.mod 与 cmd/frontend，限速避免一次性刷屏。
+  prConcurrentLimit: 5,
+  prHourlyLimit: 2,
+
+  // 与仓库提交风格保持一致（见 docs/contributing.md）：build(deps): bump xxx。
+  // config:recommended 默认开启语义化提交，这里显式关闭并覆盖前缀。
+  semanticCommits: "disabled",
+  commitMessagePrefix: "build(deps):",
+  commitMessageAction: "bump",
+
+  // major 单独 PR 便于人工评估破坏性变更；minor/patch 按包合并（默认行为，显式声明）。
+  separateMajorMinor: true,
+  separateMinorPatch: false,
+
+  // 新版本发布 3 天后再跟进，降低供应链投毒风险。
+  minimumReleaseAge: "3 days",
+
+  // 集中查看待处理更新；只扫描项目实际使用的三类依赖。
+  // 本仓库无 Dockerfile（CI 镜像由独立项目构建，见 docs/ci-image.md），不启用 dockerfile。
+  dependencyDashboard: true,
+  // 备用模式关键开关：只在 Dashboard 列出更新，人工勾选后才创建 PR，避免与 Dependabot 重复。
+  dependencyDashboardApproval: true,
+  dependencyDashboardTitle: "依赖更新面板（Renovate 备用）",
+  dependencyDashboardHeader: "Dependabot 是主依赖更新方案；本面板仅作备用。需要 Renovate 创建 PR 时先在这里勾选对应更新，避免与 Dependabot 重复提交。",
+  dependencyDashboardFooter: "勾选后 Renovate 会在下一次运行时创建 PR；发布未满 3 天的新版本不会创建 PR。",
+  enabledManagers: ["gomod", "npm", "github-actions"],
+  labels: ["dependencies"],
+
+  // 依赖更新必须人工确认后再合并；CI 门禁与覆盖率口径见 docs/contributing.md。
+  automerge: false,
+
+  packageRules: [
+    // ---------- Go ----------
+    {
+      matchManagers: ["gomod"],
+      postUpdateOptions: ["gomodTidy"],
+      addLabels: ["go"],
+    },
+    {
+      matchManagers: ["gomod"],
+      matchUpdateTypes: ["minor", "patch"],
+      groupName: "Go 依赖（非 major）",
+    },
+    // Go 版本与统一 CI 镜像（dtapps/golang/fnpack）绑定，go.mod 的 go/toolchain 指令需人工评估后修改。
+    {
+      matchManagers: ["gomod"],
+      matchDepTypes: ["golang", "toolchain"],
+      enabled: false,
+    },
+
+    // ---------- 前端（cmd/frontend，pnpm） ----------
+    {
+      matchManagers: ["npm"],
+      // package.json 的依赖全部位于 devDependencies，与 Dependabot 的 build(deps-dev) 保持一致。
+      commitMessagePrefix: "build(deps-dev):",
+      postUpdateOptions: ["pnpmDedupe"],
+      addLabels: ["frontend"],
+    },
+    {
+      matchManagers: ["npm"],
+      matchUpdateTypes: ["minor", "patch", "digest"],
+      groupName: "前端依赖（非 major）",
+    },
+
+    // ---------- GitHub Actions ----------
+    {
+      matchManagers: ["github-actions"],
+      addLabels: ["github-actions"],
+    },
+    {
+      matchManagers: ["github-actions"],
+      matchUpdateTypes: ["minor", "patch", "digest"],
+      groupName: "GitHub Actions（非 major）",
+    },
+  ],
+}

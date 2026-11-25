@@ -85,6 +85,7 @@ YAML_EXCLUDES=(
 # 复制到别的项目时按实际目录填写，不存在的目录会自动跳过。
 JSONFMT_ARGS=(.)
 JSON_TARGETS=(
+  ".github/renovate.json5"
   "cmd/frontend/"
   "fpkg/wizard/"
   "fpkg/app/ui/"

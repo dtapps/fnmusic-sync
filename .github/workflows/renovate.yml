@@ -1,0 +1,59 @@
+# Renovate 备用定时任务
+#
+# Dependabot（.github/dependabot.yml）仍是主依赖更新方案；本任务每天定时跑一次 Renovate，
+# 由于 .github/renovate.json5 开启了 dependencyDashboardApproval，定时运行只刷新
+# Dependency Dashboard，不会自动创建 PR。Dependabot 失效时，人工在 Dashboard 勾选
+# 需要的更新即可让 Renovate 创建 PR，两套机器人因此不会重复提 PR。
+name: Renovate Backup
+
+on:
+  schedule:
+    # 每天 00:00 执行（GitHub Actions 的 cron 按 UTC 计算）
+    - cron: '0 0 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: renovate-backup
+  cancel-in-progress: false
+
+jobs:
+  renovate:
+    runs-on: ubuntu-latest
+    env:
+      LOG_LEVEL: info
+      # 自托管 Renovate 只扫描当前仓库
+      RENOVATE_REPOSITORIES: ${{ github.repository }}
+      # 已有仓库内配置文件，跳过 onboarding，不额外创建配置 PR
+      RENOVATE_ONBOARDING: 'false'
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v7
+
+      - name: 运行 Renovate（备用）
+        # ── RENOVATE_TOKEN 获取与权限 ──────────────────────────────────────
+        # 用途：自托管 Renovate 用它调用 GitHub API，读取仓库、建分支、创建/更新 PR
+        #       和 Dependency Dashboard issue。
+        # 获取：GitHub 头像 → Settings → Developer settings → Personal access tokens
+        #       → Tokens (classic) → Generate new token (classic)。
+        # 权限（scopes）：
+        #   - 公开仓库：勾选 repo:public_repo
+        #   - 私有仓库：勾选 repo
+        #   - 需要 Renovate 更新 .github/workflows 下的 action 版本时：再加 workflow
+        #   - 组织仓库：生成后到 token 页面点 “Authorize” 完成 SSO 授权
+        # 保存：仓库 → Settings → Secrets and variables → Actions → New repository secret，
+        #       Name 填 RENOVATE_TOKEN，Value 粘贴 token（页面只显示一次）。
+        # 未配置时回退到 github.token：需在仓库 Settings → Actions → General 开启
+        #   “Allow GitHub Actions to create and approve pull requests”，且无法更新 workflow 文件。
+        # 也可用 fine-grained PAT（仅授权本仓库，Contents / Pull requests / Issues 读写，
+        #   Metadata 只读），但更新 workflow 文件可能受限，classic PAT 更稳妥。
+        # ──────────────────────────────────────────────────────────────────
+        uses: renovatebot/github-action@v46.3.14
+        with:
+          token: ${{ secrets.RENOVATE_TOKEN || github.token }}
+          configurationFile: .github/renovate.json5
+          renovate-version: 44.261.2
