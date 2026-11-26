@@ -550,3 +550,9 @@ junit-node:
 fetch-scripts:
 	@echo "[Scripts] 同步 CI 模板脚本..."
 	sh scripts/ci/fetch-scripts.sh
+
+# 更新 fetch-scripts.sh 自身（npm 包 @latest）
+.PHONY: update-fetch-scripts
+update-fetch-scripts:
+	curl -fsSL https://cdn.jsdelivr.net/npm/@dtapp/ci-templates@latest/scripts/ci/fetch-scripts.sh -o scripts/ci/fetch-scripts.sh
+

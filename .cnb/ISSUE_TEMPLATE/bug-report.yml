@@ -1,0 +1,97 @@
+name: 缺陷反馈
+description: 报告 FnMusicSync 的异常、崩溃或行为不符合预期
+title: '[Bug] '
+body:
+  - type: markdown
+    attributes:
+      value: |
+        提交前请先搜索已有 Issue，避免重复报告。
+
+        安全问题请按 [SECURITY.md](https://cnb.cool/dtapp/fnmusic-sync/-/blob/main/SECURITY.md) 私下报告，不要在此填写 token、session_key、api_secret、真实地址或未脱敏日志。
+
+  - type: textarea
+    id: description
+    attributes:
+      label: 问题描述
+      description: 说明实际发生了什么，以及你原本期待发生什么。
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: FnMusicSync 版本
+      description: '粘贴 `fnmusic-sync version` 的完整输出。'
+      placeholder: 'fnmusic-sync v1.2.3 (commit: ...)'
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install-mode
+    attributes:
+      label: 安装方式
+      options:
+        - 飞牛应用中心（fpk）
+        - Debian/Ubuntu（deb）
+        - Linux 通用包（tar.gz）
+        - 自行编译
+    validations:
+      required: true
+
+  - type: input
+    id: environment
+    attributes:
+      label: 运行环境
+      description: 'fnOS 版本、CPU 架构（amd64/arm64）及相关音乐服务。'
+      placeholder: fnOS 0.9.3，amd64，飞牛音乐 + Last.fm
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      description: 按顺序列出操作；偶发问题请说明触发条件与大致频率。
+      placeholder: |
+        1. ...
+        2. ...
+        3. ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: 预期行为
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: 实际行为
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: 日志与诊断信息
+      description: '可选。请附相关日志、`fnmusic-sync --check` 输出或截图；分享前删除凭证、Cookie、真实用户标识和地址。'
+      render: text
+
+  - type: textarea
+    id: workaround
+    attributes:
+      label: 临时解决办法
+      description: '可选。如果重启、升级或修改配置后能恢复，请说明。'
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: 提交前检查
+      options:
+        - label: 我已搜索已有 Issue，且这不是重复报告
+          required: true
+        - label: 我已完成脱敏，没有提交凭证或隐私数据
+          required: true

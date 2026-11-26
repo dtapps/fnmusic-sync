@@ -2,7 +2,7 @@
 #
 # 版本号归一化 + 预发布判定。
 #
-# 事实来源：三个平台的 release 流水线（CNB / GitHub / Gitee）
+# 事实来源：两个平台的 release 流水线（CNB / GitHub）
 # 都 source 这一份实现，避免各写一套
 # grep 正则、判断口径慢慢跑偏：
 #
@@ -232,7 +232,7 @@ check_version() {
 }
 
 # source 只带进函数，不调用 resolve_version 就什么都算不出来。
-# 三个平台的流水线都靠这个调用，漏一处第一步就会在 set -u 下红掉 —— 这里把约定钉死。
+# 两个平台的流水线都靠这个调用，漏一处第一步就会在 set -u 下红掉 —— 这里把约定钉死。
 if [ -n "${TAG:-}" ]; then
   printf '  ✗ 仅 source 就已经设置了 TAG=%s，函数不该有副作用\n' "${TAG}"
   failures=$((failures + 1))

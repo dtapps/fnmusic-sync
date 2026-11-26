@@ -385,9 +385,9 @@ make goreleaser-snapshot   # snapshot build into dist/ (no tag needed)
 make goreleaser-release    # build into dist/ (CI passes GORELEASER_CURRENT_TAG=<tag>)
 ```
 
-Builds and packaging are handled entirely by GoReleaser (`dist/`): tar.gz, deb and fpk for both architectures. Release assets on all three platforms include tar.gz/deb/fpk and `SHA256SUMS` (excluding the intermediate fpk tar.gz). The version comes from the tag and is injected into `internal/buildinfo` via `-ldflags -X`, so `fnmusic-sync version` shows the real version; a local `go build` without ldflags shows `dev`.
+Builds and packaging are handled entirely by GoReleaser (`dist/`): tar.gz, deb and fpk for both architectures. Release assets on CNB and GitHub include tar.gz/deb/fpk and `SHA256SUMS` (excluding the intermediate fpk tar.gz). The version comes from the tag and is injected into `internal/buildinfo` via `-ldflags -X`, so `fnmusic-sync version` shows the real version; a local `go build` without ldflags shows `dev`.
 
-CI (the release workflows on CNB, GitHub and Gitee share `scripts/ci/render-release-body.sh`) builds and publishes a Release when a tag is cut; the Release body contains a release info table, download table, `SHA256SUMS` verification notes and changelog grouped by channel. **Pre-release status is determined solely by the version suffix** (`v1.2.3-rc.1` / `-beta.1` / `-alpha.1` / `-nightly.20260101`); the pipeline takes only a version number, with no pre-release switch.
+CI (the release workflows on CNB and GitHub share `scripts/ci/render-release-body.sh`) builds and publishes a Release on schedule or manual dispatch; the Release body contains a release info table, download table, `SHA256SUMS` verification notes and changelog grouped by channel. CNB builds nightly daily at 00:00 Beijing time (UTC+8), while GitHub builds nightly daily at 00:00 UTC. **Pre-release status is determined solely by the version suffix** (`v1.2.3-rc.1` / `-beta.1` / `-alpha.1` / `-nightly.20260101`); the pipeline takes only a version number, with no pre-release switch.
 
 ## Directory structure
 

@@ -1,7 +1,7 @@
-# 分支详情页的自定义按钮：填版本号，触发 .cnb/workflows/release.yml。
+# 分支详情页的自定义按钮：填版本号与可选提交，触发 .cnb/workflows/release.yml。
 #
-# **只有一个输入：version。没有 pre_release 开关了。**
-# 预发布由版本号自己带着走（唯一规则，三个平台共用 scripts/ci/resolve-prerelease.sh）：
+# **只有两个输入：version 和可选 commit；没有 pre_release 开关。**
+# 预发布由版本号自己带着走（唯一规则，两个平台共用 scripts/ci/resolve-prerelease.sh）：
 #   v1.2.3                    → 正式版
 #   v1.2.3-rc.1               → 预发布（rc 渠道）
 #   v1.2.3-beta.1             → 预发布（beta 渠道）
@@ -19,7 +19,7 @@ branch:
   - buttons:
       - name: 打包 Go 项目
         description: 打包 Go 项目并发布 Release（预发布看版本号后缀：-rc.1 / -beta.1 / -alpha.1 / -nightly.20260101）
-        event: web_trigger_build_go_project # 触发的 CI 事件名
+        event: web_trigger_release # 触发的 CI 事件名
         permissions:
           roles:
             - owner

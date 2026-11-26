@@ -75,7 +75,7 @@ git switch -c feat/lb-playlist-range
 
 ## CI 门禁
 
-仓库同时挂 CNB、GitHub Actions 两套 CI 流水线，负责构建与门禁；发布另有 Gitee（只转发）一条，见 [docs/contributing.md](docs/contributing.md)：
+仓库同时挂 CNB、GitHub Actions 两套 CI 流水线，负责构建与门禁；发布由两套流水线独立执行，见 [docs/contributing.md](docs/contributing.md)：
 
 | 平台   | 跑什么                                                      |
 |--------|-------------------------------------------------------------|

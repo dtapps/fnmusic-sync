@@ -2,16 +2,18 @@
 # 模板脚本拉取器：把 ci-templates 里的脚本按「与模板仓库完全一致的相对路径」
 # 落到当前仓库（默认 scripts/ci/），供 CI stage 直接 sh scripts/ci/xxx.sh 调用。
 #
-# 背景：ci-templates 在 CNB / GitHub / GitLab / Gitee / GitCode 各放一份，内容一致，
-#       只有平台差异（下载地址格式）。本文件下方的清单决定要拉哪些脚本；
-#       业务仓库只需保留本文件，不必手工复制、同步。
+# 背景：ci-templates 在 CNB / GitHub / GitLab / Gitee 各放一份，内容一致，
+#       只有平台差异（下载地址格式）；同时发布到 npm（@dtapp/ci-templates），
+#       仓库源全部取不到时还能靠 npm CDN 或国内镜像兜底。
+#       本文件下方的清单决定要拉哪些脚本；业务仓库只需保留本文件，不必手工复制、同步。
 #
 # 用法（在任意仓库根目录执行）：
 #   sh scripts/ci/fetch-scripts.sh                    # 同步：缺失的下载，已存在的比 sha256，不同则更新
 #   sh scripts/ci/fetch-scripts.sh --force            # 不做比对，已存在也直接覆盖
 #   sh scripts/ci/fetch-scripts.sh --check            # 只查存在性（不下载、不比对），缺失时退出码 1
 #   sh scripts/ci/fetch-scripts.sh --list             # 打印清单与候选源顺序
-#   sh scripts/ci/fetch-scripts.sh --source gitlab    # 指定起点源（cnb|github|gitee|gitlab）
+#   sh scripts/ci/fetch-scripts.sh --source gitlab    # 指定起点源（见下方源清单）
+#   sh scripts/ci/fetch-scripts.sh --npm-version 0.0.1-nightly.20261126  # 指定 npm 包版本或 dist-tag
 #   sh scripts/ci/fetch-scripts.sh --no-fallback      # 只用起点源，失败不换源
 #   sh scripts/ci/fetch-scripts.sh delete-release.sh  # 只处理指定脚本（可多个，也可写全路径）
 #
@@ -19,17 +21,30 @@
 #   1) --source <平台> / 环境变量 CI_TEMPLATES_SOURCE 显式指定「起点源」
 #   2) 否则自动探测当前 CI 平台（CNB / GitHub / Gitee / GitLab）作为起点
 #   3) 一个都探测不到（如本地开发）：按 CNB → GitHub → Gitee → GitLab 取第一个，即默认 CNB
-#   4) 起点源取不到文件时，按同一顺序继续换下一个源，直到拿到或全部失败；
-#      回退是「每个文件独立」的，所以某个源缺某个脚本也能自动从别的源补齐
+#   4) 起点源取不到文件时，其余源按固定顺序 SOURCE_ORDER 依次尝试（四个仓库源始终
+#      排在 npm 源之前），直到拿到或全部失败；回退是「每个文件独立」的，
+#      所以某个源缺某个脚本也能自动从别的源补齐
 #      --no-fallback（或 CI_TEMPLATES_NO_FALLBACK=1）可关掉回退，只用起点源
 #
-# 四个源仓库（内容一致，按上面的顺序尝试）：
+# 源清单（内容一致，按 SOURCE_ORDER 顺序尝试）：
+# ① 仓库源：跟 CI_TEMPLATES_REF（默认 main）走，代码最新
 #   CNB    ：https://cnb.cool/dtapp/ci-templates       /-/git/raw/<ref>/<path>
 #   GitHub ：https://github.com/dtapps/ci-templates    raw.githubusercontent.com/dtapps/ci-templates/<ref>/<path>
 #   Gitee  ：https://gitee.com/dtapps/ci-templates     /raw/<ref>/<path>（302 到内容域，靠 -L 跟随）
 #   GitLab ：https://gitlab.com/dtapps/ci-templates    /-/raw/<ref>/<path>
-#   注：GitCode 没有可用的 raw 地址（网页 raw 对 .sh 一律返回 HTML 或 403「暂不支持预览」，
-#       只有 api.gitcode.com 的 raw API 能取到文件），故未列入。
+#
+# ② npm 源：跟 npm 包版本走（CI_TEMPLATES_NPM_VERSION，默认 latest 标签）
+#   jsdelivr：https://cdn.jsdelivr.net/npm/@dtapp/ci-templates@<ver>/<path>
+#   unpkg   ：https://unpkg.com/@dtapp/ci-templates@<ver>/<path>
+#             （https://www.npmjs.com/package/@dtapp/ci-templates 与 app.unpkg.com 只是
+#               包页面/文件浏览界面，真正能按路径取文件的是这两个 CDN）
+#   npm     ：https://registry.npmjs.org/@dtapp/ci-templates/-/ci-templates-<ver>.tgz
+#             （官方 registry 没有单文件接口，只能下整包然后用 tar 取单个文件）
+#
+# ③ npm 镜像源：②全部失败才用，国内网络更稳
+#   npmmirror：https://registry.npmmirror.com/@dtapp/ci-templates/-/ci-templates-<ver>.tgz
+#   tencent  ：https://mirrors.cloud.tencent.com/npm/@dtapp/ci-templates/-/ci-templates-<ver>.tgz
+#              （镜像同样只提供整包 tgz，每次运行每个镜像最多下载一次并复用）
 #
 # 平台探测（只看各平台强特征变量，避免业务仓库里配的 GITEE_TOKEN 之类被误判成 CI）：
 #   CNB     CNB=true，或 CNB_BUILD_ID / CNB_PIPELINE_ID / CNB_BUILD_WORKSPACE 任一非空
@@ -38,13 +53,20 @@
 #   GitLab  GITLAB_CI=true
 #
 # 环境变量：
-#   CI_TEMPLATES_SOURCE      cnb | github | gitee | gitlab，等价于 --source
+#   CI_TEMPLATES_SOURCE      cnb | github | gitee | gitlab | jsdelivr | unpkg | npm | npmmirror | tencent，等价于 --source
 #   CI_TEMPLATES_REF         模板仓库分支或 tag，默认 main
+#   CI_TEMPLATES_NPM_PACKAGE npm 包名，默认 @dtapp/ci-templates
+#   CI_TEMPLATES_NPM_VERSION npm 版本号或 dist-tag（latest / nightly ...），默认 latest
 #   CI_TEMPLATES_NO_FALLBACK 非空 = 不回退，只用起点源
 #   CI_TEMPLATES_CNB_URL     CNB 下载基址（默认 https://cnb.cool/dtapp/ci-templates/-/git/raw）
 #   CI_TEMPLATES_GITHUB_URL  GitHub 下载基址（默认 https://raw.githubusercontent.com/dtapps/ci-templates）
 #   CI_TEMPLATES_GITEE_URL   Gitee 下载基址（默认 https://gitee.com/dtapps/ci-templates/raw）
 #   CI_TEMPLATES_GITLAB_URL  GitLab 下载基址（默认 https://gitlab.com/dtapps/ci-templates/-/raw）
+#   CI_TEMPLATES_JSDELIVR_URL  jsDelivr 基址（默认 https://cdn.jsdelivr.net/npm）
+#   CI_TEMPLATES_UNPKG_URL   unpkg 基址（默认 https://unpkg.com）
+#   CI_TEMPLATES_NPM_URL     官方 npm registry 基址（默认 https://registry.npmjs.org）
+#   CI_TEMPLATES_NPMMIRROR_URL  npmmirror 基址（默认 https://registry.npmmirror.com）
+#   CI_TEMPLATES_TENCENT_NPM_URL 腾讯云 npm 镜像基址（默认 https://mirrors.cloud.tencent.com/npm）
 #   CI_SCRIPTS_ROOT          落盘根目录，默认本脚本所在的仓库根
 #   CI_SCRIPTS_TIMEOUT       单文件下载超时秒数，默认 30
 #
@@ -57,19 +79,29 @@
 #
 # 退出码：0 成功；1 有脚本缺失或下载失败；2 用法错误。
 #
-# 依赖：curl（缺失时退到 wget）。sha256 依次尝试 sha256sum / shasum / openssl dgst，
+# 依赖：curl（缺失时退到 wget）；npm 镜像源额外需要 tar（只解包单个文件）。
+#       sha256 依次尝试 sha256sum / shasum / openssl dgst，
 #       三者都没有时退化为「直接覆盖」——结果仍是最新，只是不再跳过。
 
 set -u
 
-# ── 四个源仓库的下载基址（内容一致，只差平台）────────────────────────────
+# ── 各源的下载基址（内容一致，只差平台与取文件方式）─────────────────────
 TEMPLATE_CNB_URL='https://cnb.cool/dtapp/ci-templates/-/git/raw'
 TEMPLATE_GITHUB_URL='https://raw.githubusercontent.com/dtapps/ci-templates'
 TEMPLATE_GITEE_URL='https://gitee.com/dtapps/ci-templates/raw'
 TEMPLATE_GITLAB_URL='https://gitlab.com/dtapps/ci-templates/-/raw'
+TEMPLATE_JSDELIVR_URL='https://cdn.jsdelivr.net/npm'
+TEMPLATE_UNPKG_URL='https://unpkg.com'
+TEMPLATE_NPM_URL='https://registry.npmjs.org'
+TEMPLATE_NPMMIRROR_URL='https://registry.npmmirror.com'
+TEMPLATE_TENCENT_NPM_URL='https://mirrors.cloud.tencent.com/npm'
 
 # 回退顺序：探测不到 CI 时取第一个；某个源失败时按同一顺序继续往后切
-SOURCE_ORDER='cnb github gitee gitlab'
+# 仓库源（跟 main，最新）→ npm CDN（跟包版本）→ npm 镜像（兜底，国内可用）
+SOURCE_ORDER='cnb github gitee gitlab jsdelivr unpkg npm npmmirror tencent'
+
+# 只有这几个源是「整包 tgz」，其余都能按路径直接取单文件
+TARBALL_SOURCES='npm npmmirror tencent'
 
 # ── 需要同步的脚本清单（路径相对模板仓库根，落盘路径与之完全一致）─────────
 # 新增脚本只要在这里加一行，业务仓库无需改动其它地方。
@@ -94,6 +126,8 @@ die() {
 
 SOURCE=${CI_TEMPLATES_SOURCE:-}
 REF=${CI_TEMPLATES_REF:-main}
+NPM_PACKAGE=${CI_TEMPLATES_NPM_PACKAGE:-@dtapp/ci-templates}
+NPM_VERSION=${CI_TEMPLATES_NPM_VERSION:-latest}
 TIMEOUT=${CI_SCRIPTS_TIMEOUT:-30}
 FORCE=0
 CHECK_ONLY=0
@@ -101,6 +135,10 @@ LIST_ONLY=0
 FALLBACK=1
 WANTED=
 fs_tmp=
+# npm 整包与版本解析的临时目录（只在用到 registry 源时才真正创建）
+NPM_TMP=${TMPDIR:-/tmp}/ci-templates-npm.$$
+# pid 被复用时可能撞上上次异常退出残留的目录，先清掉，避免复用旧版本的整包/版本号
+[ -e "$NPM_TMP" ] && rm -rf "$NPM_TMP"
 
 # 环境变量已开启「不回退」时，后面再遇到 --fallback 也能被命令行改回来
 [ -n "${CI_TEMPLATES_NO_FALLBACK:-}" ] && FALLBACK=0
@@ -109,13 +147,25 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --source | --platform)
       SOURCE=${2:-}
-      [ -n "$SOURCE" ] || die "$1 需要一个值：cnb / github / gitlab / gitee / gitcode"
+      [ -n "$SOURCE" ] || die "$1 需要一个值：cnb / github / gitee / gitlab / jsdelivr / unpkg / npm / npmmirror / tencent"
       shift
       [ $# -gt 0 ] && shift
       ;;
     --ref)
       REF=${2:-}
       [ -n "$REF" ] || die "--ref 需要一个值（分支或 tag）"
+      shift
+      [ $# -gt 0 ] && shift
+      ;;
+    --npm-version)
+      NPM_VERSION=${2:-}
+      [ -n "$NPM_VERSION" ] || die "--npm-version 需要一个值（版本号或 dist-tag，如 latest / 0.0.1-nightly.20261126）"
+      shift
+      [ $# -gt 0 ] && shift
+      ;;
+    --npm-package)
+      NPM_PACKAGE=${2:-}
+      [ -n "$NPM_PACKAGE" ] || die "--npm-package 需要一个值（如 @dtapp/ci-templates）"
       shift
       [ $# -gt 0 ] && shift
       ;;
@@ -184,9 +234,9 @@ if [ -z "$SOURCE" ]; then
 fi
 
 case "$SOURCE" in
-  cnb | github | gitee | gitlab) ;;
+  cnb | github | gitee | gitlab | jsdelivr | unpkg | npm | npmmirror | tencent) ;;
   *)
-    die "源平台只能是 cnb / github / gitee / gitlab（当前：${SOURCE}）"
+    die "源只能是 cnb / github / gitee / gitlab / jsdelivr / unpkg / npm / npmmirror / tencent（当前：${SOURCE}）"
     ;;
 esac
 
@@ -197,34 +247,114 @@ base_url_for() {
     github) printf '%s' "${CI_TEMPLATES_GITHUB_URL:-$TEMPLATE_GITHUB_URL}" ;;
     gitee) printf '%s' "${CI_TEMPLATES_GITEE_URL:-$TEMPLATE_GITEE_URL}" ;;
     gitlab) printf '%s' "${CI_TEMPLATES_GITLAB_URL:-$TEMPLATE_GITLAB_URL}" ;;
+    jsdelivr) printf '%s' "${CI_TEMPLATES_JSDELIVR_URL:-$TEMPLATE_JSDELIVR_URL}" ;;
+    unpkg) printf '%s' "${CI_TEMPLATES_UNPKG_URL:-$TEMPLATE_UNPKG_URL}" ;;
+    npm) printf '%s' "${CI_TEMPLATES_NPM_URL:-$TEMPLATE_NPM_URL}" ;;
+    npmmirror) printf '%s' "${CI_TEMPLATES_NPMMIRROR_URL:-$TEMPLATE_NPMMIRROR_URL}" ;;
+    tencent) printf '%s' "${CI_TEMPLATES_TENCENT_NPM_URL:-$TEMPLATE_TENCENT_NPM_URL}" ;;
   esac
 }
 
-# 拼下载地址：四个平台都是 <base>/<ref>/<path>
-source_url() {
-  fs_base=$(base_url_for "$1")
-  printf '%s/%s/%s' "${fs_base%/}" "$REF" "$2"
+# 这个源是不是「只能下整包 tgz」的 registry 源
+is_tarball_source() {
+  case " $TARBALL_SOURCES " in
+    *" $1 "*) return 0 ;;
+  esac
+  return 1
 }
 
-# 候选源：起点源打头，再按 SOURCE_ORDER 绕一圈；关掉回退时只留起点源
+# 纯下载：文件非空即成功，不做脚本格式校验（元数据 / tgz 也走这里）
+download() {
+  fs_dl_url=$1
+  fs_dl_out=$2
+  [ -d "${fs_dl_out%/*}" ] || mkdir -p "${fs_dl_out%/*}" || return 1
+
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsSL --connect-timeout 10 --max-time "$TIMEOUT" "$fs_dl_url" -o "$fs_dl_out" 2>/dev/null \
+      || {
+        rm -f "$fs_dl_out"
+        return 1
+      }
+  elif command -v wget >/dev/null 2>&1; then
+    wget -q -T "$TIMEOUT" -O "$fs_dl_out" "$fs_dl_url" \
+      || {
+        rm -f "$fs_dl_out"
+        return 1
+      }
+  else
+    warn '需要 curl 或 wget 才能下载模板脚本'
+    return 1
+  fi
+
+  if [ ! -s "$fs_dl_out" ]; then
+    rm -f "$fs_dl_out"
+    return 1
+  fi
+  return 0
+}
+
+# 拼下载地址：
+#   仓库源  <base>/<ref>/<path>
+#   npm CDN <base>/<包名>@<版本或 tag>/<path>
+#   镜像源  <base>/<包名>/-/<包名末段>-<具体版本>.tgz（版本稍后解析）
+source_url() {
+  fs_url_base=$(base_url_for "$1")
+  fs_url_base=${fs_url_base%/}
+  case "$1" in
+    jsdelivr | unpkg)
+      printf '%s/%s@%s/%s' "$fs_url_base" "$NPM_PACKAGE" "$NPM_VERSION" "$2"
+      ;;
+    npm | npmmirror | tencent)
+      fs_url_ver=$(npm_version_for "$1" || true)
+      [ -n "$fs_url_ver" ] || return 1
+      printf '%s/%s/-/%s-%s.tgz' "$fs_url_base" "$NPM_PACKAGE" "${NPM_PACKAGE##*/}" "$fs_url_ver"
+      ;;
+    *)
+      printf '%s/%s/%s' "$fs_url_base" "$REF" "$2"
+      ;;
+  esac
+}
+
+# 把 latest / dist-tag 解析成具体版本号（registry 的整包路径不接受 tag）
+npm_version_for() {
+  case "$NPM_VERSION" in
+    [0-9]*) printf '%s\n' "$NPM_VERSION" && return 0 ;;
+  esac
+
+  fs_ver_reg=$(base_url_for "$1")
+  fs_ver_reg=${fs_ver_reg%/}
+
+  [ -d "$NPM_TMP" ] || mkdir -p "$NPM_TMP" || return 1
+
+  fs_ver_cache="$NPM_TMP/version.$1"
+  if [ -s "$fs_ver_cache" ]; then
+    cat "$fs_ver_cache"
+    return 0
+  fi
+
+  fs_ver_json="$NPM_TMP/meta.$1.$$"
+  if ! download "${fs_ver_reg}/${NPM_PACKAGE}/${NPM_VERSION}" "$fs_ver_json"; then
+    warn "源 $1 解析版本失败（${NPM_PACKAGE}@${NPM_VERSION}）"
+    return 1
+  fi
+  fs_ver=$(grep -o '"version"[[:space:]]*:[[:space:]]*"[^"]*"' "$fs_ver_json" 2>/dev/null \
+    | head -n 1 | sed 's/.*"\([^"]*\)"$/\1/')
+  rm -f "$fs_ver_json"
+  [ -n "$fs_ver" ] || return 1
+  printf '%s\n' "$fs_ver" >"$fs_ver_cache"
+  printf '%s\n' "$fs_ver"
+}
+
+# 候选源：起点源打头，其余按 SOURCE_ORDER 固定顺序（仓库源始终在 npm 源之前）；
+# 关掉回退时只留起点源
 source_candidates() {
   if [ "$FALLBACK" != '1' ]; then
     printf '%s\n' "$SOURCE"
     return 0
   fi
-  fs_head=
-  fs_tail=
-  fs_hit=0
+  printf '%s\n' "$SOURCE"
   for fs_s in $SOURCE_ORDER; do
-    if [ "$fs_hit" = '1' ]; then
-      fs_tail="${fs_tail}${fs_tail:+ }$fs_s"
-    elif [ "$fs_s" = "$SOURCE" ]; then
-      fs_hit=1
-    else
-      fs_head="${fs_head}${fs_head:+ }$fs_s"
-    fi
-  done
-  for fs_s in $SOURCE $fs_tail $fs_head; do
+    [ "$fs_s" != "$SOURCE" ] || continue
     printf '%s\n' "$fs_s"
   done
 }
@@ -266,7 +396,7 @@ selected() {
 }
 
 if [ "$LIST_ONLY" = '1' ]; then
-  info "起点源：${SOURCE}（ref=${REF}）"
+  info "起点源：${SOURCE}（ref=${REF}；npm 包=${NPM_PACKAGE}@${NPM_VERSION}）"
   info "源顺序：$(source_candidates | tr '\n' ' ')"
   info "示例：$(source_url "$SOURCE" "$(manifest | head -n 1)")"
   info "落盘目录：${ROOT_DIR}"
@@ -281,7 +411,10 @@ if [ -n "$WANTED" ]; then
   done
 fi
 
-cleanup() { [ -n "${fs_tmp:-}" ] && rm -f "$fs_tmp"; }
+cleanup() {
+  [ -n "${fs_tmp:-}" ] && rm -f "$fs_tmp"
+  [ -n "${NPM_TMP:-}" ] && rm -rf "$NPM_TMP"
+}
 trap cleanup EXIT HUP INT TERM
 
 # 计算文件 sha256；没有可用工具时返回 1
@@ -311,37 +444,39 @@ content_state() {
 }
 
 # 只下载到临时文件（fs_tmp），不落盘；由调用方决定 mv 还是丢弃
+# fetch <源> <脚本相对路径> <落盘路径>
 fetch() {
-  fs_url=$1
-  fs_dest=$2
+  fs_source=$1
+  fs_rel=$2
+  fs_dest=$3
   fs_dir=${fs_dest%/*}
   fs_tmp="$fs_dest.tmp.$$"
 
   [ -d "$fs_dir" ] || mkdir -p "$fs_dir" || return 1
 
-  if command -v curl >/dev/null 2>&1; then
-    curl -fsSL --connect-timeout 10 --max-time "$TIMEOUT" "$fs_url" -o "$fs_tmp" 2>/dev/null \
-      || {
-        rm -f "$fs_tmp"
-        fs_tmp=
-        return 1
-      }
-  elif command -v wget >/dev/null 2>&1; then
-    wget -q -T "$TIMEOUT" -O "$fs_tmp" "$fs_url" \
-      || {
-        rm -f "$fs_tmp"
-        fs_tmp=
-        return 1
-      }
+  if is_tarball_source "$fs_source"; then
+    # registry 镜像没有单文件接口：整包下一次，用 tar 直接解出单个文件
+    fs_tgz=$(tarball_for "$fs_source") || return 1
+    if ! command -v tar >/dev/null 2>&1; then
+      warn '需要 tar 才能从 npm 整包里取脚本'
+      return 1
+    fi
+    if ! tar -xzOf "$fs_tgz" "package/${fs_rel}" >"$fs_tmp" 2>/dev/null; then
+      rm -f "$fs_tmp"
+      fs_tmp=
+      return 1
+    fi
+    if [ ! -s "$fs_tmp" ]; then
+      rm -f "$fs_tmp"
+      fs_tmp=
+      return 1
+    fi
   else
-    warn '需要 curl 或 wget 才能下载模板脚本'
-    return 1
-  fi
-
-  if [ ! -s "$fs_tmp" ]; then
-    rm -f "$fs_tmp"
-    fs_tmp=
-    return 1
+    fs_url=$(source_url "$fs_source" "$fs_rel") || return 1
+    if ! download "$fs_url" "$fs_tmp"; then
+      fs_tmp=
+      return 1
+    fi
   fi
 
   # 防止把 404 页面 / 网关错误页当成脚本落盘
@@ -358,6 +493,27 @@ fetch() {
   return 0
 }
 
+# registry 源的整包：第一次调用下载，之后复用同一个 tgz
+tarball_for() {
+  fs_tb_ver=$(npm_version_for "$1") || return 1
+  [ -n "$fs_tb_ver" ] || return 1
+
+  [ -d "$NPM_TMP" ] || mkdir -p "$NPM_TMP" || return 1
+
+  fs_tb_tgz="$NPM_TMP/$1.tgz"
+  if [ ! -s "$fs_tb_tgz" ]; then
+    fs_tb_url=$(base_url_for "$1")
+    fs_tb_url=$(printf '%s/%s/-/%s-%s.tgz' \
+      "${fs_tb_url%/}" "$NPM_PACKAGE" "${NPM_PACKAGE##*/}" "$fs_tb_ver")
+    if ! download "$fs_tb_url" "$fs_tb_tgz"; then
+      warn "源 $1 整包下载失败：${fs_tb_url}"
+      rm -f "$fs_tb_tgz"
+      return 1
+    fi
+  fi
+  printf '%s\n' "$fs_tb_tgz"
+}
+
 fs_created=0
 fs_updated=0
 fs_same=0
@@ -367,7 +523,7 @@ fs_failed=0
 CANDIDATES=$(source_candidates)
 CANDIDATE_COUNT=$(printf '%s\n' "$CANDIDATES" | grep -c .)
 
-info "起点源：${SOURCE}（ref=${REF}） → ${ROOT_DIR}"
+info "起点源：${SOURCE}（ref=${REF}；npm 包=${NPM_PACKAGE}@${NPM_VERSION}） → ${ROOT_DIR}"
 if [ "$FALLBACK" = '1' ]; then
   info "失败回退顺序：$(printf '%s' "$CANDIDATES" | tr '\n' ' ')"
 fi
@@ -395,8 +551,7 @@ while IFS= read -r fs_rel; do
   fs_ok=0
   fs_used=
   for fs_src in $CANDIDATES; do
-    fs_url=$(source_url "$fs_src" "$fs_rel")
-    if fetch "$fs_url" "$fs_dest"; then
+    if fetch "$fs_src" "$fs_rel" "$fs_dest"; then
       fs_ok=1
       fs_used=$fs_src
       break
@@ -466,8 +621,8 @@ if [ "$CHECK_ONLY" = '1' ]; then
 fi
 
 if [ "$fs_failed" -ne 0 ]; then
-  warn "有 ${fs_failed} 个脚本在所有源都取不到（起点：${SOURCE}，ref：${REF}）"
-  warn "可指定源重试：sh $0 --source <cnb|github|gitee|gitlab> --force"
+  warn "有 ${fs_failed} 个脚本在所有源都取不到（起点：${SOURCE}，ref：${REF}，npm：${NPM_PACKAGE}@${NPM_VERSION}）"
+  warn "可指定源重试：sh $0 --source <cnb|github|gitee|gitlab|jsdelivr|unpkg|npm|npmmirror|tencent> --force"
   exit 1
 fi
 

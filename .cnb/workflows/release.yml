@@ -1,5 +1,5 @@
 # 发布流水线主体：runner / 依赖 / 全部 stages 只定义这一份。
-# 下面 master 的两个触发口都通过 *trigger_release 引用它，改 stages 只改这里。
+# 下面定时、页面手动与 API 三个入口都通过 *trigger_release 引用它，改 stages 只改这里。
 .trigger_release: &trigger_release
   name: 发布
   runner:
@@ -50,17 +50,19 @@
         echo "原始 version: [${version:-}]"
 
         # 归一化 + 格式校验 + 预发布判定只有一份实现，在 scripts/ci/resolve-prerelease.sh，
-        # 三个平台（CNB / GitHub / Gitee）共同 source 它。
+        # CNB / GitHub 共同 source 它。
         # 这里只传版本号：预发布由 `-rc.1` / `-beta.1` / `-alpha.1` /
         # `-nightly.20260101` 这类后缀决定，
         # 页面上已经没有开关可以对账了（老的 pre_release 环境变量就算还在也不读）。
-        export VERSION="${version:-}"
-        # 指定构建提交（GitHub 同步过来的 commit）：各平台自己构建，必须是同一个提交，
-        # 否则同一个版本号在不同平台是不同内容（GitHub 上的包是 A、CNB 上的是 B）。
-        # commit 留空 = 构建 CNB 仓库默认分支的 HEAD（页面按钮手动触发的情形）。
+        # 定时与手动触发都先拉全 tag：nightly 推导和 changelog 都依赖完整 tag 集合。
+        git fetch --tags --quiet --force || true
+        # 定时触发没有 version 输入，默认构建 nightly；手动触发仍使用页面填写的版本号。
+        export VERSION="${version:-nightly}"
+        # 指定构建提交（可选）：CNB 独立构建，留空时使用当前仓库默认分支的 HEAD。
+        # commit 与默认分支 HEAD 可能不同，发布前需确认构建内容。
         if [ -n "${commit:-}" ]; then
           echo "切换到指定提交: ${commit}"
-          # 先试浅取目标提交（GitHub / CNB 都允许按 SHA 取），不行就整仓 fetch 后再 checkout
+          # 先试浅取目标提交（CNB 允许按 SHA 取），不行就整仓 fetch 后再 checkout
           git fetch --depth 1 origin "${commit}" 2>/dev/null \
             || git fetch origin "${commit}" 2>/dev/null \
             || true
@@ -147,7 +149,7 @@
         done
         cat dist/SHA256SUMS
 
-    # 正文只有一份实现（scripts/ci/render-release-body.sh），CNB / GitHub / Gitee 的流水线都调它，
+    # 正文只有一份实现（scripts/ci/render-release-body.sh），CNB / GitHub 的流水线都调它，
     # 避免各写一遍表格/标题/下载链接，改一处忘一处。
     - name: 生成 Release 正文
       script: |
@@ -223,7 +225,7 @@
         : "${INTERIOR_VERSION:?INTERIOR_VERSION 为空——第一步没跑成功}"
         : "${PRE_RELEASE:?PRE_RELEASE 为空——第一步没跑成功}"
 
-        # 标题统一带项目名前缀（与另外四个平台的 release.yml 同口径，改名字要一起改）。
+        # 标题统一带项目名前缀（与 GitHub 的 release.yml 同口径，改名字要一起改）。
         # 用驼峰产品名而不是仓库 slug：Release 列表里「FnMusicSync v0.1.32」比
         # 「fnmusic-sync v0.1.32」更像一次发布，也更容易被用户认成产品名。
         project_name="FnMusicSync"
@@ -266,59 +268,22 @@
     - name: 输出 Release 附件
       script: echo $FILES
 
-    # 发布到 CNB 后触发 Gitee 发布流水线，让 Gitee 从 CNB Release 搬附件。
-    # 与 GitHub release.yml 的 sync-gitee 同口径（eventType=fnmusic-sync-release，
-    # 与 Gitee 侧 .workflow/release.yml 的 triggers.webhook 逐字一致）。
-    # DOWNLOAD_SOURCE=cnb —— CNB 这边刚发完包，Gitee 从国内 CNB 搬最快（附件名固定、
-    # 全程不碰 GitHub API）；GitHub 侧那条走 github 源，因为它是搬 GitHub 自己的附件。
-    # cnb 源匿名 401 查不到 tag，所以 VERSION 必须显式传。
-    # WEBHOOK_URL / TOKEN 从 imports 的 envs 注入（与 GitHub 侧 secret 同名）。
-    # allowFailure: true —— 此时 CNB Release 与附件已发完，同步失败或没配令牌都不能
-    # 把这条流水线标红，否则上游 GitHub 的 sync-cnb 会误报「同步失败」。
-    - name: 触发 Gitee 同步发布
-      allowFailure: true
-      script: |
-        set -eu
-        WEBHOOK_URL="${SYNC_GITEE_WEBHOOK_URL:-}"
-        GITEE_TOKEN="${SYNC_GITEE_TOKEN:-}"
-        if [ -z "$WEBHOOK_URL" ] || [ -z "$GITEE_TOKEN" ]; then
-          echo "未配置 SYNC_GITEE_WEBHOOK_URL / SYNC_GITEE_TOKEN，跳过 Gitee 同步"
-          exit 0
-        fi
-
-        VERSION="${INTERIOR_VERSION}"
-        # Gitee 侧是只搬不建的转发壳：VERSION 由后缀定预发布，DOWNLOAD_SOURCE 定源，
-        # 没有 COMMIT / PRERELEASE 这类参数（预发布看后缀、包从源端搬），不要照抄 certflow。
-        echo "触发 Gitee 发布流水线: ${VERSION} (source=cnb)"
-        HTTP=$(curl -s -o /tmp/gitee-sync.json -w "%{http_code}" -X POST \
-          -H "Authorization: Bearer ${GITEE_TOKEN}" \
-          -H "Content-Type: application/json" \
-          -d "{\"eventType\":\"fnmusic-sync-release\",\"payload\":{\"params\":{\"VERSION\":\"${VERSION}\",\"DOWNLOAD_SOURCE\":\"cnb\"}}}" \
-          "${WEBHOOK_URL}")
-        echo "Gitee webhook 响应 HTTP=${HTTP}"
-        cat /tmp/gitee-sync.json 2>/dev/null || true
-        if [ "$HTTP" -lt 200 ] || [ "$HTTP" -ge 300 ]; then
-          echo "⚠ 触发 Gitee 流水线失败（HTTP=${HTTP}），不影响 CNB Release"
-        else
-          echo "✓ 已请求 Gitee 执行发布流水线（异步执行，进度看 Gitee 流水线页面）"
-        fi
-
-    # 清理旧 nightly（与 GitHub release.yml 的「只保留最近 3 个」同口径）。
-    # nightly 每天一个 tag，不清理的话 CNB 上的 Release + tag + 附件会无限堆积；
-    # GitHub 那边删掉的旧 nightly 也不会自动从 CNB 消失。
-    # 只处理日期 nightly（tag 以 -nightly.YYYYMMDD 结尾），rc / beta / alpha 与正式版一律不动。
-    # 删除口径与 GitHub 共用 scripts/ci/delete-release.sh（CNB 的 tag 删除路径必须带
-    # git 段 /-/git/tags/…），该脚本清理失败只告警、始终退出 0，不拖红已完成的发布。
+    # protect 保住正式版、latest/stable 与 rc/beta/alpha，避免 by_count 误删非 nightly 版本；
+    # dry_run 必须显式为 false，否则插件默认只列出待删除版本。
     - name: 清理旧 nightly（只保留最近 3 个）
-      script: |
-        set -eu
-        # 用流水线自动注入的 CNB_TOKEN（不要用 UPDATE_TOKEN，那是升级通道查更新用的）
-        sh scripts/ci/delete-release.sh --platform cnb --keep 3
+      image: docker.cnb.cool/dtapp/plugins/release-cleaner:latest
+      allowFailure: true
+      settings:
+        mode: by_count
+        keep: 3
+        protect: '^(v[0-9]+\.[0-9]+\.[0-9]+(-(rc|beta|alpha)[.-]?[0-9A-Za-z.-]*)?|latest|stable)$'
+        delete_git_tag: true
+        dry_run: false
 
-    # 发布成功后同步开一条「发版公告」Issue。
+    # 发布成功后开一条「发版公告」Issue。
     #
-    # 为什么放在 CNB 侧：公告正文要引用 CNB 的 Release 下载链接，而 GitHub 侧发完版
-    # 只是触发 CNB 同步，由 CNB 自己开公告最顺（也只开一条，不会两边各开一遍）。
+    # CNB / GitHub 独立发布：CNB 在 Issue 发公告，GitHub 在 Discussions 发公告，
+    # 两边各自渲染、各自创建，不再互相触发。
     #
     # 为什么用官方 cnbcool/cnb-cli 插件而不是自己拼 OpenAPI：
     # CNB 没有「创建 Issue」的内置步骤（git:issue-update 只能改状态 / 标签 / 处理人，
@@ -335,8 +300,7 @@
     # - 「创建发版公告」「发布公告评论」跑在官方 CLI 镜像里：image 是任务级环境
     #   （见 CNB 文档「构建环境」），不会影响同一条流水线里其它 stage 用的镜像。
     #
-    # 为什么失败不阻断：这一步跑在 Release 与附件都上传完之后，发布已经完成；
-    # 这里红掉只会被 GitHub 侧 sync-cnb 记成「同步失败」，反而误导。所以只告警。
+    # 为什么失败不阻断：这一步跑在 Release 与附件都上传完之后，发布已经完成，公告失败只告警。
     - name: 准备发版公告
       # 公告链路（准备 → 创建 → 评论）共用的 if：CNB 的 if 是一段 shell 脚本，退出码 0 才跑该 stage。
       # 1) 排除 nightly：每天一个 tag，每天开一条公告会把 Issue 列表刷成日报；
@@ -388,8 +352,7 @@
         printf '%s' "${PREV_TAG}" > announcement-prev-tag.txt
         echo "对比基准 tag：${PREV_TAG:-（无，评论将按公告正文改写）}"
 
-        # 渲染失败也不让发布流水线变红：正文渲染不出来只是少一条公告，
-        # 而这里变红会被 GitHub 侧 sync-cnb 记成「同步失败」，反而误导。
+        # 渲染失败也不让发布流水线变红：正文渲染不出来只是少一条公告，只告警跳过。
         # 后面的步骤读不到标题会自动跳过（创建 stage 有缺失检查）。
         if ! sh scripts/ci/render-announcement-body.sh > /dev/null; then
           echo "⚠️ 生成公告正文失败，跳过发版公告"
@@ -604,12 +567,17 @@
         fi
 
 main:
-  # 手动触发：通过页面自定义按钮执行（预发布看版本号后缀，页面不再有勾选框）
+  # 每天北京时间 00:00（Asia/Shanghai）构建 nightly 预发布。
+  'crontab: 0 0 * * *':
+    - *trigger_release
+
+  # 手动触发：通过页面自定义按钮执行（预发布看版本号后缀）。
   web_trigger_release:
     - *trigger_release
 
-  # API 触发：由 GitHub Actions 发布 Release 后调用 CNB Open API 触发（event=api_trigger_release）
-  # 需通过 env 传入 version 变量（如 {"version":"v1.2.3"} / {"version":"v1.2.3-rc.1"} / {"version":"v1.2.4-nightly.20260101"}）。
-  # 预发布标记由 version 后缀推导，env 里的 pre_release 已废弃（传了也不看，避免两套口径打架）。
+  # API 触发：调用 CNB Open API，以 event=api_trigger_release 触发，
+  # 通过请求体 env 传 version（如 v1.2.3 / v1.2.3-rc.1 / v1.2.3-nightly.20260101）
+  # 与可选 commit；不传 version 时按 nightly 构建（见「解析版本号」stage）。
+  # 预发布标记一律由版本号后缀推导，不再接受 pre_release 输入。
   api_trigger_release:
     - *trigger_release

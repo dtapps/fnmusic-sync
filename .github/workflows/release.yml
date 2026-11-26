@@ -1,9 +1,8 @@
 # 发布工作流
 # 两种触发：手动填版本号；每天 UTC 00:00 定时构建 nightly 预发布。
-# 均自动构建 Linux 产物（tar.gz/deb/fpk）并发布 GitHub Release，
-# 再同步到 CNB / Gitee，最后推送通知。
+# 均自动构建 Linux 产物（tar.gz/deb/fpk）并发布 GitHub Release，最后推送通知。
 #
-# 版本号规则（实现见 scripts/ci/resolve-prerelease.sh，三个平台同口径）：
+# 版本号规则（实现见 scripts/ci/resolve-prerelease.sh，两个平台同口径）：
 #   1.2.3                    -> 正式版，Release 不勾选 prerelease
 #   1.2.3-rc.1               -> 预发布（rc 渠道）
 #   1.2.3-beta.1             -> 预发布（beta 渠道）
@@ -115,7 +114,7 @@ jobs:
           export GIT_CONFIG_VALUE_0="$(pwd)"
 
           # 归一化 / 格式校验 / 预发布判定只有一份实现，在 scripts/ci/resolve-prerelease.sh，
-          # 三个平台（CNB / GitHub / Gitee）都 source 它。
+          # CNB / GitHub 都 source 它。
           # 只传版本号：预发布由 `-rc.1` / `-beta.1` / `-alpha.1` /
           # `-nightly.20260101` 这类后缀决定；`nightly` 关键词也在那一份里展开成
           # <最近正式版+1 补丁>-nightly.<UTC 日期>（需要完整 tag 历史，故上面用 fetch-depth: 0）。
@@ -127,7 +126,7 @@ jobs:
 
           echo "${PRE_NOTE}"
 
-          # 标题统一带项目名前缀（与另外四个平台的 release.yml 同口径，改名字要一起改）。
+          # 标题统一带项目名前缀（与 CNB 的 release.yml 同口径，改名字要一起改）。
           # 用驼峰产品名而不是仓库 slug：Release 列表里「FnMusicSync v0.1.32」比
           # 「fnmusic-sync v0.1.32」更像一次发布，也更容易被用户认成产品名。
           PROJECT_NAME="FnMusicSync"
@@ -371,10 +370,10 @@ jobs:
           name: fnmusic-sync-release
           path: release
 
-      # 正文只有一份实现（scripts/ci/render-release-body.sh），另外两个平台也调用它，
+      # 正文只有一份实现（scripts/ci/render-release-body.sh），CNB / GitHub 共同调用，
       # 避免各写一遍表格/标题/下载链接，改一处忘一处。
       # 下载表的「平台 / 说明」两列来自 scripts/ci/describe-artifact.sh
-      # （由 render-release-body.sh source 进去，三个平台共用同一份文案）。
+      # （由 render-release-body.sh source 进去，两个平台共用同一份文案）。
       - name: 生成 Release 正文
         shell: bash
         env:
@@ -402,7 +401,7 @@ jobs:
           # 更新内容：按渠道选对比基准（rc 对 rc、beta 对 beta、alpha 对 alpha、
           # nightly 对 nightly、正式版对正式版；
           # 首次发某渠道则回退到上一个正式版）。实现见 scripts/ci/release-changelog.sh，
-          # 三个平台共用一份，避免判定口径跑偏。
+          # 两个平台共用一份，避免判定口径跑偏。
           # GitHub 的提交路径是 /commit/<sha>，和 CNB 的 /-/commit 不同，前缀显式传
           CHANGELOG=$(COMMIT_URL="${REPO_URL}/commit" sh scripts/ci/release-changelog.sh "${VERSION}")
           # 直接 export 给同一步的脚本：写 $GITHUB_ENV 只对**后续** step 生效，
@@ -420,8 +419,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ needs.prepare.outputs.interior_version }}
         run: |
-          # 删除 Release 与 tag 的口径统一走 scripts/ci/delete-release.sh（GitHub / CNB 共用）；
-          # 删不掉不阻断：后续发布同名 Release 时覆盖即可，别让收尾工作拖红。
+          # GitHub 侧删除 Release 与 tag；删不掉不阻断，后续发布同名 Release 时覆盖即可。
           sh scripts/ci/delete-release.sh --platform github --tag "${VERSION}" || true
 
       - name: 发布 Release
@@ -447,17 +445,17 @@ jobs:
           body_path: release_body.md
           files: release/*
 
-      # nightly 每天一个 Release，不清理会无限堆积：Release 列表被几十个 nightly 淹没，
-      # 正式版反而看不见。保留策略：nightly 只留最近 3 个，正式版/rc/beta/alpha 一个都不动。
-      - name: 清理旧的 nightly Release（只保留最近 3 个）
-        shell: bash
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          # 只删「预发布 + tag 以 -nightly.YYYYMMDD 结尾」的 Release，保留最新 3 个，
-          # 连 Release 带 tag 一起删。实现见 scripts/ci/delete-release.sh（与 CNB 共用），
-          # 该脚本清理失败只告警、始终退出 0，不会把已经发出去的 Release 拖成红灯。
-          sh scripts/ci/delete-release.sh --platform github --keep 3
+      # protect 保住正式版、latest/stable 与 rc/beta/alpha，避免 by_count 误删非 nightly 版本；
+      # dry_run 必须显式为 false，否则插件默认只列出待删除版本。
+      - name: 清理旧 nightly（只保留最近 3 个）
+        uses: dtapps/release-cleaner-action@main
+        continue-on-error: true
+        with:
+          mode: by_count
+          keep: 3
+          protect: '^(v[0-9]+\.[0-9]+\.[0-9]+(-(rc|beta|alpha)[.-]?[0-9A-Za-z.-]*)?|latest|stable)$'
+          delete_git_tag: true
+          dry_run: false
 
   # GitHub 侧的发版公告：Release 发布成功后，在仓库 Discussions 里开一条讨论。
   #
@@ -681,171 +679,13 @@ jobs:
               return 'failed'
             }
 
-  # ── 以下两个 job：把这次发布同步到别的平台 ──────────────────────────────────
-  #
-  # 语义与 certflow / kai 同口径：GitHub Release 发布成功后，各平台各发一份同版本号
-  # 的 Release。fnmusic-sync 与那两个项目的差别是**各平台自己构建**（不是镜像 GitHub 的
-  # 附件）：CNB 跑自己的打包流水线，Gitee 走转发壳从上游取包。
-  # 好处是每个平台的包都带自己的 buildinfo.RepoSource，客户端按它决定从哪个平台查更新；
-  # 代价是同一次发版要各平台各构建一次。
-  #
-  # 两个 job 的共同约定（改任何一个都要两个一起改）：
-  #   1. 只传归一化后的 tag（v0.1.31 / v0.1.32-rc.1 / v0.1.33-nightly.20261114），
-  #      预发布由各平台按 tag 后缀自行判定，不再额外传布尔（两套口径迟早打架）。
-  #   2. token 放**job 级** env：step 自己的 env 在 if 求值阶段还读不到，
-  #      放 step 级会让 if 恒为假、同步步骤被永远跳过。
-  #   3. 未配置 secret → 整步跳过（status=skipped），发版本身照常成功。
-  #   4. 触发失败只 ::warning::，不影响 GitHub Release。
-  #   5. 每个 job 用一个 if: always() 的「记录同步状态」步骤产出唯一的 outputs.status
-  #      （triggered / skipped / failed）——job 结果区分不了「没配 secret」和「同步成功」。
-
-  # 触发 CNB 的发布流水线（.cnb/workflows/release.yml 里的 api_trigger_release 入口，
-  # 与页面按钮那条共用同一段 stages：CNB 自己构建并发布）。
-  # 令牌：cnb.cool → 个人设置 → 访问令牌 → 添加访问令牌
-  # 授权范围勾 repo-cnb-trigger:rw（与客户端升级下载用的 repo-release:rw 分开建，互不干扰）。
-  sync-cnb:
-    needs: [release, prepare]
-    runs-on: ubuntu-26.04
-    outputs:
-      status: ${{ steps.status.outputs.status }}
-    env:
-      SYNC_CNB_TOKEN: ${{ secrets.SYNC_CNB_TOKEN }}
-      VERSION: ${{ needs.prepare.outputs.interior_version }}
-      PRERELEASE: ${{ needs.prepare.outputs.pre_release }}
-      # 要构建的提交：各平台自己构建，必须传同一个提交，否则「同一版本号、不同内容」
-      COMMIT: ${{ needs.prepare.outputs.git_commit_full }}
-    steps:
-      - name: 触发 CNB 发布流水线
-        id: trigger
-        if: ${{ env.SYNC_CNB_TOKEN != '' }}
-        shell: bash
-        run: |
-          set -eu
-          # 等 8 秒，让 GitHub 的附件先同步到 CDN（各平台按 tag 拉同版本的产物）
-          echo "等待 8 秒，确保 GitHub Release 附件已同步到 CDN ..."
-          sleep 8
-
-          API="https://api.cnb.cool"  # 私有化 / 自建端点改这里
-          REPO="dtapp/fnmusic-sync"  # CNB 是 dtapp（不带 s）
-          EVENT="api_trigger_release"
-          if [ "${PRERELEASE}" = "true" ]; then
-            TITLE="GitHub 预发布同步 ${VERSION}"
-          else
-            TITLE="GitHub 正式发版同步 ${VERSION}"
-          fi
-
-          echo "触发 CNB 流水线: ${API}/${REPO}/-/build/start (event=${EVENT})"
-          HTTP=$(curl -s -o /tmp/cnb_start.json -w "%{http_code}" -X POST \
-            -H "Authorization: Bearer ${SYNC_CNB_TOKEN}" \
-            -H "Content-Type: application/json" \
-            -H "Accept: application/vnd.cnb.api+json" \
-            -d "$(jq -n \
-              --arg branch "main" \
-              --arg event "$EVENT" \
-              --arg title "$TITLE" \
-              --arg version "${VERSION}" \
-              --arg commit "${COMMIT}" \
-              '{branch: $branch, event: $event, title: $title, env: {version: $version, commit: $commit}}')" \
-            "${API}/${REPO}/-/build/start")
-
-          echo "CNB build/start 响应 HTTP=${HTTP}"
-          cat /tmp/cnb_start.json || true
-          if [ "$HTTP" != "200" ] && [ "$HTTP" != "201" ]; then
-            echo "status=failed" >> "$GITHUB_OUTPUT"
-            echo "::warning::触发 CNB 流水线失败（HTTP=${HTTP}），不影响 GitHub Release"
-          else
-            echo "status=triggered" >> "$GITHUB_OUTPUT"
-            echo "✓ 已成功请求 CNB 执行发布流水线"
-          fi
-
-      - name: 记录同步状态
-        id: status
-        if: always()
-        shell: bash
-        run: |
-          if [ "${{ steps.trigger.outcome }}" = "skipped" ]; then
-            echo "status=skipped" >> "$GITHUB_OUTPUT"
-          elif [ -n "${{ steps.trigger.outputs.status }}" ]; then
-            echo "status=${{ steps.trigger.outputs.status }}" >> "$GITHUB_OUTPUT"
-          else
-            echo "status=failed" >> "$GITHUB_OUTPUT"
-          fi
-
-  # 触发 Gitee Go 流水线（.workflow/release.yml，由它把上游的安装包搬到 Gitee Release）。
-  # Gitee Go 没有「调 API 建 Release」的接口，但有 Webhook 触发：
-  #   POST <触发地址>，Authorization: Bearer <个人令牌>，
-  #   请求体 {"eventType": "...", "payload": {"params": {...}}}
-  # eventType 必须逐字等于 .workflow/release.yml 里 triggers.webhook 配的名字
-  # （fnmusic-sync-release），两边改名要一起改。
-  # secret：
-  #   SYNC_GITEE_WEBHOOK_URL —— Gitee 流水线详情页给出的 Webhook 触发地址
-  #   SYNC_GITEE_TOKEN       —— Gitee → 个人中心 → 私人令牌
-  # 不配也不影响发版，只是 Gitee 那边需要手动点执行。
-  sync-gitee:
-    needs: [release, prepare]
-    runs-on: ubuntu-26.04
-    outputs:
-      status: ${{ steps.status.outputs.status }}
-    env:
-      SYNC_GITEE_WEBHOOK_URL: ${{ secrets.SYNC_GITEE_WEBHOOK_URL }}
-      SYNC_GITEE_TOKEN: ${{ secrets.SYNC_GITEE_TOKEN }}
-      VERSION: ${{ needs.prepare.outputs.interior_version }}
-    steps:
-      - name: 触发 Gitee 发布流水线
-        id: trigger
-        if: ${{ env.SYNC_GITEE_WEBHOOK_URL != '' && env.SYNC_GITEE_TOKEN != '' }}
-        shell: bash
-        run: |
-          set -eu
-          echo "等待 8 秒，确保 GitHub Release 附件已同步到 CDN ..."
-          sleep 8
-
-          # 只传 VERSION：Gitee 端按 tag 后缀判定预发布，不再传 PRERELEASE 布尔
-          # （两套口径会打架）。下载源由 Gitee 侧的全局参数 DOWNLOAD_SOURCE 决定
-          # （cnb / github）：走 cnb 源时要等 CNB 那条流水线发完，否则拉不到包。
-          echo "触发 Gitee 流水线: ${VERSION}"
-
-          # 把下载源显式钉成 github：本 job needs release，GitHub 附件已上传完毕，
-          # Gitee 直接从这里搬包即可，不必等并行的 CNB 流水线、也不会搞出跨平台混源。
-          HTTP=$(curl -s -o /tmp/gitee.json -w "%{http_code}" -X POST \
-            -H "Authorization: Bearer ${SYNC_GITEE_TOKEN}" \
-            -H "Content-Type: application/json" \
-            -d "{\"eventType\":\"fnmusic-sync-release\",\"payload\":{\"params\":{\"VERSION\":\"${VERSION}\",\"DOWNLOAD_SOURCE\":\"github\"}}}" \
-            "${SYNC_GITEE_WEBHOOK_URL}")
-
-          echo "Gitee webhook 响应 HTTP=${HTTP}"
-          cat /tmp/gitee.json || true
-          if [ "$HTTP" -lt 200 ] || [ "$HTTP" -ge 300 ]; then
-            echo "status=failed" >> "$GITHUB_OUTPUT"
-            echo "::warning::触发 Gitee 流水线失败（HTTP=${HTTP}），不影响 GitHub Release"
-          else
-            echo "status=triggered" >> "$GITHUB_OUTPUT"
-            echo "✓ 已请求 Gitee 执行发布流水线（异步执行，进度看 Gitee 流水线页面）"
-          fi
-
-      - name: 记录同步状态
-        id: status
-        if: always()
-        shell: bash
-        run: |
-          if [ "${{ steps.trigger.outcome }}" = "skipped" ]; then
-            echo "status=skipped" >> "$GITHUB_OUTPUT"
-          elif [ -n "${{ steps.trigger.outputs.status }}" ]; then
-            echo "status=${{ steps.trigger.outputs.status }}" >> "$GITHUB_OUTPUT"
-          else
-            echo "status=failed" >> "$GITHUB_OUTPUT"
-          fi
-
-  # 构建 / 发布 / 各平台同步全部完成后，通过 ServerChan3（方糖）推送 webhook 通知。
+  # 构建 / 发布完成后，通过 ServerChan3（方糖）推送 webhook 通知。
   # 需配置 secret SERVERCHAN_SENDKEY（形如 SCTxxxx 或 sctp{uid}t...）；未配置则跳过通知。
   # API 文档：https://doc.sc3.ft07.com/zh/serverchan3/server/api
   # 推送地址：SCT 转发 key → https://sctapi.ftqq.com/<sendkey>.send
   #          带 uid 的 sendkey（sctp 开头）→ https://<uid>.push.ft07.com/send/<sendkey>.send
   notify:
-    # 等所有镜像同步 job 结束（未配置 secret 时它们只是跳过，不影响 success 判定）。
-    # 用 !cancelled() 而不是纯 needs.release.result：某个 sync job 失败时，
-    # 通知仍要发出去（里面正好显示「❌ 触发失败」），整条流水线才有可读的结果。
-    needs: [sync-cnb, sync-gitee, release, prepare]
+    needs: [release, prepare]
     runs-on: ubuntu-26.04
     if: ${{ !cancelled() && needs.release.result == 'success' }}
     env:
@@ -877,22 +717,8 @@ jobs:
           TAG="${VERSION}"
           REPO="${{ github.repository }}"
 
-          # 各平台的 Release 页面（仓库路径各平台不同，别抄错）：
-          #   CNB → dtapp（不带 s）；Gitee → dtapps（带 s）
+          # GitHub Release 页面地址。
           GH_RELEASE_URL="https://github.com/${REPO}/releases/tag/${TAG}"
-          CNB_RELEASE_URL="https://cnb.cool/dtapp/fnmusic-sync/-/releases/tag/${TAG}"
-          GITEE_RELEASE_URL="https://gitee.com/dtapps/fnmusic-sync/releases/tag/${TAG}"
-
-          # 同步状态 → 中文标签。状态来自各 sync job 的 outputs：
-          #   triggered=已触发（异步执行，进度看平台页面）/ skipped=未配置 secret / failed=触发失败
-          sync_state() {
-            case "$1" in
-              triggered) printf '✅ 已触发' ;;
-              skipped) printf '⏭ 未配置（跳过）' ;;
-              failed) printf '❌ 触发失败' ;;
-              *) printf '❓ 未知' ;;
-            esac
-          }
 
           TITLE="FnMusicSync ${TAG} 构建完成"
           TAGS="FnMusicSync|stable"
@@ -913,9 +739,6 @@ jobs:
           DESP="${DESP}**构建时间**: ${BUILD_TIME_CN}  "$'\n'
           DESP="${DESP}**Git 提交**: ${GIT_COMMIT}  "$'\n'
           DESP="${DESP}**GitHub Release**: [${TAG}](${GH_RELEASE_URL})  "$'\n'
-          DESP="${DESP}**CNB Release**: [${TAG}](${CNB_RELEASE_URL})  "$'\n'
-          DESP="${DESP}**Gitee Release**: [${TAG}](${GITEE_RELEASE_URL})  "$'\n'
-          DESP="${DESP}**镜像同步**: CNB $(sync_state "${{ needs['sync-cnb'].outputs.status }}") · Gitee $(sync_state "${{ needs['sync-gitee'].outputs.status }}")"
 
           echo "推送 ServerChan3 通知: ${TITLE}"
           HTTP=$(curl -s -o /tmp/sc3.json -w "%{http_code}" -X POST \

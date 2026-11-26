@@ -178,7 +178,7 @@ sudo sh /tmp/install.sh upgrade --version v0.0.32
 | `-rc` 等预发布 | 最新的预发布（预发布用户能继续往前走）                           |
 | `dev`（本地）  | 同上，视为预发布客户端                                           |
 
-这套规则**依赖发布时的 tag 命名**，所以发版流水线里**只有一个参数：版本号**。三个平台（CNB / GitHub / Gitee）共用同一份判定（`scripts/ci/resolve-prerelease.sh`），没有开关、没有「是否预发布」字段可填：
+这套规则**依赖发布时的 tag 命名**，所以发版流水线里**只有一个版本号参数**。CNB / GitHub 两个平台共用同一份判定（`scripts/ci/resolve-prerelease.sh`），没有开关、没有「是否预发布」字段可填：
 
 | 版本号形态                | 判定     | 说明                                                   |
 |---------------------------|----------|--------------------------------------------------------|
@@ -191,9 +191,9 @@ sudo sh /tmp/install.sh upgrade --version v0.0.32
 
 后缀同时也是 **changelog 的渠道**：`scripts/ci/release-changelog.sh` 按 `rc / beta / alpha / nightly / stable` 分别找同渠道的上一个 tag，首次发某渠道（含 nightly）则回退到上一个正式版。正式版的对比基准永远只看正式版 tag，不会被 nightly 污染。
 
-**`nightly` 是关键词，不是版本号**：`.github/workflows/release.yml` 每天 UTC 00:00（北京时间 08:00）的定时任务把版本号留空，就等价于填 `nightly`；手动填也一样。流水线据此自动推导成 `<最近正式版 + 1 个补丁>-nightly.<UTC 构建日期>`——最近正式版 v0.2.7 → `v0.2.8-nightly.20261114`，规则在 `scripts/ci/resolve-prerelease.sh`（三个平台共用一份推导，别处再写一套只会把版本号算歪）。补丁号要 +1 是因为 nightly 走的是「下一个正式版」的版本号，否则 nightly 会抢走正式版的 tag 名，正式版就发不出去了。推导出来的 tag 走 nightly 渠道（预发布），所以稳定用户不会被推上 nightly；nightly Release 只保留最近 3 个（旧的连同 git tag 一起自动删掉），GitHub / CNB / Gitee 各自清理，删除逻辑统一在 `scripts/ci/delete-release.sh`。
+**`nightly` 是关键词，不是版本号**：CNB 每天北京时间 0 点、GitHub 每天 UTC 0 点的定时任务把版本号留空，就等价于填 `nightly`；手动填也一样。流水线据此自动推导成 `<最近正式版 + 1 个补丁>-nightly.<UTC 构建日期>`——最近正式版 v0.2.7 → `v0.2.8-nightly.20261114`，规则在 `scripts/ci/resolve-prerelease.sh`（两个平台共用一份推导，别处再写一套只会把版本号算歪）。补丁号要 +1 是因为 nightly 走的是「下一个正式版」的版本号，否则 nightly 会抢走正式版的 tag 名，正式版就发不出去了。推导出来的 tag 走 nightly 渠道（预发布），所以稳定用户不会被推上 nightly；nightly Release 只保留最近 3 个（旧的连同 git tag 一起自动删掉），CNB 使用 `release-cleaner` 插件，GitHub 使用 `scripts/ci/delete-release.sh`。
 
-**GitHub 是发版的总入口**：GitHub 发布成功后会自动把同版本号同步到 CNB / Gitee，再推一条 ServerChan3 通知（各平台同步状态一览）。同步用的 secret 全部可缺省，没配就跳过；清单见 [contributing.md](contributing.md) §GitHub 发版后的同步与通知。
+**两个平台独立发布**：CNB 与 GitHub 各自构建、各自创建 Release，不再通过 API 互相触发。GitHub 发布成功后会推一条 ServerChan3 通知；清单见 [contributing.md](contributing.md) §GitHub 发版后的通知。
 
 判法与客户端 `internal/updater.isPrereleaseTag` 逐字对齐（客户端认的是任意 `-<prerelease>` 段，不枚举渠道名）—— 两边不一致的后果是「发出去的版本没人能升上去」或者「稳定用户被推到 rc / nightly 上」，两种都撤不回来。
 

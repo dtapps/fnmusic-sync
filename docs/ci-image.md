@@ -10,7 +10,6 @@
 |--------|---------------------------------------|--------------------------------------------------------------------------------------------|
 | CNB    | `docker.cnb.cool/dtapp/golang/fnpack` | `.cnb/workflows/*.yml` 的 `docker.image`（push / release / pull-coverage / push-coverage） |
 | GitHub | `ghcr.io/dtapps/golang/fnpack:latest` | `push.yml` / `codecov.yml` / `coveralls.yml` / `release.yml` 的 `container.image`          |
-| Gitee  | 无                                    | 转发壳，不构建，也不消费 CI 镜像                                                           |
 
 两个地址指向**同一份工具链**，只是分发渠道不同：CNB 用自家 registry（国内链路快），GitHub 用平台自带 registry。
 

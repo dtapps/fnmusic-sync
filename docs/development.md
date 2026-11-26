@@ -93,7 +93,7 @@ Node 与 pnpm 的版本在仓库里有**两份互相不一致的记录**：CI �
 |-------------------|----------------------------------------------------------------------------------------------------|------------------------------------------------------|
 | `format-go`       | 仓库内全部 Go：`gofmt -w -s .`、`go fmt ./...`、`go fix ./...`                                     | 含 `cmd/frontend` 之外的目录                         |
 | `format-frontend` | `cmd/frontend` 的 `src/**` 以及 `internal/webui/www/**`（排除 `www/app.css`、`www/app.js`）        | 走 `prettier` + `prettier-plugin-svelte`；失败只警告 |
-| `format-yaml`     | `.cnb`、`.github`、`.workflow`、`.cnb.yml`、`.goreleaser.yaml`、`internal/db`、`.golangci.yml`     | 用 `.yamlfmt` 配置                                   |
+| `format-yaml`     | `.cnb`、`.github`、`.cnb.yml`、`.goreleaser.yaml`、`internal/db`、`.golangci.yml`                  | 用 `.yamlfmt` 配置                                   |
 | `format-json`     | `fpkg/wizard/*`、`fpkg/app/ui/config`、`fpkg/config/privilege`、`fpkg/config/resource`             | 用 `gojq .` 重排                                     |
 | `format-markdown` | 全仓 `*.md`（排除 `node_modules`、`.git`、`.vscode`、`.idea`、`.codebuddy`、`.trae`、`.mimocode`） | 缺 `markdownfmt` 时静默跳过                          |
 | `format-shell`    | **只有** `fpkg/cmd/*`，参数 `shfmt -w -i 2 -ci -bn -s -ln bash`                                    | `scripts/*.sh` 不在范围内                            |
@@ -350,7 +350,7 @@ sudo tail -200 /var/log/fnmusic-sync/goroutine-dump.txt
 | `gofmt`/`go fmt`/`go fix` | 标准                                 | 全部 Go                                                                               |
 | `prettier`                | `package.json` 的 `format` 脚本参数  | `cmd/frontend` + `internal/webui/www`                                                 |
 | `oxlint`                  | `cmd/frontend/.oxlintrc.json`        | `no-unused-vars`（`_` 前缀豁免）、`no-explicit-any` 为 warn，`no-console` 关闭        |
-| `yamlfmt`                 | `.yamlfmt`（2 空格、120 列、单引号） | `.cnb`、`.github`、`.workflow` 等 YAML                                                |
+| `yamlfmt`                 | `.yamlfmt`（2 空格、120 列、单引号） | `.cnb`、`.github` 等 YAML                                                             |
 | `markdownfmt`             | 无配置文件                           | 全仓 Markdown                                                                         |
 | `shfmt`                   | `-i 2 -ci -bn -s -ln bash`           | 仅 `fpkg/cmd/*`                                                                       |
 | `sql-formatter`           | `--fix -l sql`                       | `internal/{db,datadb}/*.sql`                                                          |

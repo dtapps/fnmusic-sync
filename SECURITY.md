@@ -55,7 +55,7 @@ fnmusic-sync 接管飞牛音乐的 unix socket，持有 Last.fm / ListenBrainz �
 
 5. **`/api/upgrade` 等于一个安装入口。** 它会下载 fpk 并调用系统级 `appcenter-cli` 完成重装；deb 形态下进程由 systemd 以 root 运行（安装脚本未指定 `User=`），fpk 形态下由飞牛拉起。能调这个接口，基本等于能在本机安装软件。
 
-6. **升级与下载不校验完整性。** 发布流程目前不产出 `SHA256SUMS`，`install.sh` 也不校验下载物，下载走中转站并会回退源站。请只在你能信任的网络与镜像源上升级；升级前备份 `config.yaml` 与 `state.db`。
+6. **升级与下载不校验完整性。** 发布流程会产出 `SHA256SUMS`，但当前升级程序不会下载或校验它，`install.sh` 也不校验下载物；下载会走中转站并回退源站。请只在你能信任的网络与镜像源上升级；升级前备份 `config.yaml` 与 `state.db`。
 
 7. **出网请求会带上凭证。** Last.fm / ListenBrainz 官方 API、MusicBrainz（仅在 `library.mbid_online_lookup: true` 时）、以及自升级的下载源。没有任何遥测上报。
 

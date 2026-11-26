@@ -1,13 +1,13 @@
 # 公告清理：关闭超过 7 天的版本公告讨论（与 CNB 侧的 announcement-cleanup 同口径）。
 #
-# GitHub Actions 的 schedule 只认 UTC：UTC 16:00 = 北京时间 0 点。
+# GitHub Actions 的 schedule 只认 UTC：UTC 1 点对应北京时间 9 点。
 # Discussions 没有官方专用 action，这里用官方 actions/github-script 调
 # github.rest.discussions.*（与发公告同一个官方客户端）。
 name: 公告清理
 
 on:
   schedule:
-    - cron: '0 16 * * *'
+    - cron: '0 1 * * *'
   workflow_dispatch: {}
 
 permissions:

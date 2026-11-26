@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 使用帮助与文档
+    url: https://github.com/dtapps/fnmusic-sync/blob/main/docs/README.md
+    about: 安装升级、音乐库同步、scrobble 上报、Web UI、配置项与故障排查等完整文档索引
+  - name: 安全漏洞报告（不要开公开 Issue）
+    url: https://github.com/dtapps/fnmusic-sync/blob/main/SECURITY.md
+    about: 发现安全问题请按私下渠道报告，不要在 Issue 里贴利用细节、真实地址或音乐服务凭证
+  - name: 历史发布记录
+    url: https://github.com/dtapps/fnmusic-sync/releases
+    about: 查看已发布版本的 Release 正文、下载附件与 SHA256SUMS

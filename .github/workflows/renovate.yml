@@ -8,8 +8,8 @@ name: Renovate Backup
 
 on:
   schedule:
-    # 每天 00:00 执行（GitHub Actions 的 cron 按 UTC 计算）
-    - cron: '0 0 * * *'
+    # 每天 UTC 00:30（北京时间 08:30）执行
+    - cron: '30 0 * * *'
   workflow_dispatch:
 
 permissions:

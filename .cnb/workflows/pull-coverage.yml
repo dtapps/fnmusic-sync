@@ -1,95 +1,103 @@
+# PR 覆盖率：Go / 前端两段 job 各定义一份，事件入口通过锚点引用，方便以后扩展触发方式。
+# 注意：CNB 的 include 不支持跨文件使用 YAML 锚点，锚点与引用必须在同一个文件里。
+
+# Go 单元测试覆盖率（增量红线）。
+.trigger_pull_coverage_go: &trigger_pull_coverage_go
+  name: Go 单元测试覆盖率（增量红线）
+  runner:
+    tags: cnb:arch:amd64
+  docker:
+    image: docker.cnb.cool/dtapp/golang/fnpack:latest # 统一使用预构建的 CI 环境镜像
+    volumes:
+      - /root/.cache/go-build:copy-on-write # Go 构建缓存 - 加速编译
+      - /root/.local/share/pnpm/store:copy-on-write # pnpm 全局存储 - 加速前端依赖安装
+      - /go/pkg/mod:copy-on-write # 仅缓存 Go 模块下载，避免覆盖镜像内预装的 /go/bin 工具
+      - ./scripts/ci:copy-on-write # 模板脚本缓存；卷会整体挂载该目录，同步前需先还原跟踪文件
+  env:
+    GIT_SHIM_SAFE_DIRECTORY: 'true'
+  stages:
+    - name: 同步脚本
+      script: |
+        # 卷会整体挂载 scripts/ci，先把本次提交里跟踪的脚本还原（未跟踪的模板脚本由缓存/下载提供）
+        git checkout -- scripts/ci
+        make fetch-scripts
+
+    - name: 安装全部 Go 依赖
+      script: make deps-go
+
+    - name: 安装全部前端依赖
+      script: make deps-node
+
+    - name: 生成测试覆盖率
+      script: make cover-go # 产出 coverage.out
+
+    - name: 上报覆盖率（增量红线）
+      # https://docs.cnb.cool/zh/build/internal-steps/testing/coverage.html
+      type: testing:coverage
+      options:
+        key: go # 多报告数据键：与 Node 侧（key: node）区分，各自写入 meta map 互不覆盖
+        name: Go Coverage # 徽章显示名，与 key 一对一对应
+        # diffLines: 50 # 增量覆盖率红线（%）：本次 PR 变更代码的覆盖率，低于此值阻断流水线
+        # lines: 10 # 全量覆盖率底线，与 push 流水线一致，防止总量被单个 PR 拉低
+        lang: go # golang 格式的覆盖率报告必须指定，否则计算有误差
+        pattern: 'coverage.out'
+        breakIfNoCoverage: false # 找不到覆盖率报告时仅缺失数据、不阻断流水线；低于 lines/diffLines 红线仍会拦截
+      exports:
+        lines: COVERAGE_LINES
+        diff_pct: COVERAGE_DIFF_PCT
+
+    - name: 输出覆盖率
+      script: 'echo "coverage: lines=$COVERAGE_LINES diff=$COVERAGE_DIFF_PCT"'
+
+# 前端单元测试覆盖率（增量红线）。
+.trigger_pull_coverage_node: &trigger_pull_coverage_node
+  name: 前端单元测试覆盖率（增量红线）
+  runner:
+    tags: cnb:arch:amd64
+  docker:
+    image: docker.cnb.cool/dtapp/golang/fnpack:latest # 统一使用预构建的 CI 环境镜像
+    volumes:
+      - /root/.cache/go-build:copy-on-write # Go 构建缓存 - 加速编译
+      - /root/.local/share/pnpm/store:copy-on-write # pnpm 全局存储 - 加速前端依赖安装
+      - /go/pkg/mod:copy-on-write # 仅缓存 Go 模块下载，避免覆盖镜像内预装的 /go/bin 工具
+      - ./scripts/ci:copy-on-write # 模板脚本缓存；卷会整体挂载该目录，同步前需先还原跟踪文件
+  env:
+    GIT_SHIM_SAFE_DIRECTORY: 'true'
+  stages:
+    - name: 同步脚本
+      script: |
+        # 卷会整体挂载 scripts/ci，先把本次提交里跟踪的脚本还原（未跟踪的模板脚本由缓存/下载提供）
+        git checkout -- scripts/ci
+        make fetch-scripts
+
+    - name: 安装全部 Go 依赖
+      script: make deps-go
+
+    - name: 安装全部前端依赖
+      script: make deps-node
+
+    - name: 生成前端测试覆盖率
+      script: make cover-node # 产出 cmd/frontend/coverage/lcov.info
+
+    - name: 上报覆盖率（增量红线）
+      # https://docs.cnb.cool/zh/build/internal-steps/testing/coverage.html
+      # lcov 格式由插件自动识别，无需指定 lang（lang=go 仅 golang 格式报告需要）
+      type: testing:coverage
+      options:
+        key: node # 多报告数据键：与 Go 侧（key: go）区分，各自写入 meta map 互不覆盖
+        name: Node Coverage # 徽章显示名，与 key 一对一对应
+        # diffLines: 80 # 增量覆盖率红线（%）：本次 PR 变更代码的覆盖率，低于此值阻断流水线
+        # lines: 90 # 全量覆盖率底线，与 push 流水线一致，防止总量被单个 PR 拉低
+        pattern: 'cmd/frontend/coverage/lcov.info'
+        breakIfNoCoverage: true # 找不到覆盖率报告则报错终止，避免静默通过
+      exports:
+        lines: NODE_COVERAGE_LINES
+        diff_pct: NODE_COVERAGE_DIFF_PCT
+
+    - name: 输出覆盖率
+      script: 'echo "node coverage: lines=$NODE_COVERAGE_LINES diff=$NODE_COVERAGE_DIFF_PCT"'
+
 '**':
   pull_request:
-    # Go 单元测试覆盖率（增量红线）。
-    - name: Go 单元测试覆盖率（增量红线）
-      runner:
-        tags: cnb:arch:amd64
-      docker:
-        image: docker.cnb.cool/dtapp/golang/fnpack:latest # 统一使用预构建的 CI 环境镜像
-        volumes:
-          - /root/.cache/go-build:copy-on-write # Go 构建缓存 - 加速编译
-          - /root/.local/share/pnpm/store:copy-on-write # pnpm 全局存储 - 加速前端依赖安装
-          - /go/pkg/mod:copy-on-write # 仅缓存 Go 模块下载，避免覆盖镜像内预装的 /go/bin 工具
-          - ./scripts/ci:copy-on-write # 模板脚本缓存；卷会整体挂载该目录，同步前需先还原跟踪文件
-      env:
-        GIT_SHIM_SAFE_DIRECTORY: 'true'
-      stages:
-        - name: 同步脚本
-          script: |
-            # 卷会整体挂载 scripts/ci，先把本次提交里跟踪的脚本还原（未跟踪的模板脚本由缓存/下载提供）
-            git checkout -- scripts/ci
-            make fetch-scripts
-
-        - name: 安装全部 Go 依赖
-          script: make deps-go
-
-        - name: 安装全部前端依赖
-          script: make deps-node
-
-        - name: 生成测试覆盖率
-          script: make cover-go # 产出 coverage.out
-
-        - name: 上报覆盖率（增量红线）
-          # https://docs.cnb.cool/zh/build/internal-steps/testing/coverage.html
-          type: testing:coverage
-          options:
-            key: go # 多报告数据键：与 Node 侧（key: node）区分，各自写入 meta map 互不覆盖
-            name: Go Coverage # 徽章显示名，与 key 一对一对应
-            # diffLines: 50 # 增量覆盖率红线（%）：本次 PR 变更代码的覆盖率，低于此值阻断流水线
-            # lines: 10 # 全量覆盖率底线，与 push 流水线一致，防止总量被单个 PR 拉低
-            lang: go # golang 格式的覆盖率报告必须指定，否则计算有误差
-            pattern: 'coverage.out'
-            breakIfNoCoverage: false # 找不到覆盖率报告时仅缺失数据、不阻断流水线；低于 lines/diffLines 红线仍会拦截
-          exports:
-            lines: COVERAGE_LINES
-            diff_pct: COVERAGE_DIFF_PCT
-
-        - name: 输出覆盖率
-          script: 'echo "coverage: lines=$COVERAGE_LINES diff=$COVERAGE_DIFF_PCT"'
-
-    # 前端单元测试覆盖率（增量红线）。
-    - name: 前端单元测试覆盖率（增量红线）
-      runner:
-        tags: cnb:arch:amd64
-      docker:
-        image: docker.cnb.cool/dtapp/golang/fnpack:latest # 统一使用预构建的 CI 环境镜像
-        volumes:
-          - /root/.cache/go-build:copy-on-write # Go 构建缓存 - 加速编译
-          - /root/.local/share/pnpm/store:copy-on-write # pnpm 全局存储 - 加速前端依赖安装
-          - /go/pkg/mod:copy-on-write # 仅缓存 Go 模块下载，避免覆盖镜像内预装的 /go/bin 工具
-          - ./scripts/ci:copy-on-write # 模板脚本缓存；卷会整体挂载该目录，同步前需先还原跟踪文件
-      env:
-        GIT_SHIM_SAFE_DIRECTORY: 'true'
-      stages:
-        - name: 同步脚本
-          script: |
-            # 卷会整体挂载 scripts/ci，先把本次提交里跟踪的脚本还原（未跟踪的模板脚本由缓存/下载提供）
-            git checkout -- scripts/ci
-            make fetch-scripts
-
-        - name: 安装全部 Go 依赖
-          script: make deps-go
-
-        - name: 安装全部前端依赖
-          script: make deps-node
-
-        - name: 生成前端测试覆盖率
-          script: make cover-node # 产出 cmd/frontend/coverage/lcov.info
-
-        - name: 上报覆盖率（增量红线）
-          # https://docs.cnb.cool/zh/build/internal-steps/testing/coverage.html
-          # lcov 格式由插件自动识别，无需指定 lang（lang=go 仅 golang 格式报告需要）
-          type: testing:coverage
-          options:
-            key: node # 多报告数据键：与 Go 侧（key: go）区分，各自写入 meta map 互不覆盖
-            name: Node Coverage # 徽章显示名，与 key 一对一对应
-            # diffLines: 80 # 增量覆盖率红线（%）：本次 PR 变更代码的覆盖率，低于此值阻断流水线
-            # lines: 90 # 全量覆盖率底线，与 push 流水线一致，防止总量被单个 PR 拉低
-            pattern: 'cmd/frontend/coverage/lcov.info'
-            breakIfNoCoverage: true # 找不到覆盖率报告则报错终止，避免静默通过
-          exports:
-            lines: NODE_COVERAGE_LINES
-            diff_pct: NODE_COVERAGE_DIFF_PCT
-
-        - name: 输出覆盖率
-          script: 'echo "node coverage: lines=$NODE_COVERAGE_LINES diff=$NODE_COVERAGE_DIFF_PCT"'
+    - *trigger_pull_coverage_go
+    - *trigger_pull_coverage_node

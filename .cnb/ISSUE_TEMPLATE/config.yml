@@ -1,10 +1,5 @@
-# Issue 模板选择页配置
-#
-# 规则：本仓库 Issue 仅用于发版公告，所以关闭空白 Issue（blank_issues_enabled: false），
-# 用户必须走「发版公告」模板提交，保证每条 Issue 都带版本号、变更摘要与下载地址。
-#
-# 代价：SECURITY.md 里「开一个不含技术细节的 Issue 说明需要私下安全渠道」这条兜底路径
-# 会被模板页挡住，所以下面用 contact_links 把安全渠道显式放到选择页上。
+# Issue 模板选择页：缺陷反馈、功能建议与自动发布的发版公告。
+# 关闭空白 Issue，引导用户选择模板；安全漏洞与文档入口放在 contact_links。
 blank_issues_enabled: false
 
 contact_links:

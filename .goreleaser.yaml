@@ -1,4 +1,4 @@
-# GoReleaser 配置：CNB / GitHub / Gitee 的构建与打包入口。
+# GoReleaser 配置：CNB / GitHub 的构建与打包入口。
 #
 # 流水线只负责发版：调用 `make goreleaser-release` 构建到 dist/，再上传 tar.gz/deb/fpk 与 SHA256SUMS。
 # Release 的创建仍由各平台自己的步骤完成（见 release.disable）。
