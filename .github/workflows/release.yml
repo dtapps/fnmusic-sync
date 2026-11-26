@@ -65,6 +65,8 @@ jobs:
     # 由 dtapps 统一维护并推送到 GHCR，无需本仓库自行构建（原 ci-image.yml 已删除）。
     container:
       image: ghcr.io/dtapps/golang/fnpack:latest
+      env:
+        GIT_SHIM_SAFE_DIRECTORY: 'true'
     outputs:
       interior_version: ${{ steps.gen.outputs.interior_version }}
       interior_release_title: ${{ steps.gen.outputs.interior_release_title }}
@@ -94,20 +96,6 @@ jobs:
       - name: 同步脚本
         shell: bash
         run: make fetch-scripts
-
-      # 容器工作区是 runner 挂进来的 bind mount（属主是 runner 用户），容器内进程却是 root，
-      - name: 让容器内的 git 可用
-        shell: bash
-        run: |
-          git config --system --add safe.directory '*' 2>/dev/null || true
-          git config --global --add safe.directory "$GITHUB_WORKSPACE" 2>/dev/null || true
-
-          # 结果打进日志：以后一眼能看出这条登记有没有生效
-          if git status --porcelain > /dev/null 2>&1; then
-            echo "✓ 容器内 git 可用，COMMIT=$(git rev-parse --short HEAD)"
-          else
-            echo "⚠️ 容器内 git 仍不可用。"
-          fi
 
       - name: 解析版本号（预发布看后缀）
         id: gen
@@ -238,6 +226,8 @@ jobs:
     # 由 dtapps 统一维护并推送到 GHCR，无需本仓库自行构建（原 ci-image.yml 已删除）。
     container:
       image: ghcr.io/dtapps/golang/fnpack:latest
+      env:
+        GIT_SHIM_SAFE_DIRECTORY: 'true'
     steps:
       - name: 检出代码
         uses: actions/checkout@v7
@@ -260,20 +250,6 @@ jobs:
       - name: 同步脚本
         shell: bash
         run: make fetch-scripts
-
-      # 容器工作区是 runner 挂进来的 bind mount（属主是 runner 用户），容器内进程却是 root，
-      - name: 让容器内的 git 可用
-        shell: bash
-        run: |
-          git config --system --add safe.directory '*' 2>/dev/null || true
-          git config --global --add safe.directory "$GITHUB_WORKSPACE" 2>/dev/null || true
-
-          # 结果打进日志：以后一眼能看出这条登记有没有生效
-          if git status --porcelain > /dev/null 2>&1; then
-            echo "✓ 容器内 git 可用，COMMIT=$(git rev-parse --short HEAD)"
-          else
-            echo "⚠️ 容器内 git 仍不可用。"
-          fi
 
       # 容器镜像已预装 Go 工具链（GOPATH=/go，工具在 /go/bin 且已在 PATH），
       # 这里把路径常量写入 $GITHUB_ENV，供后续 make 步骤的 GOPATH/GOBIN 引用。

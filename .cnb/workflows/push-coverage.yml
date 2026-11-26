@@ -11,6 +11,8 @@
           - /root/.local/share/pnpm/store:copy-on-write # pnpm 全局存储 - 加速前端依赖安装
           - /go/pkg/mod:copy-on-write # 仅缓存 Go 模块下载，避免覆盖镜像内预装的 /go/bin 工具
           - ./scripts/ci:copy-on-write # 模板脚本缓存；卷会整体挂载该目录，同步前需先还原跟踪文件
+      env:
+        GIT_SHIM_SAFE_DIRECTORY: 'true'
       stages:
         - name: 同步脚本
           script: |
@@ -55,6 +57,8 @@
           - /root/.local/share/pnpm/store:copy-on-write # pnpm 全局存储 - 加速前端依赖安装
           - /go/pkg/mod:copy-on-write # 仅缓存 Go 模块下载，避免覆盖镜像内预装的 /go/bin 工具
           - ./scripts/ci:copy-on-write # 模板脚本缓存；卷会整体挂载该目录，同步前需先还原跟踪文件
+      env:
+        GIT_SHIM_SAFE_DIRECTORY: 'true'
       stages:
         - name: 同步脚本
           script: |

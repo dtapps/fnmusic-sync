@@ -37,6 +37,8 @@ jobs:
     # 统一使用预构建的 CI 基础镜像（含 Go/Node/pnpm + 全部 Go 工具链）
     container:
       image: ghcr.io/dtapps/golang/fnpack:latest
+      env:
+        GIT_SHIM_SAFE_DIRECTORY: 'true'
     env:
       CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
     steps:

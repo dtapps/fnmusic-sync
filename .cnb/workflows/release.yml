@@ -34,6 +34,7 @@
   #   scripts/ci/resolve-prev-tag.sh 算出并落盘）。所以模板里**不要出现 | 和 &**：
   #   sed 用 | 当分隔符，& 在替换串里是特殊字符。
   env:
+    GIT_SHIM_SAFE_DIRECTORY: 'true'
     ANNOUNCEMENT_COMMENT_TEXT: |-
       @{{REPOSLUG}}(发版日志助手) 请对比标签 {{PREVIOUSTAG}} 和 {{CURRENTTAG}} 的差异。
   stages:
@@ -69,10 +70,6 @@
           fi
           echo "当前提交: $(git rev-parse --short HEAD)"
         fi
-        # 容器里进程是 root、checkout 目录属主是宿主 uid，git 2.35+ 会以
-        # "detected dubious ownership" 直接失败（与 GitHub release.yml 同一条纪律）。
-        git config --global --add safe.directory "$(pwd)" 2>/dev/null || true
-        git fetch --tags --quiet --force || true
         # shellcheck disable=SC1091
         . scripts/ci/resolve-prerelease.sh
         # source 只带进函数，必须显式调用才会算出 TAG / PKG_VERSION / PRERELEASE。

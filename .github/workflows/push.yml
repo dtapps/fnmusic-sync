@@ -33,6 +33,8 @@ jobs:
     # 由 dtapps 统一维护并推送到 GHCR，无需本仓库自行构建（原 ci-image.yml 已删除）。
     container:
       image: ghcr.io/dtapps/golang/fnpack:latest
+      env:
+        GIT_SHIM_SAFE_DIRECTORY: 'true'
     steps:
       - name: 检出代码
         uses: actions/checkout@v7
