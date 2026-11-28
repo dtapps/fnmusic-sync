@@ -1,6 +1,7 @@
-# 分支详情页的自定义按钮：填版本号与可选提交，触发 .cnb/workflows/release.yml。
+# 分支详情页的自定义按钮：填版本号，触发 .cnb/workflows/release.yml。
 #
-# **只有两个输入：version 和可选 commit；没有 pre_release 开关。**
+# **唯一输入是 version，没有 pre_release 开关。**
+# 构建始终使用触发分支当前 HEAD。
 # 预发布由版本号自己带着走（唯一规则，两个平台共用 scripts/ci/resolve-prerelease.sh）：
 #   v1.2.3                    → 正式版
 #   v1.2.3-rc.1               → 预发布（rc 渠道）
@@ -18,7 +19,7 @@
 branch:
   - buttons:
       - name: 打包 Go 项目
-        description: 打包 Go 项目并发布 Release（预发布看版本号后缀：-rc.1 / -beta.1 / -alpha.1 / -nightly.20260101）
+        description: 打包 Go 项目并发布 Release（版本：${version}；预发布看版本号后缀：-rc.1 / -beta.1 / -alpha.1 / -nightly.20260101）
         event: web_trigger_release # 触发的 CI 事件名
         permissions:
           roles:
@@ -33,12 +34,6 @@ branch:
             required: true # 是否必填
             type: input
             default: nightly
-          commit:
-            name: 构建提交
-            description: 可选：要发布的代码版本（完整 SHA / 分支 / tag）；留空则用当前分支 HEAD
-            required: false
-            type: input
-
       - name: 生成 Code Wiki
         description: 重新分析仓库并生成 Code Wiki 文档
         event: web_trigger_codewiki # 触发的 CI 事件名
@@ -47,4 +42,3 @@ branch:
             - owner
             - master
             - developer
-

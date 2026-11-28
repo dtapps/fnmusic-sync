@@ -1,5 +1,45 @@
-# 发布流水线主体：runner / 依赖 / 全部 stages 只定义这一份。
-# 下面定时、页面手动与 API 三个入口都通过 *trigger_release 引用它，改 stages 只改这里。
+# 发布流水线：版本门禁与发布主体各定义一份。
+# 定时、页面手动与 API 三个入口都并行拉起这两条 pipeline；发布主体先 await 门禁，
+# 门禁的 parse + validate 成功后才继续构建、打包与发布。
+.version_gate: &version_gate
+  name: 版本门禁
+  runner:
+    tags: cnb:arch:amd64 # 指定 Runner 必须有这个标签
+  docker:
+    image: docker.cnb.cool/dtapp/golang/fnpack:latest # 提供 Git 仓库与基础工具
+  stages:
+    - name: 解析版本号（预发布看后缀）
+      image: docker.cnb.cool/dtapp/plugins/release-version:latest
+      settings:
+        mode: parse
+        version: ${version}
+        default_nightly: true
+        fetch_tags: true
+        nightly_fallback: error
+      exports:
+        tag: INTERIOR_VERSION
+        prerelease: PRE_RELEASE
+
+    - name: 校验版本号与 tag
+      image: docker.cnb.cool/dtapp/plugins/release-version:latest
+      settings:
+        mode: validate
+        version: ${INTERIOR_VERSION}
+        fetch_tags: true
+        allow_existing_nightly: false
+      exports:
+        validated: VERSION_VALIDATED
+        latest_stable: LATEST_STABLE
+
+    # 只在解析与校验都成功后通知；校验失败时发布主体的 await 会随门禁失败一起结束。
+    - name: 通知版本门禁通过
+      type: cnb:resolve
+      options:
+        key: fnmusic-sync-release-version-gate
+        data:
+          tag: ${INTERIOR_VERSION}
+          prerelease: ${PRE_RELEASE}
+
 .trigger_release: &trigger_release
   name: 发布
   runner:
@@ -38,92 +78,21 @@
     ANNOUNCEMENT_COMMENT_TEXT: |-
       @{{REPOSLUG}}(发版日志助手) 请对比标签 {{PREVIOUSTAG}} 和 {{CURRENTTAG}} 的差异。
   stages:
+    # 与「版本门禁」pipeline 配对：parse + validate 成功后才拿得到版本号，
+    # 后续构建、打包、发布全部排在这一步之后。
+    - name: 等待版本门禁
+      type: cnb:await
+      options:
+        key: fnmusic-sync-release-version-gate
+      exports:
+        tag: INTERIOR_VERSION
+        prerelease: PRE_RELEASE
+
     - name: 同步脚本
       script: |
         # 卷会整体挂载 scripts/ci，先把本次提交里跟踪的脚本还原（未跟踪的模板脚本由缓存/下载提供）
         git checkout -- scripts/ci
         make fetch-scripts
-
-    - name: 解析版本号（预发布看后缀）
-      script: |
-        set -eu
-        echo "原始 version: [${version:-}]"
-
-        # 归一化 + 格式校验 + 预发布判定只有一份实现，在 scripts/ci/resolve-prerelease.sh，
-        # CNB / GitHub 共同 source 它。
-        # 这里只传版本号：预发布由 `-rc.1` / `-beta.1` / `-alpha.1` /
-        # `-nightly.20260101` 这类后缀决定，
-        # 页面上已经没有开关可以对账了（老的 pre_release 环境变量就算还在也不读）。
-        # 定时与手动触发都先拉全 tag：nightly 推导和 changelog 都依赖完整 tag 集合。
-        git fetch --tags --quiet --force || true
-        # 定时触发没有 version 输入，默认构建 nightly；手动触发仍使用页面填写的版本号。
-        export VERSION="${version:-nightly}"
-        # 指定构建提交（可选）：CNB 独立构建，留空时使用当前仓库默认分支的 HEAD。
-        # commit 与默认分支 HEAD 可能不同，发布前需确认构建内容。
-        if [ -n "${commit:-}" ]; then
-          echo "切换到指定提交: ${commit}"
-          # 先试浅取目标提交（CNB 允许按 SHA 取），不行就整仓 fetch 后再 checkout
-          git fetch --depth 1 origin "${commit}" 2>/dev/null \
-            || git fetch origin "${commit}" 2>/dev/null \
-            || true
-          if ! git checkout --force "${commit}" 2>/dev/null; then
-            echo "❌ 切换到提交 ${commit} 失败（该提交不在本仓库里？）"
-            exit 1
-          fi
-          echo "当前提交: $(git rev-parse --short HEAD)"
-        fi
-        # shellcheck disable=SC1091
-        . scripts/ci/resolve-prerelease.sh
-        # source 只带进函数，必须显式调用才会算出 TAG / PKG_VERSION / PRERELEASE。
-        # 少了这一句，下面第一个 ${PRE_NOTE} 在 set -u 下就是 unbound variable。
-        resolve_version "${VERSION}" || exit 1
-
-        echo "${PRE_NOTE}"
-        echo "tag: ${TAG}  包版本: ${PKG_VERSION}  预发布: ${PRERELEASE}"
-
-        # 判定完再输出：中途失败时不会留下一半 env 给下游。
-        echo "##[set-output interior_version=${TAG}]"
-        echo "##[set-output pre_release=${PRERELEASE}]"
-      exports:
-        interior_version: INTERIOR_VERSION
-        pre_release: PRE_RELEASE
-
-    # 发版前先把版本号这件事验干净。这三件事出错都不会让构建失败，
-    # 但会发出一个「看起来成功、内容是错的」Release：
-    #   1) tag 没拉全 → changelog 算不出基准，正文退化成「首次发布」
-    #   2) tag 已经存在 → 覆盖已有 tag，历史 Release 的对比基准跟着变
-    #   3) 版本号比已有的还旧 → 正文里 diff 是反的
-    # 放在构建之前：省掉十分钟的无效构建，错误信息也落在这条上而不是最后一步。
-    - name: 校验版本号与 tag
-      script: |
-        set -eu
-        echo "版本号: ${INTERIOR_VERSION}"
-
-        # tag 拉全（CNB 的 checkout 不一定带 tag，缺了就没法算基准）
-        git fetch --tags --quiet --force || true
-        count=$(git tag -l 'v*' | wc -l | tr -d ' ')
-        echo "本地版本 tag: ${count} 个"
-
-        # tag 不能已经存在：重跑同一次发布会把 tag 挪到新提交上
-        if git rev-parse -q --verify "refs/tags/${INTERIOR_VERSION}" >/dev/null; then
-          echo "❌ tag ${INTERIOR_VERSION} 已存在，不能重复发布"
-          echo "   已有指向: $(git rev-parse --short "${INTERIOR_VERSION}")"
-          echo "   当前 HEAD: $(git rev-parse --short HEAD)"
-          exit 1
-        fi
-        echo "✅ tag ${INTERIOR_VERSION} 不存在，可以发布"
-
-        # 新版本必须比已有的正式版更新，否则正文里的 diff 是反的。
-        # nightly 必须一起排除：sort -V 会把 v1.2.3-nightly.20260101 排在 v1.2.3 之后，
-        # 留着它会让随后发的正式版被误判成「比已有正式版旧」，直接挡住发布。
-        if [ "${PRE_RELEASE}" = "false" ]; then
-          latest=$(git tag -l 'v*' | grep -Ev -- '-(rc|beta|alpha|nightly)' | grep -v '\.rc' | sort -V | tail -n 1 || true)
-          if [ -n "$latest" ] && [ "$(printf '%s\n%s\n' "$latest" "${INTERIOR_VERSION}" | sort -V | tail -n 1)" != "${INTERIOR_VERSION}" ]; then
-            echo "❌ 版本号 ${INTERIOR_VERSION} 比已有的正式版 ${latest} 旧"
-            exit 1
-          fi
-          echo "✅ 比上一个正式版 ${latest:-（无）} 新"
-        fi
 
     - name: 安装全部 Go 依赖
       script: make deps-go
@@ -149,66 +118,17 @@
         done
         cat dist/SHA256SUMS
 
-    # 正文只有一份实现（scripts/ci/render-release-body.sh），CNB / GitHub 的流水线都调它，
-    # 避免各写一遍表格/标题/下载链接，改一处忘一处。
     - name: 生成 Release 正文
-      script: |
-        set -eu
-        # 打包没出产物就别往下走：否则会发出一个零附件的 Release，正文表格是空的，
-        # 看起来「成功」，用户点开什么都下不到。
-        count=$(find dist -maxdepth 1 -type f \( -name '*.deb' -o -name '*.fpk' -o -name 'fnmusic-sync-linux-*.tar.gz' \) | wc -l)
-        if [ "$count" -eq 0 ]; then
-          echo "❌ 打包没有产出任何 deb/fpk/tar.gz，先看 make goreleaser-release 的日志"
-          exit 1
-        fi
-        echo "产物 ${count} 个"
-
-        CNB_ROOT="${CNB_REPO_URL_HTTPS%/}"
-        CNB_BASE="${CNB_ROOT}/-"
-
-        # ⚠ 必须先把历史补全，否则「更新内容」与 GitHub 侧对不上。
-        # CNB 平台的检出是**浅克隆**（depth=1）：tag 能拉到（fetch --tags 有效），
-        # 但历史只有 HEAD 一个提交，于是 scripts/ci/release-changelog.sh 里的
-        # `git log <上一个 tag>..HEAD` 只能输出 HEAD 一条 —— 正文里的「更新内容」
-        # 会退化成「只有最新那条提交」，而 GitHub 侧（fetch-depth: 0）是整个周期几十条。
-        # 同一个版本号、两份代码，两边正文却不一样就是这么来的。
-        git fetch --unshallow --quiet 2>/dev/null \
-          || git fetch --depth 1000 --quiet 2>/dev/null \
-          || true
-        VISIBLE=$(git rev-list --count HEAD 2>/dev/null || echo 0)
-        echo "本地可见提交数: ${VISIBLE}"
-        if [ "${VISIBLE}" -lt 2 ]; then
-          echo "⚠ 历史没补全（仍是浅克隆）：「更新内容」可能只有最新一条提交，与其它平台不一致"
-        fi
-
-        # 更新内容：按渠道选对比基准（rc 对 rc、beta 对 beta、alpha 对 alpha、
-        # nightly 对 nightly、正式版对正式版；首次发某渠道则回退到上一个正式版）。
-        # 实现见 scripts/ci/release-changelog.sh。
-        # 不用 cnbcool/changelog 插件了：插件不区分渠道，也不分组，发正式版时
-        # 覆盖不到整轮预发布期间的改动。
-        # 脚本挑不出基准时会 exit 1（而不是谎报「首次发布」），这里显式接住，
-        # 免得 CNB 不传播退出码、正文带着错误提示发出去。
-        if ! LATEST_CHANGE_LOG="$(REPO_URL="${CNB_ROOT}" \
-          COMMIT_URL="${CNB_ROOT}/-/commit" \
-          sh scripts/ci/release-changelog.sh "${INTERIOR_VERSION}")"; then
-          echo "❌ 生成更新内容失败，见上面的错误信息"
-          exit 1
-        fi
-
-        # REPO_URL / COMMIT_URL / COMMIT_SHA 决定正文里「提交」那一行能不能带链接；
-        # CNB 的 Web 路径统一带 /-/ 前缀，和 GitHub 的 /commit 不同，所以由调用方传。
-        VERSION="${INTERIOR_VERSION}" \
-          PRERELEASE="${PRE_RELEASE}" \
-          DL_BASE="${CNB_BASE}/releases/download/${INTERIOR_VERSION}" \
-          STABLE_URL="${CNB_BASE}/releases" \
-          REPO_URL="${CNB_ROOT}" \
-          COMMIT_URL="${CNB_ROOT}/-/commit" \
-          COMMIT_SHA="${CNB_COMMIT:-}" \
-          BUILD_TIME="$(date -u '+%Y-%m-%d %H:%M:%S UTC')" \
-          ARTIFACT_DIR=dist \
-          OUT_FILE=release_body.md \
-          CHANGELOG="${LATEST_CHANGE_LOG}" \
-          sh scripts/ci/render-release-body.sh
+      image: docker.cnb.cool/dtapp/plugins/release-changelog:latest
+      settings:
+        mode: release
+        version: ${INTERIOR_VERSION}
+        commit: ${CNB_COMMIT}
+        artifact_dir: dist
+        artifact_layout: single
+        out_file: release_body.md
+        fetch_tags: true
+        fetch_history: true
 
     # 生成 Release 选项文件，供 git:release 的 optionsFrom 读取。
     #
@@ -247,8 +167,7 @@
       type: git:release
       # tag / title / preRelease / description 全部来自上一步写出的 JSON。
       # 版本号带 -rc / -beta / -alpha / -nightly 后缀才勾选「预发布」，正式版不勾，不接受人工输入。
-      # tag 落在**当前工作区的 HEAD** 上 —— 第一步已经按 commit 参数切到指定提交，
-      # 所以 tag 与包指向同一个提交（不切的话 tag 会落在默认分支 HEAD 上）。
+      # tag 落在当前工作区的 HEAD 上，与本次构建的源码、产物保持一致。
       optionsFrom: ./.cnb-release-options.json
 
     # https://docs.cnb.cool/zh/plugin/public/cnbcool/attachments.html
@@ -324,7 +243,7 @@
         # 公告正文与 Release 正文同源：下载表 / 校验 / 更新内容都取自 release_body.md，
         # 不在这里另编一套（格式见 scripts/ci/render-announcement-body.sh）。
         if [ ! -f scripts/ci/render-announcement-body.sh ]; then
-          echo "⚠️ 缺少 scripts/ci/render-announcement-body.sh（发布用的提交里没有该脚本），跳过公告"
+          echo "⚠️ 缺少 scripts/ci/render-announcement-body.sh，跳过公告"
           exit 0
         fi
 
@@ -335,15 +254,15 @@
         export CNB_WEB_BASE="${WEB_BASE}"
         export GITHUB_WEB="https://github.com/dtapps/fnmusic-sync"
         export STABLE_URL="${WEB_BASE}/releases/latest"
-        # stage 1 已切到本次发布的提交，HEAD 即发布提交。
+        # HEAD 即本次发布使用的触发提交。
         export COMMIT_SHA="$(git rev-parse HEAD 2>/dev/null || true)"
 
         # 公告评论要指明「对比哪两个 tag」。基准必须和 Release 正文同口径（正式版对比
         # 上一个正式版，不掺 rc/beta），所以直接调 resolve-prev-tag.sh —— 它是正文
         # （release-changelog.sh）与这里共用的唯一一份判定，别另写一套 tag 排序。
         #
-        # 补一次 tag 拉取：stage 1 用 `git fetch --depth 1 <commit>` 只取单个提交，
-        # 不保证带 tag。加 --force 是为了覆盖被改动过的旧 tag；失败不阻断
+        # 补一次 tag 拉取：当前克隆不保证包含完整 tag 历史。
+        # 加 --force 是为了覆盖被改动过的旧 tag；失败不阻断
         # （取不到就退回「按公告正文改写」）。
         # 故意不加 --depth：给一个完整克隆的仓库加 --depth 反而会把它变浅、截掉历史。
         git fetch --tags --quiet --force >/dev/null 2>&1 || true
@@ -569,15 +488,18 @@
 main:
   # 每天北京时间 00:00（Asia/Shanghai）构建 nightly 预发布。
   'crontab: 0 0 * * *':
+    - *version_gate
     - *trigger_release
 
   # 手动触发：通过页面自定义按钮执行（预发布看版本号后缀）。
   web_trigger_release:
+    - *version_gate
     - *trigger_release
 
   # API 触发：调用 CNB Open API，以 event=api_trigger_release 触发，
-  # 通过请求体 env 传 version（如 v1.2.3 / v1.2.3-rc.1 / v1.2.3-nightly.20260101）
-  # 与可选 commit；不传 version 时按 nightly 构建（见「解析版本号」stage）。
+  # 通过请求体 env 传 version（如 v1.2.3 / v1.2.3-rc.1 / v1.2.3-nightly.20260101）；
+  # 不传 version 时按 nightly 构建（见「解析版本号」stage）。
   # 预发布标记一律由版本号后缀推导，不再接受 pre_release 输入。
   api_trigger_release:
+    - *version_gate
     - *trigger_release

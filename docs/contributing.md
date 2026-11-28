@@ -195,18 +195,16 @@ git status           # 确认 format 的改动都进本次提交
 
 1. 合并到 `main`，确认 CNB 的 push 与覆盖率流水线都绿。
 2. 触发发布（两个平台独立执行）：
-   - CNB：`.cnb/workflows/release.yml` 每天北京时间 0 点（`crontab: 0 0 * * *`，时区 `Asia/Shanghai`）自动构建 nightly；也可用页面按钮手动触发，填写 `version`，可选 `commit`。
-   - GitHub：`workflow_dispatch` 跑 `.github/workflows/release.yml`，填写 `version`，可选 `commit`；另有每天 UTC 00:00（北京时间 08:00）的定时任务，版本号留空自动走 nightly。
+   - CNB：`.cnb/workflows/release.yml` 每天北京时间 0 点（`crontab: 0 0 * * *`，时区 `Asia/Shanghai`）自动构建 nightly；也可用页面按钮手动触发，填写 `version`。
+   - GitHub：`workflow_dispatch` 跑 `.github/workflows/release.yml`，填写 `version`；另有每天 UTC 00:00（北京时间 08:00）的定时任务，版本号留空自动走 nightly。
    - **没有预发布开关**：版本号写成 `1.2.3-rc.1`（或 `-beta.1` / `-alpha.1` / `-nightly.20260101`）就是预发布，不带后缀就是正式版，见 [deployment.md](deployment.md) §升级。后缀同时决定 Release 正文里更新内容的对比渠道（同渠道对比）。
-   - **构建指定提交**：手动触发时可填 `commit`（留空 = 默认分支最新提交），CNB / GitHub 都在各自仓库检出该提交，保证包与 tag 指向同一份代码。填的提交不在对应平台仓库中时，那边会明确报错。
-   - **tag 落在实际被构建的那个提交上**：GitHub 侧给 `softprops/action-gh-release` 传 `target_commitish`，CNB 的 `git:release` 落在当前工作区 HEAD。
-   - **边界**：被检出的提交里带着它自己的 `scripts/`。目标提交必须与当前工作流兼容，构建更早的提交可能因缺少 `resolve_version` 等脚本而明确失败。
-3. 流水线做的事：版本号归一化 + 校验（自动补 `v` 前缀，规则在 `scripts/ci/resolve-prerelease.sh`）→ `make deps` → `VERSION=<tag> GORELEASER_CURRENT_TAG=<tag> REPO_SOURCE=<平台> make goreleaser-release` → 生成 Release 正文 → 建 Release 并挂附件（只传 tar.gz/deb/fpk 与 `SHA256SUMS`）。
+   - **构建触发时的提交**：两个平台都使用触发分支当前的 HEAD，不接受指定历史提交；需要重发历史版本时，先从目标提交创建分支或 tag，再触发发布。
+3. 流水线做的事：版本号归一化 + Tag 校验（GitHub 用 `dtapps/release-version-action@main`，CNB 用 `scripts/ci/resolve-prerelease.sh`）→ `make deps` → `VERSION=<tag> GORELEASER_CURRENT_TAG=<tag> REPO_SOURCE=<平台> make goreleaser-release` → 生成 Release 正文 → 建 Release 并挂附件（只传 tar.gz/deb/fpk 与 `SHA256SUMS`）。
 4. GitHub 发布成功后通过 ServerChan3 推送通知；CNB 与 GitHub 之间不再通过 API 互相触发。
 
-### 版本号规则（两个平台同一份实现）
+### 版本号规则
 
-实现见 `scripts/ci/resolve-prerelease.sh`（可 `bash scripts/ci/resolve-prerelease.sh --self-test` 跑自检），CNB / GitHub 都 source 它：
+GitHub 使用 `dtapps/release-version-action@main`；CNB 使用 `scripts/ci/resolve-prerelease.sh`（可 `bash scripts/ci/resolve-prerelease.sh --self-test` 跑自检）：
 
 | 版本号形态               | 判定   | 说明                                                                                                     |
 |--------------------------|--------|----------------------------------------------------------------------------------------------------------|
@@ -218,7 +216,7 @@ git status           # 确认 format 的改动都进本次提交
 | `nightly`                | 预发布 | 关键词：自动推导成 `<最近正式版+1 补丁>-nightly.<UTC 日期>`，最近正式版 v0.2.7 → v0.2.8-nightly.20261114 |
 | `nightly.20261114`       | 预发布 | 关键词 + 指定 UTC 日期（手动补发某一天的 nightly）                                                       |
 
-- `nightly` 的基准是仓库里最大的 `vX.Y.Z` tag，补丁号 +1 是因为 nightly 要走「下一个正式版」的版本号，否则 nightly 会抢走正式版的 tag 名。推导要完整 tag 历史，所以各平台都要 `git fetch --tags` / `fetch-depth: 0`。
+- `nightly` 的基准是仓库里最大的 `vX.Y.Z` tag，补丁号 +1 是因为 nightly 要走「下一个正式版」的版本号，否则 nightly 会抢走正式版的 tag 名。推导要完整 tag 历史，所以各平台都要 `fetch-depth: 0`；GitHub 校验时再由 Action `fetch --tags` 兜底。GitHub 设置 `nightly_fallback: error`，没有正式版 Tag 时直接失败，不会回退到预发布或 `0.0.0`。
 - nightly 是预发布（`prerelease=true`），稳定用户不会被推上 nightly。
 - 保留策略：nightly 只保留**最近 3 个** Release，多余的连同 git tag 一起删；CNB 使用 `release-cleaner` 插件（`by_count` + `protect`），GitHub 使用 `scripts/ci/delete-release.sh`。
 

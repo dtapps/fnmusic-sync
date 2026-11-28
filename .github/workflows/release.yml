@@ -2,7 +2,7 @@
 # 两种触发：手动填版本号；每天 UTC 00:00 定时构建 nightly 预发布。
 # 均自动构建 Linux 产物（tar.gz/deb/fpk）并发布 GitHub Release，最后推送通知。
 #
-# 版本号规则（实现见 scripts/ci/resolve-prerelease.sh，两个平台同口径）：
+# GitHub 侧版本号由 dtapps/release-version-action 解析与校验，规则如下：
 #   1.2.3                    -> 正式版，Release 不勾选 prerelease
 #   1.2.3-rc.1               -> 预发布（rc 渠道）
 #   1.2.3-beta.1             -> 预发布（beta 渠道）
@@ -37,11 +37,6 @@ on:
         required: true
         type: string
         default: 'nightly'
-      commit:
-        description: '要构建的提交（留空则使用默认分支最新提交）'
-        required: false
-        type: string
-        default: ''
 
 permissions:
   contents: write
@@ -58,7 +53,43 @@ concurrency:
   queue: max
 
 jobs:
+  # 独立版本门禁：Docker Action 放在宿主机 job，解析与 Tag 校验全部通过后才放行其他 job。
+  version-gate:
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: read
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+      version: ${{ steps.version.outputs.version }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          ref: ${{ github.sha }}
+
+      - name: 解析版本号
+        id: version
+        uses: dtapps/release-version-action@main
+        env:
+          TZ: UTC
+        with:
+          mode: parse
+          version: ${{ inputs.version || 'nightly' }}
+          fetch_tags: false
+          nightly_fallback: error
+
+      - name: 校验版本号与 tag
+        uses: dtapps/release-version-action@main
+        with:
+          mode: validate
+          version: ${{ steps.version.outputs.tag }}
+          fetch_tags: true
+          allow_existing_nightly: true
+
   prepare:
+    needs: version-gate
     runs-on: ubuntu-26.04
     # 直接使用统一共享的 CI 镜像（含 Go/Node/pnpm + GTK/WebKit + 全部 Go 工具链），
     # 由 dtapps 统一维护并推送到 GHCR，无需本仓库自行构建（原 ci-image.yml 已删除）。
@@ -80,9 +111,8 @@ jobs:
           # nightly 推导要读「最近正式版」的 tag，必须把 tag 全拉下来：
           # 默认 shallow clone 只有当前分支的 1 个 commit，tag 一个都取不到。
           fetch-depth: 0
-          # 构建指定提交（留空 → 触发时的默认分支最新提交）：
-          # 定时任务没有 inputs，github.sha 就是默认分支当时的 HEAD。
-          ref: ${{ inputs.commit || github.sha }}
+          # 构建触发时的提交：定时任务即默认分支当时的 HEAD。
+          ref: ${{ github.sha }}
 
       # 缓存同步下来的模板脚本；key 绑定仓库内脚本内容，脚本一改就换新缓存，
       # 避免旧缓存把已跟踪脚本（如 resolve-prerelease.sh）恢复成旧版本。
@@ -96,130 +126,43 @@ jobs:
         shell: bash
         run: make fetch-scripts
 
-      - name: 解析版本号（预发布看后缀）
+      - name: 生成构建与发布参数
         id: gen
         shell: bash
         env:
-          # 定时触发没有 inputs（version 留空）→ 当成 nightly
-          VERSION: ${{ inputs.version || 'nightly' }}
+          TAG: ${{ needs['version-gate'].outputs.tag }}
+          PRERELEASE: ${{ needs['version-gate'].outputs.prerelease }}
         run: |
           set -eu
-          echo "原始 version: [${VERSION}]"
 
-          # 容器里进程是 root、checkout 目录属主是宿主的 uid，git 2.35+ 会以
-          # "detected dubious ownership" 直接失败。
-          # 用 GIT_CONFIG_* 给本次命令链放行：不写任何配置文件，也不依赖 HOME 可写。
           export GIT_CONFIG_COUNT=1
           export GIT_CONFIG_KEY_0=safe.directory
           export GIT_CONFIG_VALUE_0="$(pwd)"
 
-          # 归一化 / 格式校验 / 预发布判定只有一份实现，在 scripts/ci/resolve-prerelease.sh，
-          # CNB / GitHub 都 source 它。
-          # 只传版本号：预发布由 `-rc.1` / `-beta.1` / `-alpha.1` /
-          # `-nightly.20260101` 这类后缀决定；`nightly` 关键词也在那一份里展开成
-          # <最近正式版+1 补丁>-nightly.<UTC 日期>（需要完整 tag 历史，故上面用 fetch-depth: 0）。
-          # 以前那个 prerelease 布尔输入已经删掉 —— 它会跟版本号打架，而且打得毫无必要。
-          # shellcheck disable=SC1091
-          . scripts/ci/resolve-prerelease.sh
-          # source 只带进函数，必须显式调用才会算出 TAG / PKG_VERSION / PRERELEASE
-          resolve_version "${VERSION}"
-
-          echo "${PRE_NOTE}"
-
-          # 标题统一带项目名前缀（与 CNB 的 release.yml 同口径，改名字要一起改）。
-          # 用驼峰产品名而不是仓库 slug：Release 列表里「FnMusicSync v0.1.32」比
-          # 「fnmusic-sync v0.1.32」更像一次发布，也更容易被用户认成产品名。
           PROJECT_NAME="FnMusicSync"
-
-          # 预发布版本在标题上带个后缀，便于在 Release 列表里一眼区分
           if [ "${PRERELEASE}" = "true" ]; then
             RELEASE_TITLE="${PROJECT_NAME} ${TAG} (预发布)"
           else
             RELEASE_TITLE="${PROJECT_NAME} ${TAG}"
           fi
 
+          BUILD_TIME="$(bash scripts/get-build-time.sh 2>/dev/null || true)"
+          if [ -z "${BUILD_TIME}" ]; then
+            BUILD_TIME="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+          fi
+
           {
             echo "interior_version=${TAG}"
             echo "interior_release_title=${RELEASE_TITLE}"
-            # 只在本 job 之间传，不再来自用户输入
             echo "pre_release=${PRERELEASE}"
-            # 统一构建时间（UTC ISO 8601）：Release 正文、通知里显示的是同一个时刻，
-            # 不会出现「正文写 12:00、通知写 12:03」这种对不上的情况。
-            # 构建历史提交时仓库里可能还没有这个脚本，退回本机 date。
-            BUILD_TIME="$(bash scripts/get-build-time.sh 2>/dev/null || true)"
-            if [ -z "${BUILD_TIME}" ]; then
-              BUILD_TIME="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
-            fi
             echo "build_time=${BUILD_TIME}"
-            # 实际被构建的那个提交（可能不是触发时的 HEAD —— 手动指定 commit 时就是它）：
-            # 短号用于显示、完整 SHA 用于链接（缩写长度随仓库规模变化，链接里用缩写会 404）。
             echo "git_commit=$(git rev-parse --short HEAD)"
             echo "git_commit_full=$(git rev-parse HEAD)"
           } >> "$GITHUB_OUTPUT"
 
-          # 本 job 后续的「校验」step 也要用归一化后的版本号与预发布标记：
-          # GITHUB_OUTPUT 只跨 job 传，同一 job 内后续 step 读不到，另写 GITHUB_ENV。
-          {
-            echo "VERSION=${TAG}"
-            echo "PRERELEASE=${PRERELEASE}"
-          } >> "$GITHUB_ENV"
-
-      # 发版前先把版本号这件事验干净。这几件事出错都不会让构建失败，
-      # 但会发出一个「看起来成功、内容是错的」Release。
-      # 放在 prepare（而不是 release）：填错版本号时立刻失败，
-      # 不要等 deb/fpk 都打完才发现，白烧构建时间。
-      # prepare 已 fetch-depth: 0 拉全 tag，数据齐全，校验不需要等打包。
-      - name: 校验版本号与 tag
-        shell: bash
-        run: |
-          set -eu
-          echo "版本号: ${VERSION}"
-
-          # 容器里进程是 root、checkout 目录属主是宿主的 uid
-          # （与「解析版本号」step 同款兜底；GIT_CONFIG_* 只对当前 step 有效）
-          export GIT_CONFIG_COUNT=1
-          export GIT_CONFIG_KEY_0=safe.directory
-          export GIT_CONFIG_VALUE_0="$(pwd)"
-
-          # checkout 已带 fetch-depth: 0，这里再补一次兜底
-          git fetch --tags --quiet --force || true
-          count=$(git tag -l 'v*' | wc -l | tr -d ' ')
-          echo "本地版本 tag: ${count} 个"
-
-          if git rev-parse -q --verify "refs/tags/${VERSION}" >/dev/null; then
-            # nightly 同一天重跑 / 补发：允许覆盖同名 tag（每天一个 tag，重建的是同一个）。
-            # 其它渠道（正式版 / rc / beta / alpha）不允许：重发会把 tag 挪到新提交上，
-            # 历史 Release 的对比基准跟着变。
-            case "${VERSION}" in
-            *-nightly.*)
-              echo "✅ ${VERSION} 是 nightly，允许覆盖同名 Release（发布前会先删掉旧的）"
-              ;;
-            *)
-              echo "❌ tag ${VERSION} 已存在，不能重复发布"
-              echo "   已有指向: $(git rev-parse --short "${VERSION}")"
-              echo "   当前 HEAD: $(git rev-parse --short HEAD)"
-              echo "   确需重发：sh scripts/ci/delete-release.sh --platform github --tag ${VERSION}，再重跑本工作流"
-              exit 1
-              ;;
-            esac
-          else
-            echo "✅ tag ${VERSION} 不存在，可以发布"
-          fi
-
-          if [ "${PRERELEASE}" = "false" ]; then
-            # nightly 必须排除：sort -V 会把 v1.2.3-nightly.20260101 排在 v1.2.3 之后，
-            # 留着它会让随后发的正式版被误判成「比已有正式版旧」，直接挡住发布。
-            latest=$(git tag -l 'v*' | grep -Ev -- '-(rc|beta|alpha|nightly)' | grep -v '\.rc' | sort -V | tail -n 1 || true)
-            if [ -n "$latest" ] && [ "$(printf '%s\n%s\n' "$latest" "${VERSION}" | sort -V | tail -n 1)" != "${VERSION}" ]; then
-              echo "❌ 版本号 ${VERSION} 比已有的正式版 ${latest} 旧"
-              exit 1
-            fi
-            echo "✅ 比上一个正式版 ${latest:-（无）} 新"
-          fi
-
   # 构建 + 打包 Linux 产物（tar.gz/deb/fpk）
   build:
-    needs: prepare
+    needs: [version-gate, prepare]
     runs-on: ubuntu-26.04
     # 直接使用统一共享的 CI 镜像（含 Go/Node/pnpm + GTK/WebKit + 全部 Go 工具链），
     # 由 dtapps 统一维护并推送到 GHCR，无需本仓库自行构建（原 ci-image.yml 已删除）。
@@ -231,9 +174,8 @@ jobs:
       - name: 检出代码
         uses: actions/checkout@v7
         with:
-          # 与 prepare 同一个提交：版本号推导与实际打包必须是同一个 commit，
-          # 否则「推出来的 tag 指向 A、打出来的包是 B」。
-          ref: ${{ inputs.commit || github.sha }}
+          # 与 prepare 同一个提交，确保版本号推导与实际打包使用同一份源码。
+          ref: ${{ github.sha }}
           # 需要上一个 tag 算 fpk 的更新内容，shallow clone 只有 1 个 commit，
           # git describe / git log 都会退化。
           fetch-depth: 0
@@ -337,7 +279,7 @@ jobs:
 
   # 构建完成后，发布 GitHub Release
   release:
-    needs: [build, prepare]
+    needs: [version-gate, build, prepare]
     runs-on: ubuntu-26.04
 
     env:
@@ -348,9 +290,8 @@ jobs:
         uses: actions/checkout@v7
         with:
           fetch-depth: 0
-          # 与 prepare / build 同一个提交：Release 正文里的「提交」链接、
-          # changelog 的对比区间都要指向真正被构建的那一个。
-          ref: ${{ inputs.commit || github.sha }}
+          # 与 prepare / build 同一个提交，保证 Release 正文和 changelog 对应实际产物。
+          ref: ${{ github.sha }}
 
       # 缓存同步下来的模板脚本；key 绑定仓库内脚本内容，脚本一改就换新缓存，
       # 避免旧缓存把已跟踪脚本（如 resolve-prerelease.sh）恢复成旧版本。
@@ -370,57 +311,18 @@ jobs:
           name: fnmusic-sync-release
           path: release
 
-      # 正文只有一份实现（scripts/ci/render-release-body.sh），CNB / GitHub 共同调用，
-      # 避免各写一遍表格/标题/下载链接，改一处忘一处。
-      # 下载表的「平台 / 说明」两列来自 scripts/ci/describe-artifact.sh
-      # （由 render-release-body.sh source 进去，两个平台共用同一份文案）。
       - name: 生成 Release 正文
-        shell: bash
-        env:
-          VERSION: ${{ needs.prepare.outputs.interior_version }}
-          PRERELEASE: ${{ needs.prepare.outputs.pre_release }}
-          REPO_URL: https://github.com/${{ github.repository }}
-          # 提交号用「实际被构建的那一个」（手动指定 commit 时不是 github.sha）
-          COMMIT_SHA: ${{ needs.prepare.outputs.git_commit_full }}
-          ARTIFACT_DIR: release
-          OUT_FILE: release_body.md
-          # prepare 生成的 ISO8601 构建时间：正文里显示成与其他平台同口径的
-          # 「YYYY-MM-DD HH:MM:SS UTC」，转换失败就退回原始值（不让格式化卡住发布）
-          RAW_BUILD_TIME: ${{ needs.prepare.outputs.build_time }}
-        run: |
-          set -eu
-
-          # 下载基址在脚本里拼，不写进 env：整条 URL 太长，yamlfmt 会把表达式折行
-          DL_BASE="${REPO_URL}/releases/download/${VERSION}"
-          STABLE_URL="${REPO_URL}/releases/latest"
-          export DL_BASE STABLE_URL
-
-          BUILD_TIME="$(date -u -d "${RAW_BUILD_TIME}" '+%Y-%m-%d %H:%M:%S UTC' 2>/dev/null || printf '%s' "${RAW_BUILD_TIME}")"
-          export BUILD_TIME
-
-          # 更新内容：按渠道选对比基准（rc 对 rc、beta 对 beta、alpha 对 alpha、
-          # nightly 对 nightly、正式版对正式版；
-          # 首次发某渠道则回退到上一个正式版）。实现见 scripts/ci/release-changelog.sh，
-          # 两个平台共用一份，避免判定口径跑偏。
-          # GitHub 的提交路径是 /commit/<sha>，和 CNB 的 /-/commit 不同，前缀显式传
-          CHANGELOG=$(COMMIT_URL="${REPO_URL}/commit" sh scripts/ci/release-changelog.sh "${VERSION}")
-          # 直接 export 给同一步的脚本：写 $GITHUB_ENV 只对**后续** step 生效，
-          # 本 step 里读不到，之前那样写 CHANGELOG 会是空的。
-          export CHANGELOG
-
-          sh scripts/ci/render-release-body.sh
-
-      # nightly 同一天重跑 / 补发时同名 tag 已存在：先删掉旧 Release 与 tag 再重建，
-      # 避免旧附件堆在 Release 上。其它渠道这里是无害的空操作
-      # （它们的 tag 不存在同名 Release，被上面的校验挡住）。
-      - name: 删除同名旧 Release（如果存在）
-        shell: bash
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          VERSION: ${{ needs.prepare.outputs.interior_version }}
-        run: |
-          # GitHub 侧删除 Release 与 tag；删不掉不阻断，后续发布同名 Release 时覆盖即可。
-          sh scripts/ci/delete-release.sh --platform github --tag "${VERSION}" || true
+        id: changelog
+        uses: dtapps/release-changelog-action@main
+        with:
+          mode: release
+          version: ${{ needs.prepare.outputs.interior_version }}
+          commit: ${{ needs.prepare.outputs.git_commit_full }}
+          build_time: ${{ needs.prepare.outputs.build_time }}
+          stable_url: https://github.com/${{ github.repository }}/releases/latest
+          artifact_dir: release
+          fetch_tags: false
+          fetch_history: false
 
       - name: 发布 Release
         uses: softprops/action-gh-release@v3
@@ -437,12 +339,9 @@ jobs:
           # 现在能保证小写，只因为 resolve-prerelease.sh 的 case 里写死的就是这两个值；
           # 任何人把它「简化」成从表单/开关透传，这条约定当场就破。
           prerelease: ${{ needs.prepare.outputs.pre_release }}
-          # tag 必须落在**实际被构建的那个提交**上。
-          # 不传的话 action 默认用 github.sha（触发工作流时默认分支的 HEAD），
-          # 于是「指定 commit 构建」会变成：包是 A 构建的、tag 却指向 B ——
-          # 用户按 tag 拉源码拿到的不是包里的代码，下一次发版的 changelog 基准也跟着算错。
+          # 固定 tag 指向实际构建的提交，而不是发布 job 运行时可能已经前进的分支头。
           target_commitish: ${{ needs.prepare.outputs.git_commit_full }}
-          body_path: release_body.md
+          body_path: ${{ steps.changelog.outputs.body_file }}
           files: release/*
 
       # protect 保住正式版、latest/stable 与 rc/beta/alpha，避免 by_count 误删非 nightly 版本；
@@ -467,7 +366,7 @@ jobs:
   # 令牌：GITHUB_TOKEN 需要 discussions: write（下面 permissions 显式声明）。
   # 仓库还要在 Settings → General 里打开 Discussions，否则接口 404 —— 只告警跳过，不影响发布。
   announce:
-    needs: [release, prepare]
+    needs: [version-gate, release, prepare]
     runs-on: ubuntu-26.04
     # nightly 每天一个 tag：每天都开一条讨论会把讨论区刷成日报。
     # 直接在 job 级跳过——job 不跑，两个 step 都不会执行，也就不存在「跳过了一半」的问题。
@@ -496,7 +395,7 @@ jobs:
       - name: 检出代码
         uses: actions/checkout@v7
         with:
-          ref: ${{ inputs.commit || github.sha }}
+          ref: ${{ github.sha }}
           fetch-depth: 0
 
       # 缓存同步下来的模板脚本；key 绑定仓库内脚本内容，脚本一改就换新缓存，
@@ -516,8 +415,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          # 正文与 Release 正文同源：直接取已发布 Release 的正文，不重新渲染
-          # （发布用的提交可能还没进分支头，正文脚本未必是同一份）。
+          # 正文与 Release 正文同源：直接取已发布 Release 的正文，不重新渲染。
           gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${VERSION}" --jq '.body // ""' > release_body.md
           if [ ! -s release_body.md ]; then
             echo "::warning::取不到 Release 正文，跳过发版公告"
@@ -685,7 +583,7 @@ jobs:
   # 推送地址：SCT 转发 key → https://sctapi.ftqq.com/<sendkey>.send
   #          带 uid 的 sendkey（sctp 开头）→ https://<uid>.push.ft07.com/send/<sendkey>.send
   notify:
-    needs: [release, prepare]
+    needs: [version-gate, release, prepare]
     runs-on: ubuntu-26.04
     if: ${{ !cancelled() && needs.release.result == 'success' }}
     env:
