@@ -38,10 +38,10 @@ minimumReleaseAge: 0
 # 由下方 patchedDependencies 登记。正常合并行为不变，已实测：原型污染校验、i18n 静态字典合并、数组合并均正常。
 # 注：补丁不改版本号，OSV/Dependabot 仍会按 4.3.1 报该 GHSA，但代码层面漏洞已消除。
 overrides:
-  minimatch: 11.0.5
-  glob: 14.0.4
-  zod: 4.6.6
-  svelte-i18n>esbuild: 0.25.12
+  minimatch: 11.0.9
+  glob: 14.0.6
+  zod: 4.6.7
+  svelte-i18n>esbuild: 0.28.2
 
 patchedDependencies:
   deepmerge@4.3.1: patches/deepmerge@4.3.1.patch
